@@ -1,0 +1,211 @@
+package configgen
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"vps-auto-deploy/internal/component/singbox"
+	"vps-auto-deploy/internal/model"
+)
+
+// SingboxConfig 代表完整的 sing-box 服务端配置
+type SingboxConfig struct {
+	Log       *LogConfig       `json:"log,omitempty"`
+	Inbounds  []InboundConfig  `json:"inbounds"`
+	Outbounds []OutboundConfig `json:"outbounds"`
+	Route     *RouteConfig     `json:"route,omitempty"`
+}
+
+type LogConfig struct {
+	Level     string `json:"level"`
+	Timestamp bool   `json:"timestamp"`
+}
+
+type InboundConfig struct {
+	Type       string                 `json:"type"`
+	Tag        string                 `json:"tag"`
+	Listen     string                 `json:"listen,omitempty"`
+	ListenPort int                    `json:"listen_port"`
+	Users      []InboundUser          `json:"users,omitempty"`
+	TLS        *InboundTLSConfig      `json:"tls,omitempty"`
+	Transport  map[string]interface{} `json:"transport,omitempty"`
+}
+
+type InboundUser struct {
+	Name string `json:"name"`
+	UUID string `json:"uuid"`
+	Flow string `json:"flow,omitempty"`
+}
+
+type InboundTLSConfig struct {
+	Enabled    bool                 `json:"enabled"`
+	ServerName string               `json:"server_name,omitempty"`
+	Reality    *InboundRealityConfig `json:"reality,omitempty"`
+}
+
+type InboundRealityConfig struct {
+	Enabled    bool              `json:"enabled"`
+	Handshake  map[string]interface{} `json:"handshake"`
+	PrivateKey string            `json:"private_key"`
+	ShortID    []string          `json:"short_id,omitempty"`
+}
+
+type OutboundConfig struct {
+	Type string `json:"type"`
+	Tag  string `json:"tag"`
+}
+
+type RouteConfig struct {
+	Rules []map[string]interface{} `json:"rules,omitempty"`
+}
+
+// GenerateServerConfig 根据数据库中的数据构建 sing-box 完整配置
+func GenerateServerConfig() (*SingboxConfig, error) {
+	// 1. 获取启用的成员
+	rows, err := model.DB.Query("SELECT name, uuid FROM members WHERE enabled = 1")
+	if err != nil {
+		return nil, fmt.Errorf("query members: %w", err)
+	}
+	defer rows.Close()
+
+	var members []model.Member
+	for rows.Next() {
+		var m model.Member
+		if err := rows.Scan(&m.Name, &m.UUID); err == nil {
+			members = append(members, m)
+		}
+	}
+
+	// 2. 获取启用的入站
+	inboundRows, err := model.DB.Query("SELECT id, tag, protocol, listen, port, spec_json FROM inbounds WHERE enabled = 1")
+	if err != nil {
+		return nil, fmt.Errorf("query inbounds: %w", err)
+	}
+	defer inboundRows.Close()
+
+	cfg := &SingboxConfig{
+		Log: &LogConfig{
+			Level:     "info",
+			Timestamp: true,
+		},
+		Outbounds: []OutboundConfig{
+			{Type: "direct", Tag: "direct"},
+			{Type: "block", Tag: "block"},
+		},
+	}
+
+	for inboundRows.Next() {
+		var ib model.Inbound
+		if err := inboundRows.Scan(&ib.ID, &ib.Tag, &ib.Protocol, &ib.Listen, &ib.Port, &ib.SpecJSON); err != nil {
+			continue
+		}
+
+		inboundCfg := InboundConfig{
+			Type:       "vless",
+			Tag:        ib.Tag,
+			Listen:     ib.Listen,
+			ListenPort: ib.Port,
+		}
+
+		switch ib.Protocol {
+		case "vless-reality":
+			var spec model.VLESSRealitySpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+
+			flow := spec.Flow
+			if flow == "" {
+				flow = "xtls-rprx-vision"
+			}
+
+			// 填充用户
+			for _, m := range members {
+				inboundCfg.Users = append(inboundCfg.Users, InboundUser{
+					Name: m.Name,
+					UUID: m.UUID,
+					Flow: flow,
+				})
+			}
+
+			hsPort := spec.HandshakePort
+			if hsPort == 0 {
+				hsPort = 443
+			}
+
+			inboundCfg.TLS = &InboundTLSConfig{
+				Enabled:    true,
+				ServerName: spec.ServerName,
+				Reality: &InboundRealityConfig{
+					Enabled: true,
+					Handshake: map[string]interface{}{
+						"server":      spec.HandshakeServer,
+						"server_port": hsPort,
+					},
+					PrivateKey: spec.PrivateKey,
+					ShortID:    []string{spec.ShortID},
+				},
+			}
+
+		case "vless-ws":
+			var spec model.VLESSWSSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+
+			for _, m := range members {
+				inboundCfg.Users = append(inboundCfg.Users, InboundUser{
+					Name: m.Name,
+					UUID: m.UUID,
+				})
+			}
+
+			path := spec.Path
+			if path == "" {
+				path = "/ws"
+			}
+			inboundCfg.Transport = map[string]interface{}{
+				"type": "ws",
+				"path": path,
+			}
+		}
+
+		cfg.Inbounds = append(cfg.Inbounds, inboundCfg)
+	}
+
+	return cfg, nil
+}
+
+// ApplyAndReload 将生成的配置写入并重启/重载 sing-box 服务
+func ApplyAndReload(destPath string) error {
+	cfg, err := GenerateServerConfig()
+	if err != nil {
+		return err
+	}
+
+	rawJSON, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+
+	_ = os.MkdirAll(filepath.Dir(destPath), 0755)
+
+	// 先写到临时文件以便校验
+	tmpPath := destPath + ".tmp"
+	if err := os.WriteFile(tmpPath, rawJSON, 0644); err != nil {
+		return fmt.Errorf("write temp config error: %w", err)
+	}
+	defer os.Remove(tmpPath)
+
+	// 调用 sing-box check -c 预检验
+	if err := singbox.CheckConfig(tmpPath); err != nil {
+		return fmt.Errorf("sing-box check failed: %w", err)
+	}
+
+	// 校验通过，原子覆盖
+	if err := os.WriteFile(destPath, rawJSON, 0644); err != nil {
+		return fmt.Errorf("write final config error: %w", err)
+	}
+
+	driver := singbox.NewDriver()
+	return driver.ReloadOrRestart()
+}
+

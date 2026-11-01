@@ -1,0 +1,75 @@
+package model
+
+import (
+	"database/sql"
+	"time"
+)
+
+// Setting 键值对系统配置
+type Setting struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+}
+
+// Member 小团队成员/订阅主体
+type Member struct {
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	UUID      string    `json:"uuid"`
+	SubToken  string    `json:"sub_token"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// Inbound sing-box 入站配置
+type Inbound struct {
+	ID        int64     `json:"id"`
+	Tag       string    `json:"tag"`
+	Protocol  string    `json:"protocol"` // "vless-reality" | "vless-ws"
+	Listen    string    `json:"listen"`   // "::" 或 "127.0.0.1"
+	Port      int       `json:"port"`     // 端口
+	SpecJSON  string    `json:"spec_json"` // JSON 字符串
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// VLESSRealitySpec 是 VLESS-Reality 协议特定的参数
+type VLESSRealitySpec struct {
+	Flow            string `json:"flow"`             // 默认 xtls-rprx-vision
+	ServerName      string `json:"server_name"`      // SNI (如 www.microsoft.com)
+	HandshakeServer string `json:"handshake_server"` // 目标服务器
+	HandshakePort   int    `json:"handshake_port"`   // 目标端口 (默认 443)
+	PrivateKey      string `json:"private_key"`      // Reality 私钥 (服务端)
+	PublicKey       string `json:"public_key"`       // Reality 公钥 (客户端)
+	ShortID         string `json:"short_id"`         // 8位十六进制
+	Fingerprint     string `json:"fingerprint"`      // 默认 chrome
+}
+
+// VLESSWSSpec 是 VLESS-WS 协议参数 (搭配 Cloudflared)
+type VLESSWSSpec struct {
+	Path        string `json:"path"`         // ws path (如 /ws)
+	Host        string `json:"host"`         // ws host header
+	TunnelID    int64  `json:"tunnel_id"`    // 关联的 Cloudflared 隧道 ID
+}
+
+// Tunnel Cloudflared 隧道
+type Tunnel struct {
+	ID             int64          `json:"id"`
+	Name           string         `json:"name"`
+	Mode           string         `json:"mode"`              // "quick" 或 "token"
+	Token          string         `json:"token"`             // Cloudflare Zero Trust Token
+	Domain         string         `json:"domain"`            // quick 模式下抓取的 trycloudflare.com 域名或自定义域名
+	TargetPort     int            `json:"target_port"`       // 本地代理服务入站端口 (如 10086)
+	EdgeIPVersion  string         `json:"edge_ip_version"`   // "auto" | "4" | "6"
+	Protocol       string         `json:"protocol"`          // "auto" | "http2" | "quic"
+	Status         string         `json:"status"`            // "stopped" | "running" | "error"
+	Enabled        bool           `json:"enabled"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+}
+
+// DB 全局数据库对象
+var DB *sql.DB
+

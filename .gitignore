@@ -1,0 +1,22 @@
+# Binaries
+/bin/
+/server
+/vps-panel
+cmd/server/dist
+
+# Node
+web/node_modules
+web/dist
+
+# SQLite Databases & Logs
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.log
+
+# OS & Editor
+.DS_Store
+.idea/
+.vscode/
+
