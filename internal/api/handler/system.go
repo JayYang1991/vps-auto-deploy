@@ -42,7 +42,7 @@ func GetSystemOverview(c *gin.Context) {
 		bbrEnabled = true
 	}
 
-	comps, _ := component.ListAll()
+	comps, _ := component.ListAll(false)
 
 	c.JSON(http.StatusOK, SystemOverview{
 		PublicIP:   pubIP,

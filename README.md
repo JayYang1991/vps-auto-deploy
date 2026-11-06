@@ -6,10 +6,14 @@
 
 ## ✨ 核心特性
 
+- **轻量解耦 & 按需管理**：
+  - **初次部署零捆绑**：初始一键安装脚本仅部署管理服务端（Control Plane），不强制安装任何后端代理软件。
+  - **Web 端组件商店**：通过 Web 界面按需选择安装、升级或卸载 **sing-box**、**cloudflared**、**Xray** 等组件。
+  - **安装过程透明可控**：点击安装/升级时弹出实时终端日志流（SSE），清晰展示下载、解压、校验及 Systemd 服务注册全流程。
 - **软件生命周期管理**：
-  - 自动从 GitHub Release 检测、一键安装/热升级 **sing-box** 与 **cloudflared** 最新版本。
-  - Systemd 原生托管与开机自启，提供 Server-Sent Events (SSE) 实时日志流查看。
-  - 插件化 Driver 接口设计，方便后续扩展 Xray、Hysteria2 等组件。
+  - 自动查询 GitHub Release 最新版本，对比当前安装版本并高亮显示可更新标识。
+  - 原生支持服务的启动、停止、重启、开机自启与一键安全卸载。
+  - Systemd 原生托管，提供网页端实时 `journalctl` 日志流监控。
 - **协议开箱即用**：
   - **直连首选：VLESS-XTLS-Vision-Reality**：集成标准库与内核 X25519 密钥协商，一键自动生成私钥、公钥 (pbk) 与 ShortID。
   - **隧道救砖：VLESS-WS + Cloudflared (Argo)**：支持 Quick Tunnel 自动免登录试用隧道与 Zero Trust Token 固定域名隧道。

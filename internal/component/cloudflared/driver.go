@@ -35,6 +35,18 @@ func (d *Driver) Name() string {
 	return DriverName
 }
 
+func (d *Driver) DisplayName() string {
+	return "Cloudflared Argo 隧道"
+}
+
+func (d *Driver) Description() string {
+	return "Cloudflare Zero Trust / Argo 隧道反代客户端，穿透并拯救被墙阻断的公网 IP。"
+}
+
+func (d *Driver) Category() string {
+	return "tunnel"
+}
+
 func (d *Driver) GetInstalledVersion() (string, error) {
 	if _, err := os.Stat(BinaryPath); errors.Is(err, os.ErrNotExist) {
 		return "", nil
@@ -43,7 +55,6 @@ func (d *Driver) GetInstalledVersion() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// "cloudflared version 2024.10.0 (built ...)"
 	lines := strings.Split(out, "\n")
 	if len(lines) > 0 {
 		parts := strings.Fields(lines[0])
@@ -62,18 +73,28 @@ func (d *Driver) GetLatestRelease() (string, error) {
 	return rel.TagName, nil
 }
 
-func (d *Driver) InstallOrUpgrade(version string) error {
+func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
+	if logFn == nil {
+		logFn = func(string) {}
+	}
+
+	logFn(fmt.Sprintf("正在查询 GitHub 仓库 %s/%s 最新版本信息...", Owner, Repo))
 	rel, err := component.FetchLatestRelease(Owner, Repo)
 	if err != nil {
 		return fmt.Errorf("fetch latest release: %w", err)
 	}
+
+	targetVersion := rel.TagName
+	if version != "" && version != "latest" {
+		targetVersion = version
+	}
+	logFn(fmt.Sprintf("已确定目标版本: %s", targetVersion))
 
 	arch := runtime.GOARCH
 	if arch != "amd64" && arch != "arm64" {
 		return fmt.Errorf("unsupported arch: %s", arch)
 	}
 
-	// 匹配 cloudflared-linux-amd64 / cloudflared-linux-arm64
 	var downloadURL string
 	targetName := fmt.Sprintf("cloudflared-linux-%s", arch)
 	for _, asset := range rel.Assets {
@@ -90,12 +111,15 @@ func (d *Driver) InstallOrUpgrade(version string) error {
 	tmpBinary := filepath.Join(os.TempDir(), fmt.Sprintf("cloudflared-%s", rel.TagName))
 	defer os.Remove(tmpBinary)
 
+	logFn(fmt.Sprintf("开始下载资产: %s", downloadURL))
 	if err := component.DownloadFile(downloadURL, tmpBinary); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
+	logFn("资产下载完成，开始安装...")
 
 	_ = os.MkdirAll(filepath.Dir(BinaryPath), 0755)
 
+	logFn(fmt.Sprintf("安装二进制文件至 %s...", BinaryPath))
 	if err := os.Rename(tmpBinary, BinaryPath); err != nil {
 		input, err := os.ReadFile(tmpBinary)
 		if err != nil {
@@ -107,10 +131,19 @@ func (d *Driver) InstallOrUpgrade(version string) error {
 	}
 	_ = os.Chmod(BinaryPath, 0755)
 
+	component.SetCachedLatestVersion(DriverName, rel.TagName)
+	logFn("cloudflared 安装/升级成功！可在「Argo 隧道」页面配置并启动隧道。")
 	return nil
 }
 
-// ConfigureService 依据隧道模式生成并配置 Systemd 单元
+func (d *Driver) Uninstall() error {
+	_ = d.systemd.Stop()
+	_ = d.systemd.Disable()
+	_ = component.RemoveServiceUnit(UnitName)
+	_ = os.Remove(BinaryPath)
+	return nil
+}
+
 func (d *Driver) ConfigureService(mode, token string, localPort int, protocol string) error {
 	var execArgs string
 	if mode == "token" && token != "" {
@@ -120,7 +153,6 @@ func (d *Driver) ConfigureService(mode, token string, localPort int, protocol st
 		}
 		execArgs = fmt.Sprintf("tunnel %srun --token %s", protoArg, token)
 	} else {
-		// Quick Tunnel
 		execArgs = fmt.Sprintf("tunnel --url http://127.0.0.1:%d --no-autoupdate", localPort)
 	}
 
@@ -166,6 +198,9 @@ func (d *Driver) Status() (component.ServiceStatus, error) {
 
 	return component.ServiceStatus{
 		Name:             DriverName,
+		DisplayName:      d.DisplayName(),
+		Description:      d.Description(),
+		Category:         d.Category(),
 		Installed:        installed,
 		InstalledVersion: installedVer,
 		Active:           active,
@@ -184,4 +219,3 @@ func (d *Driver) Stop() error {
 func (d *Driver) Restart() error {
 	return d.systemd.Restart()
 }
-

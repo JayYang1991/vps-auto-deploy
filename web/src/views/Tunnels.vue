@@ -11,6 +11,17 @@
       <button @click="openCreateModal" class="btn btn-primary">+ 新建 Argo 隧道</button>
     </div>
 
+    <!-- 未安装 cloudflared 提示横幅 -->
+    <div v-if="!cloudflaredInstalled" style="background-color: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 0.5rem; padding: 0.75rem 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
+      <div style="display: flex; align-items: center; gap: 0.5rem; color: #fbbf24; font-size: 0.85rem;">
+        <span>💡</span>
+        <span>当前尚未安装 <b>cloudflared</b> 客户端。您可在此配置隧道，保存后前往「仪表盘」一键安装 cloudflared 即可自动连接 Cloudflare 边缘节点！</span>
+      </div>
+      <router-link to="/" class="btn btn-secondary" style="padding: 0.25rem 0.6rem; font-size: 0.75rem; white-space: nowrap; border-color: #fbbf24; color: #fbbf24;">
+        前往安装
+      </router-link>
+    </div>
+
     <div v-if="tunnels.length === 0" class="card" style="text-align: center; padding: 3rem;">
       <div style="font-size: 2rem; margin-bottom: 0.5rem;">🚇</div>
       <p style="color: #94a3b8; margin-bottom: 1rem;">暂无已配置的 Cloudflared 隧道。</p>
@@ -100,6 +111,7 @@ import { ref, reactive, onMounted } from 'vue'
 import api from '../api'
 
 const tunnels = ref<any[]>([])
+const cloudflaredInstalled = ref(true)
 
 const modal = reactive({
   show: false,
@@ -117,6 +129,12 @@ async function loadTunnels() {
   try {
     const res = await api.get('/tunnels')
     tunnels.value = res.data || []
+
+    const compRes = await api.get('/components')
+    const cf = (compRes.data || []).find((c: any) => c.name === 'cloudflared')
+    if (cf) {
+      cloudflaredInstalled.value = cf.installed
+    }
   } catch (err) {
     console.error(err)
   }

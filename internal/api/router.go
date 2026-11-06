@@ -49,6 +49,8 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			// 组件管理
 			api.GET("/components", handler.ListComponents)
 			api.POST("/components/:name/install", handler.InstallComponent)
+			api.GET("/components/:name/install-status", handler.GetInstallStatus)
+			api.GET("/components/:name/install-logs", handler.StreamInstallLogs)
 			api.POST("/components/:name/action", handler.ActionComponent)
 
 			// 入站节点与 Reality

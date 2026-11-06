@@ -21,12 +21,12 @@ import (
 )
 
 const (
-	DriverName  = "sing-box"
-	Owner       = "SagerNet"
-	Repo        = "sing-box"
-	BinaryPath  = "/usr/local/bin/sing-box"
-	UnitName    = "sing-box.service"
-	ConfigPath  = "/etc/sing-box/config.json"
+	DriverName = "sing-box"
+	Owner      = "SagerNet"
+	Repo       = "sing-box"
+	BinaryPath = "/usr/local/bin/sing-box"
+	UnitName   = "sing-box.service"
+	ConfigPath = "/etc/sing-box/config.json"
 )
 
 type Driver struct {
@@ -43,6 +43,18 @@ func (d *Driver) Name() string {
 	return DriverName
 }
 
+func (d *Driver) DisplayName() string {
+	return "sing-box 代理核心"
+}
+
+func (d *Driver) Description() string {
+	return "通用代理与路由平台，原生支持 VLESS-Reality、Hysteria2、TUIC、Shadowsocks 等全协议。"
+}
+
+func (d *Driver) Category() string {
+	return "proxy"
+}
+
 func (d *Driver) GetInstalledVersion() (string, error) {
 	if _, err := os.Stat(BinaryPath); errors.Is(err, os.ErrNotExist) {
 		return "", nil
@@ -51,7 +63,6 @@ func (d *Driver) GetInstalledVersion() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// "sing-box version 1.11.0 ..."
 	lines := strings.Split(out, "\n")
 	if len(lines) > 0 {
 		parts := strings.Fields(lines[0])
@@ -70,11 +81,22 @@ func (d *Driver) GetLatestRelease() (string, error) {
 	return rel.TagName, nil
 }
 
-func (d *Driver) InstallOrUpgrade(version string) error {
+func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
+	if logFn == nil {
+		logFn = func(string) {}
+	}
+
+	logFn(fmt.Sprintf("正在查询 GitHub 仓库 %s/%s 最新版本信息...", Owner, Repo))
 	rel, err := component.FetchLatestRelease(Owner, Repo)
 	if err != nil {
 		return fmt.Errorf("fetch latest release: %w", err)
 	}
+
+	targetVersion := rel.TagName
+	if version != "" && version != "latest" {
+		targetVersion = version
+	}
+	logFn(fmt.Sprintf("已确定目标版本: %s", targetVersion))
 
 	arch := runtime.GOARCH
 	if arch != "amd64" && arch != "arm64" {
@@ -98,23 +120,22 @@ func (d *Driver) InstallOrUpgrade(version string) error {
 	tmpArchive := filepath.Join(os.TempDir(), fmt.Sprintf("singbox-%s.tar.gz", rel.TagName))
 	defer os.Remove(tmpArchive)
 
+	logFn(fmt.Sprintf("开始下载资产: %s", downloadURL))
 	if err := component.DownloadFile(downloadURL, tmpArchive); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
+	logFn("资产下载完成，开始解压与校验...")
 
-	// 解压 tar.gz 获取 sing-box 二进制
 	tmpBinary, err := extractBinary(tmpArchive, "sing-box")
 	if err != nil {
 		return fmt.Errorf("extract failed: %w", err)
 	}
 	defer os.Remove(tmpBinary)
 
-	// 确保 /usr/local/bin 存在
 	_ = os.MkdirAll(filepath.Dir(BinaryPath), 0755)
 
-	// 移动并替换
+	logFn(fmt.Sprintf("安装二进制文件至 %s...", BinaryPath))
 	if err := os.Rename(tmpBinary, BinaryPath); err != nil {
-		// 跨分区则使用拷贝
 		input, err := os.ReadFile(tmpBinary)
 		if err != nil {
 			return err
@@ -125,10 +146,9 @@ func (d *Driver) InstallOrUpgrade(version string) error {
 	}
 	_ = os.Chmod(BinaryPath, 0755)
 
-	// 配置 /etc/sing-box 目录
 	_ = os.MkdirAll(filepath.Dir(ConfigPath), 0755)
 
-	// 写入 Systemd 服务文件
+	logFn("配置并更新 Systemd 服务单元...")
 	unitContent := fmt.Sprintf(`[Unit]
 Description=sing-box service
 Documentation=https://sing-box.sagernet.org
@@ -146,9 +166,27 @@ LimitNOFILE=infinity
 WantedBy=multi-user.target
 `, BinaryPath, ConfigPath)
 
-	_ = component.WriteServiceUnit(UnitName, unitContent)
+	if err := component.WriteServiceUnit(UnitName, unitContent); err != nil {
+		logFn(fmt.Sprintf("[WARN] 写入服务单元失败: %v", err))
+	}
 	_ = d.systemd.Enable()
 
+	// 尝试启动服务（若配置文件已存在）
+	if _, err := os.Stat(ConfigPath); err == nil {
+		logFn("检测到现有配置，正在启动 sing-box 服务...")
+		_ = d.systemd.Restart()
+	}
+
+	component.SetCachedLatestVersion(DriverName, rel.TagName)
+	logFn("sing-box 安装/升级成功！")
+	return nil
+}
+
+func (d *Driver) Uninstall() error {
+	_ = d.systemd.Stop()
+	_ = d.systemd.Disable()
+	_ = component.RemoveServiceUnit(UnitName)
+	_ = os.Remove(BinaryPath)
 	return nil
 }
 
@@ -172,6 +210,9 @@ func (d *Driver) Status() (component.ServiceStatus, error) {
 
 	return component.ServiceStatus{
 		Name:             DriverName,
+		DisplayName:      d.DisplayName(),
+		Description:      d.Description(),
+		Category:         d.Category(),
 		Installed:        installed,
 		InstalledVersion: installedVer,
 		Active:           active,
@@ -197,6 +238,9 @@ func (d *Driver) ReloadOrRestart() error {
 
 // CheckConfig 校验配置文件格式是否合法
 func CheckConfig(cfgPath string) error {
+	if _, err := os.Stat(BinaryPath); errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("sing-box is not installed yet")
+	}
 	out, err := executil.RunCommand(5*time.Second, BinaryPath, "check", "-c", cfgPath)
 	if err != nil {
 		return fmt.Errorf("%s: %s", err.Error(), out)
@@ -206,7 +250,6 @@ func CheckConfig(cfgPath string) error {
 
 // GenerateRealityKeypair 生成 Reality 公私钥对与随机 short_id
 func GenerateRealityKeypair() (privateKey, publicKey, shortID string, err error) {
-	// 优先调用系统已安装的 sing-box generate reality-keypair
 	if _, statErr := os.Stat(BinaryPath); statErr == nil {
 		out, runErr := executil.RunCommand(3*time.Second, BinaryPath, "generate", "reality-keypair")
 		if runErr == nil {
@@ -222,7 +265,6 @@ func GenerateRealityKeypair() (privateKey, publicKey, shortID string, err error)
 		}
 	}
 
-	// 纯 Go 标准库 X25519 降级实现
 	if privateKey == "" || publicKey == "" {
 		curve := ecdh.X25519()
 		priv, err := curve.GenerateKey(rand.Reader)
@@ -233,7 +275,6 @@ func GenerateRealityKeypair() (privateKey, publicKey, shortID string, err error)
 		publicKey = base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes())
 	}
 
-	// 生成 8 字节 (16 hex) 或 4 字节 (8 hex) ShortID
 	sidBytes := make([]byte, 4)
 	_, _ = rand.Read(sidBytes)
 	shortID = hex.EncodeToString(sidBytes)
@@ -281,4 +322,3 @@ func extractBinary(archivePath, targetName string) (string, error) {
 
 	return "", fmt.Errorf("%s not found in archive", targetName)
 }
-

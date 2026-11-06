@@ -63,6 +63,12 @@ func (s *SystemdManager) Enable() error {
 	return err
 }
 
+// Disable 取消开机自启
+func (s *SystemdManager) Disable() error {
+	_, err := executil.RunCommand(5*time.Second, "systemctl", "disable", s.UnitName)
+	return err
+}
+
 // DaemonReload 重新载入 systemd 配置
 func DaemonReload() error {
 	_, err := executil.RunCommand(5*time.Second, "systemctl", "daemon-reload")
@@ -75,6 +81,13 @@ func WriteServiceUnit(unitName, content string) error {
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return fmt.Errorf("write systemd unit error: %w", err)
 	}
+	return DaemonReload()
+}
+
+// RemoveServiceUnit 移除 /etc/systemd/system/<unit>.service
+func RemoveServiceUnit(unitName string) error {
+	path := fmt.Sprintf("/etc/systemd/system/%s", unitName)
+	_ = os.Remove(path)
 	return DaemonReload()
 }
 

@@ -13,6 +13,7 @@ import (
 	"vps-auto-deploy/internal/component"
 	"vps-auto-deploy/internal/component/cloudflared"
 	"vps-auto-deploy/internal/component/singbox"
+	"vps-auto-deploy/internal/component/xray"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/pkg/netutil"
 )
@@ -31,6 +32,7 @@ func init() {
 	// 注册组件驱动
 	component.Register(singbox.NewDriver())
 	component.Register(cloudflared.NewDriver())
+	component.Register(xray.NewDriver())
 }
 
 func main() {

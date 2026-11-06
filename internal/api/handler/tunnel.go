@@ -69,19 +69,22 @@ func CreateTunnel(c *gin.Context) {
 
 	id, _ := res.LastInsertId()
 
-	// 启动并配置隧道
+	// 启动并配置隧道（若 cloudflared 已安装）
 	drv := cloudflared.NewDriver()
-	_ = drv.ConfigureService(req.Mode, req.Token, req.TargetPort, proto)
-	_ = drv.Start()
+	ver, _ := drv.GetInstalledVersion()
+	if ver != "" {
+		_ = drv.ConfigureService(req.Mode, req.Token, req.TargetPort, proto)
+		_ = drv.Start()
 
-	// 若为 quick 模式，异步从日志中提取 trycloudflare 域名
-	if req.Mode == "quick" {
-		go captureQuickTunnelDomain(id)
+		// 若为 quick 模式，异步从日志中提取 trycloudflare 域名
+		if req.Mode == "quick" {
+			go captureQuickTunnelDomain(id)
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"id":      id,
-		"message": "tunnel created and service started",
+		"message": "tunnel saved successfully",
 	})
 }
 

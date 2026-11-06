@@ -14,6 +14,17 @@
       </div>
     </div>
 
+    <!-- 未安装 sing-box 提示横幅 -->
+    <div v-if="!singboxInstalled" style="background-color: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 0.5rem; padding: 0.75rem 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
+      <div style="display: flex; align-items: center; gap: 0.5rem; color: #fbbf24; font-size: 0.85rem;">
+        <span>💡</span>
+        <span>当前尚未安装 <b>sing-box</b> 代理核心。您可直接在此预先配置节点，配置将安全落盘；配置完成后请前往「仪表盘」一键安装 sing-box 即可自动运行！</span>
+      </div>
+      <router-link to="/" class="btn btn-secondary" style="padding: 0.25rem 0.6rem; font-size: 0.75rem; white-space: nowrap; border-color: #fbbf24; color: #fbbf24;">
+        前往安装
+      </router-link>
+    </div>
+
     <!-- 节点列表 -->
     <div v-if="inbounds.length === 0" class="card" style="text-align: center; padding: 3rem;">
       <div style="font-size: 2rem; margin-bottom: 0.5rem;">🌐</div>
@@ -180,6 +191,7 @@ import QrcodeVue from 'qrcode.vue'
 import api from '../api'
 
 const inbounds = ref<any[]>([])
+const singboxInstalled = ref(true)
 
 const modal = reactive({
   show: false,
@@ -225,6 +237,12 @@ async function loadInbounds() {
   try {
     const res = await api.get('/inbounds')
     inbounds.value = res.data || []
+
+    const compRes = await api.get('/components')
+    const sb = (compRes.data || []).find((c: any) => c.name === 'sing-box')
+    if (sb) {
+      singboxInstalled.value = sb.installed
+    }
   } catch (err) {
     console.error(err)
   }

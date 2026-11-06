@@ -195,9 +195,13 @@ func ApplyAndReload(destPath string) error {
 	}
 	defer os.Remove(tmpPath)
 
-	// 调用 sing-box check -c 预检验
-	if err := singbox.CheckConfig(tmpPath); err != nil {
-		return fmt.Errorf("sing-box check failed: %w", err)
+	// 调用 sing-box check -c 预检验（若已安装）
+	driver := singbox.NewDriver()
+	installedVer, _ := driver.GetInstalledVersion()
+	if installedVer != "" {
+		if err := singbox.CheckConfig(tmpPath); err != nil {
+			return fmt.Errorf("sing-box check failed: %w", err)
+		}
 	}
 
 	// 校验通过，原子覆盖
@@ -205,7 +209,9 @@ func ApplyAndReload(destPath string) error {
 		return fmt.Errorf("write final config error: %w", err)
 	}
 
-	driver := singbox.NewDriver()
-	return driver.ReloadOrRestart()
+	if installedVer != "" {
+		return driver.ReloadOrRestart()
+	}
+	return nil
 }
 
