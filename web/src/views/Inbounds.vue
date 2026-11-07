@@ -1,9 +1,12 @@
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
       <div>
-        <h2 style="font-size: 1.25rem; font-weight: 600;">Sing-box 入站节点</h2>
-        <p style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.2rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span style="font-size: 1.5rem;">🌐</span>
+          <h1 style="font-size: 1.35rem; font-weight: 700; color: #f8fafc;">Sing-box 入站节点配置</h1>
+        </div>
+        <p style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.25rem;">
           支持直连首选的 VLESS-XTLS-Vision-Reality 及配合 Cloudflared 隧道防封的 VLESS-WS
         </p>
       </div>
@@ -14,21 +17,28 @@
       </div>
     </div>
 
-    <!-- 未安装 sing-box 提示横幅 -->
-    <div v-if="!singboxInstalled" style="background-color: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 0.5rem; padding: 0.75rem 1rem; margin-bottom: 1.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
-      <div style="display: flex; align-items: center; gap: 0.5rem; color: #fbbf24; font-size: 0.85rem;">
-        <span>💡</span>
-        <span>当前尚未安装 <b>sing-box</b> 代理核心。您可直接在此预先配置节点，配置将安全落盘；配置完成后请前往「仪表盘」一键安装 sing-box 即可自动运行！</span>
+    <!-- 未安装 sing-box 渐进式空状态引导卡片 -->
+    <div v-if="!singboxInstalled" class="card" style="margin-bottom: 1.5rem; background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.35);">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+          <span style="font-size: 1.6rem;">📦</span>
+          <div>
+            <div style="font-weight: 600; color: #fbbf24; font-size: 0.95rem;">未检测到已安装的 sing-box 代理核心</div>
+            <div style="color: #94a3b8; font-size: 0.825rem; margin-top: 0.25rem;">
+              入站节点由底层的 sing-box 驱动并监听。您可以先在此预设规则，或直接进入软件中心一键安装。
+            </div>
+          </div>
+        </div>
+        <router-link to="/components?install=sing-box" class="btn btn-primary" style="font-size: 0.825rem; padding: 0.4rem 0.85rem;">
+          🚀 前往「软件中心」一键安装
+        </router-link>
       </div>
-      <router-link to="/" class="btn btn-secondary" style="padding: 0.25rem 0.6rem; font-size: 0.75rem; white-space: nowrap; border-color: #fbbf24; color: #fbbf24;">
-        前往安装
-      </router-link>
     </div>
 
     <!-- 节点列表 -->
     <div v-if="inbounds.length === 0" class="card" style="text-align: center; padding: 3rem;">
-      <div style="font-size: 2rem; margin-bottom: 0.5rem;">🌐</div>
-      <p style="color: #94a3b8; margin-bottom: 1rem;">暂无已配置的入站节点，点击上方按钮一键创建 VLESS-Reality 节点。</p>
+      <div style="font-size: 2.25rem; margin-bottom: 0.5rem;">🌐</div>
+      <p style="color: #94a3b8; margin-bottom: 1.25rem;">暂无已配置的入站节点，点击下方按钮一键配置首个 VLESS-Reality 节点。</p>
       <button @click="openCreateModal" class="btn btn-primary">+ 一键配置首个 VLESS-Reality 节点</button>
     </div>
 
@@ -36,7 +46,7 @@
       <div v-for="ib in inbounds" :key="ib.id" class="card" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
         <div>
           <div style="display: flex; align-items: center; gap: 0.75rem;">
-            <span style="font-size: 1.1rem; font-weight: 600;">{{ ib.tag }}</span>
+            <span style="font-size: 1.1rem; font-weight: 600; color: #f8fafc;">{{ ib.tag }}</span>
             <span :class="['badge', ib.protocol === 'vless-reality' ? 'badge-success' : 'badge-warning']">
               {{ ib.protocol }}
             </span>
@@ -45,7 +55,7 @@
             </span>
           </div>
 
-          <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.5rem; display: flex; gap: 1.5rem;">
+          <div style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.5rem; display: flex; gap: 1.5rem; flex-wrap: wrap;">
             <span>监听端口: <b style="color: #f1f5f9;">{{ ib.port }}</b></span>
             <span>绑定地址: <b style="color: #f1f5f9;">{{ ib.listen }}</b></span>
             <span v-if="ib.protocol === 'vless-reality'">
@@ -166,7 +176,7 @@
         ></textarea>
 
         <div style="display: flex; justify-content: center; gap: 0.75rem;">
-          <button @click="copyText(shareModal.uri)" class="btn btn-primary">复制节点链接</button>
+          <button @click="copyShareUri" class="btn btn-primary">复制节点链接</button>
           <button @click="shareModal.show = false" class="btn btn-secondary">关闭</button>
         </div>
       </div>
@@ -189,6 +199,11 @@
 import { ref, reactive, onMounted } from 'vue'
 import QrcodeVue from 'qrcode.vue'
 import api from '../api'
+import { useToast, copyToClipboard } from '../composables/useToast'
+import { useConfirm } from '../composables/useConfirm'
+
+const { toast } = useToast()
+const { showConfirm } = useConfirm()
 
 const inbounds = ref<any[]>([])
 const singboxInstalled = ref(true)
@@ -243,8 +258,8 @@ async function loadInbounds() {
     if (sb) {
       singboxInstalled.value = sb.installed
     }
-  } catch (err) {
-    console.error(err)
+  } catch (err: any) {
+    toast.error('加载入站节点列表失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
@@ -272,8 +287,8 @@ async function generateRealityKeys() {
     realitySpec.private_key = res.data.private_key
     realitySpec.public_key = res.data.public_key
     realitySpec.short_id = res.data.short_id
-  } catch (err) {
-    console.error(err)
+  } catch (err: any) {
+    toast.error('生成密钥失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
@@ -305,19 +320,28 @@ async function submitInbound() {
       enabled: form.enabled,
     })
     modal.show = false
+    toast.success('入站节点已保存！')
     await loadInbounds()
   } catch (err: any) {
-    alert('保存失败: ' + (err.response?.data?.error || err.message))
+    toast.error('保存失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
 async function deleteInbound(id: number) {
-  if (!confirm('确定要删除该入站节点吗？删除后 sing-box 将自动重载生效。')) return
+  const confirmed = await showConfirm({
+    title: '确认删除入站节点',
+    message: '确定要删除该入站节点吗？删除后 sing-box 配置将自动重写并热重载生效。',
+    confirmText: '确认删除',
+    danger: true,
+  })
+  if (!confirmed) return
+
   try {
     await api.delete(`/inbounds/${id}`)
+    toast.success('节点已成功删除！')
     await loadInbounds()
   } catch (err: any) {
-    alert('删除失败: ' + (err.response?.data?.error || err.message))
+    toast.error('删除失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
@@ -326,13 +350,12 @@ async function showShareModal(ib: any) {
     const membersRes = await api.get('/members')
     const members = membersRes.data || []
     if (members.length === 0) {
-      alert('请先在"成员与订阅"中创建至少一个成员！')
+      toast.warning('请先在「成员与订阅」中创建至少一个成员账号！')
       return
     }
     const m = members[0]
     const spec = parseSpec(ib.spec_json)
 
-    // 拼接 vless 协议链接
     const sysRes = await api.get('/system/overview')
     const ip = sysRes.data.public_ip
 
@@ -351,8 +374,8 @@ async function showShareModal(ib: any) {
     shareModal.title = `${ib.tag} (默认用户: ${m.name})`
     shareModal.uri = uri
     shareModal.show = true
-  } catch (err) {
-    console.error(err)
+  } catch (err: any) {
+    toast.error('获取节点信息失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
@@ -362,17 +385,15 @@ async function openPreview() {
     previewModal.content = JSON.stringify(res.data, null, 2)
     previewModal.show = true
   } catch (err: any) {
-    alert('获取预览配置失败: ' + (err.response?.data?.error || err.message))
+    toast.error('获取配置预览失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
-function copyText(txt: string) {
-  navigator.clipboard.writeText(txt)
-  alert('已复制到剪贴板！')
+function copyShareUri() {
+  copyToClipboard(shareModal.uri, '节点链接')
 }
 
 onMounted(() => {
   loadInbounds()
 })
 </script>
-

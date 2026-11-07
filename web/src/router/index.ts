@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import Dashboard from '../views/Dashboard.vue'
+import Components from '../views/Components.vue'
 import Inbounds from '../views/Inbounds.vue'
 import Tunnels from '../views/Tunnels.vue'
 import Subscriptions from '../views/Subscriptions.vue'
@@ -9,6 +10,7 @@ import Login from '../views/Login.vue'
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
   { path: '/', component: Dashboard },
+  { path: '/components', component: Components },
   { path: '/inbounds', component: Inbounds },
   { path: '/tunnels', component: Tunnels },
   { path: '/subscriptions', component: Subscriptions },

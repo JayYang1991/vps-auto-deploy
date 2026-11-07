@@ -1,9 +1,12 @@
 <template>
   <div>
-    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
       <div>
-        <h2 style="font-size: 1.25rem; font-weight: 600;">团队成员与订阅中心</h2>
-        <p style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.2rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span style="font-size: 1.5rem;">👥</span>
+          <h1 style="font-size: 1.35rem; font-weight: 700; color: #f8fafc;">团队成员与订阅分发中心</h1>
+        </div>
+        <p style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.25rem;">
           每个成员拥有独立 UUID 与免登录专属订阅链接，支持随时吊销或重新生成，共用同一服务端节点
         </p>
       </div>
@@ -17,7 +20,7 @@
         <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem;">
           <div>
             <div style="display: flex; align-items: center; gap: 0.75rem;">
-              <span style="font-size: 1.15rem; font-weight: 600;">{{ m.name }}</span>
+              <span style="font-size: 1.15rem; font-weight: 600; color: #f8fafc;">{{ m.name }}</span>
               <span :class="['badge', m.enabled ? 'badge-success' : 'badge-secondary']">
                 {{ m.enabled ? '正常' : '已禁用' }}
               </span>
@@ -127,7 +130,10 @@
           style="font-size: 0.75rem; margin-bottom: 1rem; word-break: break-all;"
         ></textarea>
 
-        <button @click="qrModal.show = false" class="btn btn-secondary">关闭</button>
+        <div style="display: flex; justify-content: center; gap: 0.75rem;">
+          <button @click="copyModalUrl" class="btn btn-primary">复制订阅链接</button>
+          <button @click="qrModal.show = false" class="btn btn-secondary">关闭</button>
+        </div>
       </div>
     </div>
   </div>
@@ -137,6 +143,11 @@
 import { ref, reactive, onMounted } from 'vue'
 import QrcodeVue from 'qrcode.vue'
 import api from '../api'
+import { useToast, copyToClipboard } from '../composables/useToast'
+import { useConfirm } from '../composables/useConfirm'
+
+const { toast } = useToast()
+const { showConfirm } = useConfirm()
 
 const members = ref<any[]>([])
 
@@ -158,8 +169,8 @@ async function loadMembers() {
   try {
     const res = await api.get('/members')
     members.value = res.data || []
-  } catch (err) {
-    console.error(err)
+  } catch (err: any) {
+    toast.error('加载成员列表失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
@@ -170,12 +181,15 @@ function getSubFullURL(subToken: string, target: string): string {
 
 function copySubURL(subToken: string, target: string) {
   const url = getSubFullURL(subToken, target)
-  navigator.clipboard.writeText(url)
-  alert('订阅链接已复制到剪贴板！可以直接粘贴到 Clash/Singbox 客户端使用。')
+  copyToClipboard(url, `${target.toUpperCase()} 订阅链接`)
+}
+
+function copyModalUrl() {
+  copyToClipboard(qrModal.url, '订阅链接')
 }
 
 function openSubQR(memberName: string, subToken: string, target: string) {
-  qrModal.title = `${memberName} - ${target.toUpperCase()} 订阅码`
+  qrModal.title = `${memberName} - ${target.toUpperCase()} 订阅二维码`
   qrModal.url = getSubFullURL(subToken, target)
   qrModal.show = true
 }
@@ -187,31 +201,47 @@ async function createMember() {
       enabled: true,
     })
     modal.show = false
+    toast.success(`成员 ${form.name} 创建成功！`)
     form.name = ''
     await loadMembers()
   } catch (err: any) {
-    alert('添加失败: ' + (err.response?.data?.error || err.message))
+    toast.error('添加失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
 async function resetToken(id: number) {
-  if (!confirm('确定要重置该成员的订阅码吗？重置后原有的订阅链接将立即失效！')) return
+  const confirmed = await showConfirm({
+    title: '重置订阅码',
+    message: '确定要重置该成员的订阅码吗？重置后原有的订阅链接将立即失效！',
+    confirmText: '确认重置',
+    danger: true,
+  })
+  if (!confirmed) return
+
   try {
     await api.post(`/members/${id}/reset-token`)
+    toast.success('订阅码已成功重置！原链接已失效。')
     await loadMembers()
-    alert('订阅码已重置！')
   } catch (err: any) {
-    alert('重置失败: ' + (err.response?.data?.error || err.message))
+    toast.error('重置失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
 async function deleteMember(id: number) {
-  if (!confirm('确定要删除该成员吗？')) return
+  const confirmed = await showConfirm({
+    title: '删除成员',
+    message: '确定要删除该成员吗？删除后该成员名下的所有客户端连接配置将无法再同步节点。',
+    confirmText: '确认删除',
+    danger: true,
+  })
+  if (!confirmed) return
+
   try {
     await api.delete(`/members/${id}`)
+    toast.success('成员已删除！')
     await loadMembers()
   } catch (err: any) {
-    alert('删除失败: ' + (err.response?.data?.error || err.message))
+    toast.error('删除失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
@@ -219,4 +249,3 @@ onMounted(() => {
   loadMembers()
 })
 </script>
-

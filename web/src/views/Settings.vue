@@ -1,6 +1,9 @@
 <template>
-  <div style="max-width: 650px;">
-    <h2 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 1.5rem;">面板设置与安全</h2>
+  <div style="max-width: 680px;">
+    <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1.5rem;">
+      <span style="font-size: 1.5rem;">⚙️</span>
+      <h1 style="font-size: 1.35rem; font-weight: 700; color: #f8fafc;">面板设置与安全</h1>
+    </div>
 
     <!-- 系统参数 -->
     <div class="card" style="margin-bottom: 1.5rem;">
@@ -60,8 +63,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { reactive, onMounted } from 'vue'
 import api from '../api'
+import { useToast } from '../composables/useToast'
+
+const { toast } = useToast()
 
 const settings = reactive({
   secret_path: '',
@@ -79,23 +85,23 @@ async function loadSettings() {
     const res = await api.get('/settings')
     settings.secret_path = res.data.secret_path
     settings.public_ip = res.data.public_ip
-  } catch (err) {
-    console.error(err)
+  } catch (err: any) {
+    toast.error('加载系统设置失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
 async function saveSettings() {
   try {
     await api.post('/settings', settings)
-    alert('系统设置已更新！如果修改了安全路径，请使用新路径重新访问。')
+    toast.success('系统设置已更新！如果修改了安全路径，请使用新路径重新访问。', 5000)
   } catch (err: any) {
-    alert('保存失败: ' + (err.response?.data?.error || err.message))
+    toast.error('保存失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
 async function updatePassword() {
   if (passForm.new_password !== passForm.confirm_password) {
-    alert('两次输入的新密码不一致！')
+    toast.warning('两次输入的新密码不一致！')
     return
   }
 
@@ -104,11 +110,13 @@ async function updatePassword() {
       old_password: passForm.old_password,
       new_password: passForm.new_password,
     })
-    alert('密码修改成功，请使用新密码重新登录！')
-    localStorage.removeItem('token')
-    window.location.hash = '#/login'
+    toast.success('密码修改成功，请使用新密码重新登录！', 3000)
+    setTimeout(() => {
+      localStorage.removeItem('token')
+      window.location.hash = '#/login'
+    }, 1200)
   } catch (err: any) {
-    alert('修改密码失败: ' + (err.response?.data?.error || err.message))
+    toast.error('修改密码失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
@@ -116,4 +124,3 @@ onMounted(() => {
   loadSettings()
 })
 </script>
-
