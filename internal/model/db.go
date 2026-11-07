@@ -124,6 +124,21 @@ func migrate() error {
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS cf_preferred_ips (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		ip TEXT NOT NULL,
+		port INTEGER NOT NULL DEFAULT 443,
+		tag TEXT NOT NULL DEFAULT '',
+		name TEXT NOT NULL DEFAULT '',
+		colo TEXT NOT NULL DEFAULT '',
+		latency TEXT NOT NULL DEFAULT '',
+		speed TEXT NOT NULL DEFAULT '',
+		raw_link TEXT NOT NULL DEFAULT '',
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_cf_preferred_ips_ip ON cf_preferred_ips(ip);
 	`
 	if _, err := DB.Exec(schema); err != nil {
 		return err

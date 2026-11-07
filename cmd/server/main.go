@@ -11,6 +11,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 	"vps-auto-deploy/internal/api"
+	"vps-auto-deploy/internal/cfpref"
 	"vps-auto-deploy/internal/component"
 	"vps-auto-deploy/internal/component/cloudflared"
 	"vps-auto-deploy/internal/component/singbox"
@@ -112,6 +113,9 @@ func main() {
 
 	// 5. 启动后台受管节点心跳保活守护协程 (每 30 秒自动巡检与自愈)
 	node.StartHealthCheckWorker(30 * time.Second)
+
+	// 6. 启动 Cloudflare 优选 IP 定时拉取与调度协程
+	cfpref.StartWorker()
 
 	r := api.SetupRouter(WebFS)
 

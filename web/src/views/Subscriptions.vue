@@ -56,6 +56,18 @@
             未安装
           </span>
         </button>
+
+        <button
+          @click="activeSubSection = 'cf_preferred'"
+          :class="['btn', activeSubSection === 'cf_preferred' ? 'btn-primary' : 'btn-secondary']"
+          style="padding: 0.35rem 0.85rem; font-size: 0.8rem; border: none;"
+          type="button"
+        >
+          <span>⚡ Cloudflare 优选 IP</span>
+          <span v-if="cfPrefStatus.total_count" class="badge badge-secondary" style="margin-left: 0.35rem; font-size: 0.7rem;">
+            {{ cfPrefStatus.total_count }}
+          </span>
+        </button>
       </div>
     </div>
 
@@ -486,6 +498,342 @@
       </div>
     </div>
 
+    <!-- ==================== 版块三：Cloudflare 优选 IP ==================== -->
+    <div v-else-if="activeSubSection === 'cf_preferred'">
+      <!-- 顶部统计概览 -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <div class="card" style="display: flex; align-items: center; gap: 0.85rem; padding: 1rem;">
+          <div style="font-size: 1.85rem;">⚡</div>
+          <div>
+            <div style="font-size: 0.775rem; color: #94a3b8; font-weight: 500;">优选 IP 节点数</div>
+            <div style="font-size: 1.35rem; font-weight: 700; color: #f8fafc; margin-top: 0.2rem;">
+              {{ cfPrefStatus.total_count }} <span style="font-size: 0.75rem; font-weight: 400; color: #94a3b8;">个可用</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="display: flex; align-items: center; gap: 0.85rem; padding: 1rem;">
+          <div style="font-size: 1.85rem;">⏱️</div>
+          <div>
+            <div style="font-size: 0.775rem; color: #94a3b8; font-weight: 500;">上次同步时间</div>
+            <div style="font-size: 0.95rem; font-weight: 600; color: #f8fafc; margin-top: 0.35rem;">
+              {{ formatDateTime(cfPrefStatus.last_fetch_at) || '尚未执行同步' }}
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="display: flex; align-items: center; gap: 0.85rem; padding: 1rem;">
+          <div style="font-size: 1.85rem;">⏰</div>
+          <div>
+            <div style="font-size: 0.775rem; color: #94a3b8; font-weight: 500;">自动定时更新</div>
+            <div style="font-size: 0.95rem; font-weight: 600; margin-top: 0.35rem;">
+              <span v-if="cfPrefStatus.cron_enabled" style="color: #34d399;">
+                ✓ 运行中 ({{ cfPrefStatus.cron_mode === 'daily' ? `每日 ${cfPrefStatus.cron_time}` : `每 ${cfPrefStatus.cron_interval}` }})
+              </span>
+              <span v-else style="color: #94a3b8;">未启用 (仅手动同步)</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card" style="display: flex; align-items: center; gap: 0.85rem; padding: 1rem;">
+          <div style="font-size: 1.85rem;">📡</div>
+          <div>
+            <div style="font-size: 0.775rem; color: #94a3b8; font-weight: 500;">最近抓取状态</div>
+            <div style="font-size: 0.875rem; font-weight: 600; margin-top: 0.35rem; word-break: break-all;">
+              <span v-if="cfPrefStatus.last_fetch_status === 'success'" style="color: #34d399;">
+                ✓ 成功获取 {{ cfPrefStatus.last_fetch_count }} 个节点
+              </span>
+              <span v-else-if="cfPrefStatus.last_fetch_status" style="color: #f87171;">
+                {{ cfPrefStatus.last_fetch_status }}
+              </span>
+              <span v-else style="color: #94a3b8;">就绪</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 抓取源与定时更新调度配置 Card -->
+      <div class="card" style="margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-size: 1.25rem;">⚙️</span>
+            <div>
+              <h3 style="font-size: 1.1rem; font-weight: 600; color: #f8fafc;">优选 IP 抓取源与定时更新配置</h3>
+              <p style="color: #94a3b8; font-size: 0.8rem; margin-top: 0.15rem;">
+                配置 EDGETUNNEL 优选订阅源与周期性自动同步，保持本地优选节点库最新
+              </p>
+            </div>
+          </div>
+
+          <button
+            @click="saveCFPrefSettings"
+            class="btn btn-primary"
+            style="font-size: 0.825rem; padding: 0.45rem 0.9rem;"
+            :disabled="savingCfSettings"
+            type="button"
+          >
+            <span>💾</span>
+            <span>{{ savingCfSettings ? '正在保存...' : '保存抓取与调度配置' }}</span>
+          </button>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 1rem;">
+          <div>
+            <label class="form-label">
+              优选订阅源 URL 模板 (支持 <code>{host}</code> 与 <code>{uuid}</code> 动态变量)
+            </label>
+            <div style="display: flex; gap: 0.5rem;">
+              <input
+                v-model="cfPrefStatus.sub_url"
+                type="text"
+                class="input"
+                placeholder="https://sub.19910417.xyz/sub?host={host}&uuid={uuid}"
+              />
+              <button
+                @click="cfPrefStatus.sub_url = 'https://sub.19910417.xyz/sub?host={host}&uuid={uuid}'"
+                class="btn btn-secondary"
+                style="font-size: 0.75rem; white-space: nowrap;"
+                type="button"
+              >
+                默认模板
+              </button>
+            </div>
+            <p class="form-hint">
+              抓取时系统将自动替换 <code>{host}</code> 为伪装/穿透域名，替换 <code>{uuid}</code> 为客户端凭据
+            </p>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem;">
+            <div>
+              <label class="form-label">伪装域名 / Host</label>
+              <input
+                v-model="cfPrefStatus.host"
+                type="text"
+                class="input"
+                placeholder="留空自动探测隧道域名或 dl.google.com"
+              />
+              <p class="form-hint">Cloudflare 边缘握手的 Host / SNI 域名</p>
+            </div>
+
+            <div>
+              <label class="form-label">用户 UUID</label>
+              <input
+                v-model="cfPrefStatus.uuid"
+                type="text"
+                class="input"
+                placeholder="留空自动读取第一个有效团队成员的 UUID"
+              />
+              <p class="form-hint">关联的 VLESS 鉴权凭据</p>
+            </div>
+          </div>
+
+          <!-- 定时自动同步配置 -->
+          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid #1e293b; border-radius: 0.5rem; padding: 1rem;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 0.75rem;">
+              <label style="display: flex; align-items: center; gap: 0.6rem; cursor: pointer;">
+                <input type="checkbox" v-model="cfPrefStatus.cron_enabled" />
+                <span style="font-size: 0.9rem; font-weight: 600; color: #f8fafc;">
+                  启用后台定时自动更新优选 IP
+                </span>
+              </label>
+
+              <div v-if="cfPrefStatus.cron_enabled" style="display: flex; gap: 0.5rem; align-items: center;">
+                <label style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: #cbd5e1; cursor: pointer;">
+                  <input type="radio" value="interval" v-model="cfPrefStatus.cron_mode" />
+                  固定间隔模式
+                </label>
+                <label style="display: flex; align-items: center; gap: 0.35rem; font-size: 0.8rem; color: #cbd5e1; cursor: pointer;">
+                  <input type="radio" value="daily" v-model="cfPrefStatus.cron_mode" />
+                  每日固定时间点
+                </label>
+              </div>
+            </div>
+
+            <div v-if="cfPrefStatus.cron_enabled" style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; padding-top: 0.5rem; border-top: 1px dashed #334155;">
+              <div v-if="cfPrefStatus.cron_mode === 'interval'" style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="font-size: 0.825rem; color: #94a3b8;">每隔多久自动拉取一次：</span>
+                <select v-model="cfPrefStatus.cron_interval" class="input" style="width: 140px; padding: 0.3rem 0.6rem; font-size: 0.825rem;">
+                  <option value="2h">每 2 小时</option>
+                  <option value="6h">每 6 小时 (推荐)</option>
+                  <option value="12h">每 12 小时</option>
+                  <option value="24h">每 24 小时</option>
+                </select>
+              </div>
+
+              <div v-else-if="cfPrefStatus.cron_mode === 'daily'" style="display: flex; align-items: center; gap: 0.5rem;">
+                <span style="font-size: 0.825rem; color: #94a3b8;">每日自动拉取时间点：</span>
+                <input
+                  v-model="cfPrefStatus.cron_time"
+                  type="time"
+                  class="input"
+                  style="width: 130px; padding: 0.3rem 0.6rem; font-size: 0.825rem;"
+                />
+                <span style="font-size: 0.75rem; color: #64748b;">(推荐 04:00 凌晨低峰期)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 本地持久化优选 IP 节点库 Card -->
+      <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <span style="font-size: 1.25rem;">🌐</span>
+            <div>
+              <h3 style="font-size: 1.1rem; font-weight: 600; color: #f8fafc;">
+                本地优选 IP 节点库
+                <span style="font-size: 0.85rem; color: #94a3b8; font-weight: 400;">
+                  (已持久化 {{ cfIps.length }} 个节点)
+                </span>
+              </h3>
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+            <button
+              @click="manualFetchCFIps"
+              class="btn btn-primary"
+              style="font-size: 0.8rem; padding: 0.4rem 0.8rem;"
+              :disabled="fetchingCf"
+              type="button"
+            >
+              <span>⚡</span>
+              <span>{{ fetchingCf ? '正在抓取中...' : '立即重新获取' }}</span>
+            </button>
+
+            <button
+              @click="copyAllCFIpList"
+              class="btn btn-secondary"
+              style="font-size: 0.8rem; padding: 0.4rem 0.8rem;"
+              :disabled="!cfIps.length"
+              type="button"
+              title="复制全部 IP:端口 列表"
+            >
+              📋 复制全部 IP
+            </button>
+
+            <button
+              @click="copyAllCFVlessLinks"
+              class="btn btn-secondary"
+              style="font-size: 0.8rem; padding: 0.4rem 0.8rem;"
+              :disabled="!cfIps.length"
+              type="button"
+              title="复制全部 VLESS 订阅链接"
+            >
+              🔗 复制订阅链接
+            </button>
+
+            <button
+              @click="clearAllCFIps"
+              class="btn btn-danger"
+              style="font-size: 0.8rem; padding: 0.4rem 0.8rem;"
+              :disabled="!cfIps.length"
+              type="button"
+            >
+              🗑️ 清空列表
+            </button>
+          </div>
+        </div>
+
+        <!-- 搜索过滤 -->
+        <div style="margin-bottom: 1rem;">
+          <input
+            v-model="cfSearchKeyword"
+            @input="loadCFIps"
+            type="text"
+            class="input"
+            placeholder="🔍 搜索优选 IP / 地区备注 (如 SG, JP, 443)..."
+            style="font-size: 0.825rem;"
+          />
+        </div>
+
+        <!-- 列表表格 -->
+        <div v-if="loadingCfIps" style="text-align: center; padding: 2.5rem; color: #94a3b8;">
+          正在加载优选 IP 节点列表...
+        </div>
+
+        <div v-else-if="cfIps.length === 0" style="text-align: center; padding: 3rem 1rem; color: #94a3b8; background: rgba(15, 23, 42, 0.4); border-radius: 0.5rem; border: 1px dashed #334155;">
+          <div style="font-size: 2.2rem; margin-bottom: 0.5rem;">📡</div>
+          <div style="font-size: 0.95rem; font-weight: 600; color: #cbd5e1; margin-bottom: 0.35rem;">
+            本地暂无持久化的 Cloudflare 优选 IP
+          </div>
+          <p style="font-size: 0.8rem; max-width: 480px; margin: 0 auto 1.25rem; color: #64748b;">
+            点击右上角「立即重新获取」按钮，系统将立即从 EDGETUNNEL_SUB_URL 获取最新优选节点并保存在本地数据库中
+          </p>
+          <button @click="manualFetchCFIps" class="btn btn-primary" :disabled="fetchingCf">
+            ⚡ 立即获取优选 IP
+          </button>
+        </div>
+
+        <div v-else style="overflow-x: auto;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th style="width: 60px;">序号</th>
+                <th>地区 / 节点名称</th>
+                <th>优选 IP 地址</th>
+                <th style="width: 80px;">端口</th>
+                <th style="width: 160px;">更新时间</th>
+                <th style="width: 160px; text-align: right;">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(item, idx) in cfIps" :key="item.id">
+                <td style="color: #64748b; font-size: 0.8rem;">#{{ idx + 1 }}</td>
+                <td>
+                  <div style="display: flex; align-items: center; gap: 0.45rem;">
+                    <span v-if="item.colo" class="badge badge-primary" style="font-size: 0.7rem; font-weight: 700;">
+                      {{ item.colo }}
+                    </span>
+                    <span style="font-weight: 600; color: #f8fafc; font-size: 0.85rem;">
+                      {{ item.name || item.tag }}
+                    </span>
+                  </div>
+                </td>
+                <td>
+                  <code style="background: rgba(30, 41, 59, 0.7); padding: 0.2rem 0.45rem; border-radius: 0.3rem; font-size: 0.8rem; color: #38bdf8;">
+                    {{ item.ip }}
+                  </code>
+                </td>
+                <td style="color: #cbd5e1; font-size: 0.825rem;">{{ item.port }}</td>
+                <td style="color: #94a3b8; font-size: 0.75rem;">{{ formatDateTime(item.updated_at) }}</td>
+                <td style="text-align: right;">
+                  <div style="display: flex; justify-content: flex-end; gap: 0.35rem;">
+                    <button
+                      @click="copySingleCFIp(item.ip, item.port)"
+                      class="btn btn-secondary"
+                      style="font-size: 0.7rem; padding: 0.2rem 0.45rem;"
+                      title="复制 IP:端口"
+                    >
+                      复制 IP
+                    </button>
+                    <button
+                      v-if="item.raw_link"
+                      @click="copySingleCFLink(item.raw_link)"
+                      class="btn btn-secondary"
+                      style="font-size: 0.7rem; padding: 0.2rem 0.45rem;"
+                      title="复制 VLESS 链接"
+                    >
+                      链接
+                    </button>
+                    <button
+                      @click="deleteSingleCFIp(item.id)"
+                      class="btn btn-danger"
+                      style="font-size: 0.7rem; padding: 0.2rem 0.45rem;"
+                      title="删除单条"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- 添加成员弹窗 -->
     <div v-if="modal.show" class="modal-overlay" @click.self="modal.show = false">
       <div class="modal-content">
@@ -547,7 +895,7 @@ const route = useRoute()
 const { toast } = useToast()
 const { showConfirm } = useConfirm()
 
-const activeSubSection = ref<'members' | 'subconverter'>('members')
+const activeSubSection = ref<'members' | 'subconverter' | 'cf_preferred'>('members')
 const members = ref<any[]>([])
 const loading = ref(true)
 
@@ -928,18 +1276,181 @@ async function deleteMember(id: number) {
   }
 }
 
+// Cloudflare 优选 IP 状态与数据
+const cfPrefStatus = reactive({
+  sub_url: '',
+  host: '',
+  uuid: '',
+  path: '',
+  cron_enabled: false,
+  cron_mode: 'interval',
+  cron_interval: '6h',
+  cron_time: '04:00',
+  last_fetch_at: '',
+  last_fetch_status: '',
+  last_fetch_count: '',
+  total_count: 0,
+})
+
+const cfIps = ref<any[]>([])
+const loadingCfIps = ref(false)
+const fetchingCf = ref(false)
+const savingCfSettings = ref(false)
+const cfSearchKeyword = ref('')
+
+function formatDateTime(str?: string): string {
+  if (!str) return ''
+  const d = new Date(str)
+  if (isNaN(d.getTime())) return str
+  return d.toLocaleString('zh-CN', { hour12: false })
+}
+
+async function loadCFPrefStatus() {
+  try {
+    const res = await api.get('/cf-preferred/status')
+    if (res.data) {
+      Object.assign(cfPrefStatus, res.data)
+    }
+  } catch (err: any) {
+    console.error('加载优选 IP 配置失败:', err)
+  }
+}
+
+async function loadCFIps() {
+  loadingCfIps.value = true
+  try {
+    const params = cfSearchKeyword.value.trim() ? { keyword: cfSearchKeyword.value.trim() } : {}
+    const res = await api.get('/cf-preferred/ips', { params })
+    cfIps.value = res.data || []
+    cfPrefStatus.total_count = cfIps.value.length
+  } catch (err: any) {
+    toast.error('加载优选 IP 列表失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    loadingCfIps.value = false
+  }
+}
+
+async function saveCFPrefSettings() {
+  savingCfSettings.value = true
+  try {
+    await api.post('/cf-preferred/settings', {
+      sub_url: cfPrefStatus.sub_url,
+      host: cfPrefStatus.host,
+      uuid: cfPrefStatus.uuid,
+      path: cfPrefStatus.path,
+      cron_enabled: cfPrefStatus.cron_enabled,
+      cron_mode: cfPrefStatus.cron_mode,
+      cron_interval: cfPrefStatus.cron_interval,
+      cron_time: cfPrefStatus.cron_time,
+    })
+    toast.success('优选 IP 抓取与调度配置保存成功！')
+    await loadCFPrefStatus()
+  } catch (err: any) {
+    toast.error('保存配置失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    savingCfSettings.value = false
+  }
+}
+
+async function manualFetchCFIps() {
+  fetchingCf.value = true
+  try {
+    const res = await api.post('/cf-preferred/fetch')
+    const count = res.data?.data?.count || 0
+    toast.success(`优选 IP 同步成功！已成功持久化 ${count} 个节点`)
+    await loadCFPrefStatus()
+    await loadCFIps()
+  } catch (err: any) {
+    toast.error('同步优选 IP 失败: ' + (err.response?.data?.error || err.message))
+    await loadCFPrefStatus()
+  } finally {
+    fetchingCf.value = false
+  }
+}
+
+async function clearAllCFIps() {
+  const ok = await showConfirm({
+    title: '确认清空本地优选 IP 库',
+    message: '清空后将移除本地数据库保存的所有 Cloudflare 优选节点，是否继续？',
+    confirmText: '确认清空',
+    danger: true,
+  })
+  if (!ok) return
+
+  try {
+    await api.delete('/cf-preferred/ips')
+    toast.success('本地优选 IP 库已成功清空')
+    cfIps.value = []
+    cfPrefStatus.total_count = 0
+    await loadCFPrefStatus()
+  } catch (err: any) {
+    toast.error('清空失败: ' + (err.response?.data?.error || err.message))
+  }
+}
+
+async function deleteSingleCFIp(id: number) {
+  try {
+    await api.delete(`/cf-preferred/ips/${id}`)
+    toast.success('已删除该优选 IP')
+    cfIps.value = cfIps.value.filter((item) => item.id !== id)
+    cfPrefStatus.total_count = cfIps.value.length
+  } catch (err: any) {
+    toast.error('删除失败: ' + (err.response?.data?.error || err.message))
+  }
+}
+
+function copyAllCFIpList() {
+  if (!cfIps.value.length) return
+  const text = cfIps.value.map((item) => `${item.ip}:${item.port}`).join('\n')
+  copyToClipboard(text, `${cfIps.value.length} 个优选 IP:端口`)
+}
+
+function copyAllCFVlessLinks() {
+  if (!cfIps.value.length) return
+  const text = cfIps.value.map((item) => item.raw_link).filter(Boolean).join('\n')
+  copyToClipboard(text, `${cfIps.value.length} 条 VLESS 节点链接`)
+}
+
+function copySingleCFIp(ip: string, port: number) {
+  copyToClipboard(`${ip}:${port}`, `${ip}:${port}`)
+}
+
+function copySingleCFLink(link: string) {
+  copyToClipboard(link, 'VLESS 优选节点链接')
+}
+
 watch(
   () => route.query,
   (query) => {
     if (query.sub === 'subconverter' || query.tab === 'subconverter') {
       activeSubSection.value = 'subconverter'
+    } else if (query.sub === 'cf_preferred' || query.tab === 'cf_preferred' || query.sub === 'cfip') {
+      activeSubSection.value = 'cf_preferred'
+      loadCFIps()
     }
   },
   { immediate: true }
 )
 
+watch(activeSubSection, (sec) => {
+  if (sec === 'cf_preferred') {
+    loadCFPrefStatus()
+    loadCFIps()
+  }
+})
+
 onMounted(async () => {
-  await Promise.all([loadMembers(), fetchSubStatus(), fetchSubConfig(), fetchTemplates(), fetchWorkbenchPreferences()])
+  await Promise.all([
+    loadMembers(),
+    fetchSubStatus(),
+    fetchSubConfig(),
+    fetchTemplates(),
+    fetchWorkbenchPreferences(),
+    loadCFPrefStatus(),
+  ])
+  if (activeSubSection.value === 'cf_preferred') {
+    await loadCFIps()
+  }
   window.addEventListener('node-context-changed', loadMembers)
 })
 

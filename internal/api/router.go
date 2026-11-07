@@ -113,6 +113,14 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.GET("/subconverter/templates", handler.ListSubconverterTemplates)
 			api.GET("/subconverter/preferences", handler.GetSubconverterPreferences)
 			api.POST("/subconverter/preferences", handler.SaveSubconverterPreferences)
+
+			// Cloudflare 优选 IP 管理与定时同步
+			api.GET("/cf-preferred/status", handler.GetCFPreferredStatus)
+			api.POST("/cf-preferred/settings", handler.SaveCFPreferredSettings)
+			api.POST("/cf-preferred/fetch", handler.TriggerCFPreferredFetch)
+			api.GET("/cf-preferred/ips", handler.ListCFPreferredIPs)
+			api.DELETE("/cf-preferred/ips", handler.ClearCFPreferredIPs)
+			api.DELETE("/cf-preferred/ips/:id", handler.DeleteCFPreferredIP)
 		}
 	}
 
