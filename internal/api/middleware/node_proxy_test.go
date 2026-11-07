@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -60,8 +61,12 @@ func TestNodeProxyWithTLSFingerprint(t *testing.T) {
 	}
 
 	remoteReceivedAuth := ""
+	remoteReceivedTargetHeader := ""
+	remoteReceivedTargetQuery := ""
 	mockRemoteServer := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		remoteReceivedAuth = r.Header.Get("Authorization")
+		remoteReceivedTargetHeader = r.Header.Get("X-Target-Node-ID")
+		remoteReceivedTargetQuery = r.URL.Query().Get("node_id")
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok_from_remote"}`))
@@ -116,6 +121,26 @@ func TestNodeProxyWithTLSFingerprint(t *testing.T) {
 		if remoteReceivedAuth != "Bearer mock-token-xyz" {
 			t.Fatalf("Expected injected token, got: %s", remoteReceivedAuth)
 		}
+		if remoteReceivedTargetHeader != "" {
+			t.Fatalf("Expected X-Target-Node-ID to be stripped, got: %s", remoteReceivedTargetHeader)
+		}
+		if remoteReceivedTargetQuery != "" {
+			t.Fatalf("Expected node_id query param to be stripped, got: %s", remoteReceivedTargetQuery)
+		}
+	}
+
+	// 测试 A2：以 query 参数携带 node_id=2 访问 -> 代理成功且 query 中的 node_id 被剔除
+	{
+		req, _ := http.NewRequest(http.MethodGet, "/mastersecret/api/test-endpoint?node_id=2&foo=bar", nil)
+		w := newTestRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected 200 OK from proxy with query param, got %d: %s", w.Code, w.Body.String())
+		}
+		if remoteReceivedTargetQuery != "" {
+			t.Fatalf("Expected node_id query to be stripped, got: %s", remoteReceivedTargetQuery)
+		}
 	}
 
 	// 测试 B：篡改指纹为伪造指纹 -> 触发中间人安全拦截 (502 Bad Gateway)
@@ -142,6 +167,24 @@ func TestNodeProxyWithTLSFingerprint(t *testing.T) {
 
 		if w.Code != http.StatusBadGateway {
 			t.Fatalf("Expected 502 Bad Gateway due to MITM fingerprint mismatch, got %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	// 测试 C：访问系统设置 /api/settings，即使带 X-Target-Node-ID 也必须保留在主控本地处理
+	{
+		sec.GET("/api/settings", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"settings": "master_settings"})
+		})
+		req, _ := http.NewRequest(http.MethodGet, "/mastersecret/api/settings", nil)
+		req.Header.Set("X-Target-Node-ID", "2")
+		w := newTestRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected 200 OK for master settings, got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "master_settings") {
+			t.Fatalf("Expected master_settings response, got: %s", w.Body.String())
 		}
 	}
 }

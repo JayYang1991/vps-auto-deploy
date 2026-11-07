@@ -30,11 +30,13 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// 集群管理自身接口必须在主控节点执行，不予代理
+		// 集群管理自身接口与主控系统设置必须在主控节点执行，不予代理
 		reqPath := c.Request.URL.Path
 		secret := c.Param("secret")
 		basePrefix := "/" + secret + "/api"
-		if strings.HasPrefix(reqPath, basePrefix+"/nodes") {
+		if strings.HasPrefix(reqPath, basePrefix+"/nodes") ||
+			strings.HasPrefix(reqPath, basePrefix+"/settings") ||
+			strings.HasPrefix(reqPath, basePrefix+"/auth/password") {
 			c.Next()
 			return
 		}
@@ -80,6 +82,12 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 			req.Host = fmt.Sprintf("%s:%d", targetNode.Host, targetNode.PanelPort)
 			req.URL.Path = remotePath
 			req.URL.RawPath = ""
+
+			// 关键：删除跨节点目标 ID，防止远端节点因本地不存在该节点 ID 而发生二次代理递归报错
+			req.Header.Del("X-Target-Node-ID")
+			q := req.URL.Query()
+			q.Del("node_id")
+			req.URL.RawQuery = q.Encode()
 
 			// 注入远端节点的 JWT Bearer Token
 			if targetNode.APIToken != "" {
