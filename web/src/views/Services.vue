@@ -56,11 +56,11 @@
 
         <!-- Sing-box 专属操作：配置透视与热重载 -->
         <div style="display: flex; gap: 0.6rem; align-items: center;">
-          <button @click="openConfigViewer" class="btn btn-secondary" style="font-size: 0.825rem; padding: 0.4rem 0.8rem;">
-            <span>📜</span>
-            <span>查看当前完整配置</span>
+          <button @click="openConfigViewer" class="btn btn-secondary" style="font-size: 0.825rem; padding: 0.4rem 0.8rem;" title="预览与语法预检当前 Sing-box 完整配置">
+            <span>🔍</span>
+            <span>预览 JSON 配置</span>
           </button>
-          <button @click="reloadConfig" class="btn btn-secondary" style="font-size: 0.825rem; padding: 0.4rem 0.8rem;" :disabled="reloading">
+          <button @click="reloadConfig" class="btn btn-secondary" style="font-size: 0.825rem; padding: 0.4rem 0.8rem;" :disabled="reloading" title="应用最新入站/出站规则并重载内核">
             <span>⚡</span>
             <span>{{ reloading ? '重载中...' : '强制热重载' }}</span>
           </button>

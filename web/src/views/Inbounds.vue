@@ -11,8 +11,7 @@
         </p>
       </div>
 
-      <div style="display: flex; gap: 0.75rem;">
-        <button @click="openPreview" class="btn btn-secondary">🔍 预览 JSON 配置</button>
+      <div>
         <button @click="openCreateModal" class="btn btn-primary">+ 新增节点</button>
       </div>
     </div>
@@ -204,17 +203,6 @@
         </div>
       </div>
     </div>
-
-    <!-- 配置预览弹窗 -->
-    <div v-if="previewModal.show" class="modal-overlay" @click.self="previewModal.show = false">
-      <div class="modal-content" style="max-width: 750px; max-height: 85vh; display: flex; flex-direction: column;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-          <h3 style="font-size: 1.125rem; font-weight: 600;">Sing-box 服务端完整配置预览</h3>
-          <button @click="previewModal.show = false" class="btn btn-secondary" style="padding: 0.25rem 0.5rem;">关闭</button>
-        </div>
-        <pre style="flex: 1; background-color: #0f172a; padding: 1rem; border-radius: 0.5rem; overflow-y: auto; font-size: 0.8rem; line-height: 1.4;">{{ previewModal.content }}</pre>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -264,11 +252,6 @@ const shareModal = reactive({
   show: false,
   title: '',
   uri: '',
-})
-
-const previewModal = reactive({
-  show: false,
-  content: '',
 })
 
 async function loadInbounds() {
@@ -450,16 +433,6 @@ async function showShareModal(ib: any) {
     shareModal.show = true
   } catch (err: any) {
     toast.error('获取节点信息失败: ' + (err.response?.data?.error || err.message))
-  }
-}
-
-async function openPreview() {
-  try {
-    const res = await api.get('/inbounds/preview')
-    previewModal.content = JSON.stringify(res.data, null, 2)
-    previewModal.show = true
-  } catch (err: any) {
-    toast.error('获取配置预览失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
