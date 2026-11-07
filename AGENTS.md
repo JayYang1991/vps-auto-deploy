@@ -163,6 +163,11 @@ type ServiceStatus struct {
   - 用户请求查看节点密码时，前端弹出二次鉴权模态框，请求输入主控当前管理员密码。
   - 后端 `POST /api/nodes/:id/reveal-credentials` 使用 `bcrypt` 比对主控密码；若不符直接返回 `403 Forbidden`。
   - 验证成功后，解密被纳管节点密码并返回，前端开启 **60 秒倒计时自动锁定**，超时后自动重新隐藏凭据。
-4. **零原生弹窗检查**：运行 `grep -rnE "\b(alert|confirm|prompt)\(" web/src` 确保输出为空。
-5. **构建与验证**：执行 `go test ./...` 与 `bash build.sh`，确保前后端联编生成单一二进制 `bin/vps-panel` 无任何报错。
+
+### 3. 自签 TLS 证书与证书指纹锁定防中间人劫持 (Certificate Pinning & TOFU)
+- **零公网证书依赖**：被纳管节点启动时自动生成高强度 ECDSA P-256 证书与私钥，并计算 SHA-256 证书指纹（冒号分隔十六进制串）。
+- **SSH 安全信道指纹提取**：部署阶段通过已认证的 SSH 管道直接执行 `-print-fingerprint` 抓取远端证书指纹，持久化入库 `nodes.cert_fingerprint`。
+- **TOFU 主机密钥记录**：首次 SSH 连接捕获目标机器 `ssh_host_key`（`ssh.FingerprintSHA256`），防止后续连接遭遇机器重装或 IP 冒充。
+- **反向代理强校验**：主控端 `NodeProxyMiddleware` 代理 HTTPS 请求时，设置 `tls.Config{InsecureSkipVerify: true, VerifyConnection: ...}`，严格比对远端证书 DER 数据的 SHA-256 指纹。若指纹不符直接拦截断开并返回 `502 Bad Gateway`。
+
 

@@ -10,6 +10,9 @@ export interface NodeItem {
   secret_path: string
   username: string
   is_master: boolean
+  use_tls: boolean
+  cert_fingerprint: string
+  ssh_host_key: string
   status: 'online' | 'offline' | 'deploying' | 'error'
   os_info: string
   latency_ms: number
@@ -67,3 +70,4 @@ export function useNodeContext() {
     switchNode,
   }
 }
+

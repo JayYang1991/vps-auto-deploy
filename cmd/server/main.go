@@ -14,6 +14,7 @@ import (
 	"vps-auto-deploy/internal/component/cloudflared"
 	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/pkg/crypto"
 	"vps-auto-deploy/internal/pkg/netutil"
 )
 
@@ -23,6 +24,10 @@ var (
 	resetUserFlag   = flag.String("reset-username", "", "Reset admin username")
 	resetPassFlag   = flag.String("reset-password", "", "Reset admin password")
 	resetSecretFlag = flag.String("reset-secret", "", "Reset secret path")
+	tlsFlag         = flag.Bool("tls", false, "Enable HTTPS with self-signed certificate (Phase 1 MITM protection)")
+	certFlag        = flag.String("cert", "/etc/vps-auto-deploy/cert.pem", "TLS certificate file path")
+	keyFlag         = flag.String("key", "/etc/vps-auto-deploy/key.pem", "TLS private key file path")
+	printFpFlag     = flag.Bool("print-fingerprint", false, "Print TLS certificate SHA-256 fingerprint and exit")
 )
 
 // webFS 允许外部通过 embed 方式注入静态资源
@@ -71,24 +76,65 @@ func main() {
 		return
 	}
 
-	// 3. 读取系统关键参数并打印启动信息
+	// 3. 处理证书路径适配与指纹打印
+	certPath := *certFlag
+	keyPath := *keyFlag
+	if os.Geteuid() != 0 && certPath == "/etc/vps-auto-deploy/cert.pem" {
+		certPath = "./cert.pem"
+		keyPath = "./key.pem"
+	}
+
+	if *printFpFlag {
+		fp, err := crypto.LoadOrGenerateCert(certPath, keyPath, []string{"127.0.0.1", "localhost", netutil.GetPublicIP()})
+		if err != nil {
+			log.Fatalf("Failed to generate or load certificate: %v", err)
+		}
+		fmt.Println(fp)
+		return
+	}
+
+	// 4. 读取系统关键参数并打印启动信息
 	secretPath, _ := model.GetSetting("secret_path")
 	publicIP := netutil.GetPublicIP()
+
+	var certFingerprint string
+	if *tlsFlag {
+		var err error
+		certFingerprint, err = crypto.LoadOrGenerateCert(certPath, keyPath, []string{"127.0.0.1", "localhost", publicIP})
+		if err != nil {
+			log.Fatalf("Failed to prepare TLS certificates: %v", err)
+		}
+	}
 
 	r := api.SetupRouter(WebFS)
 
 	addr := fmt.Sprintf(":%d", *portFlag)
+	protocol := "http"
+	if *tlsFlag {
+		protocol = "https"
+	}
+
 	fmt.Println("==================================================================")
 	fmt.Println("           VPS Auto Deploy Server (Control Plane)                 ")
 	fmt.Println("==================================================================")
-	fmt.Printf(" [!] Access URL:   http://%s:%d/%s/\n", publicIP, *portFlag, secretPath)
-	fmt.Printf(" [!] Local URL:    http://127.0.0.1:%d/%s/\n", *portFlag, secretPath)
+	fmt.Printf(" [!] Access URL:   %s://%s:%d/%s/\n", protocol, publicIP, *portFlag, secretPath)
+	fmt.Printf(" [!] Local URL:    %s://127.0.0.1:%d/%s/\n", protocol, *portFlag, secretPath)
 	fmt.Printf(" [!] Default User: admin\n")
 	fmt.Printf(" [!] Default Pass: admin888 (Please change after initial login!)\n")
+	if *tlsFlag {
+		fmt.Printf(" [!] TLS Security: ENABLED (MITM Protection)\n")
+		fmt.Printf(" [!] Pinned FP:    %s\n", certFingerprint)
+	}
 	fmt.Println("==================================================================")
 
-	if err := http.ListenAndServe(addr, r); err != nil {
-		log.Fatalf("Server startup failed: %v", err)
+	if *tlsFlag {
+		if err := http.ListenAndServeTLS(addr, certPath, keyPath, r); err != nil {
+			log.Fatalf("TLS Server startup failed: %v", err)
+		}
+	} else {
+		if err := http.ListenAndServe(addr, r); err != nil {
+			log.Fatalf("Server startup failed: %v", err)
+		}
 	}
 }
 

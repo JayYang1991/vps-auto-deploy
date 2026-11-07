@@ -88,3 +88,4 @@ func TestNodeCRUD(t *testing.T) {
 		t.Fatalf("Node %d should have been deleted", id)
 	}
 }
+

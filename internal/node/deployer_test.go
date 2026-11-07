@@ -38,3 +38,4 @@ func TestRandomGenerators(t *testing.T) {
 		t.Errorf("Expected 8 hex characters, got %d", len(hexStr))
 	}
 }
+

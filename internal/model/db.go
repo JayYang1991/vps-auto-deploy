@@ -110,6 +110,9 @@ func migrate() error {
 		password_encrypted TEXT NOT NULL DEFAULT '',
 		api_token TEXT NOT NULL DEFAULT '',
 		is_master INTEGER NOT NULL DEFAULT 0,
+		use_tls INTEGER NOT NULL DEFAULT 0,
+		cert_fingerprint TEXT NOT NULL DEFAULT '',
+		ssh_host_key TEXT NOT NULL DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'online',
 		os_info TEXT NOT NULL DEFAULT '',
 		latency_ms INTEGER NOT NULL DEFAULT 0,
@@ -117,8 +120,16 @@ func migrate() error {
 		updated_at DATETIME NOT NULL
 	);
 	`
-	_, err := DB.Exec(schema)
-	return err
+	if _, err := DB.Exec(schema); err != nil {
+		return err
+	}
+
+	// 增量字段平滑迁移 (防御 MITM 指纹字段)
+	_, _ = DB.Exec("ALTER TABLE nodes ADD COLUMN use_tls INTEGER NOT NULL DEFAULT 0")
+	_, _ = DB.Exec("ALTER TABLE nodes ADD COLUMN cert_fingerprint TEXT NOT NULL DEFAULT ''")
+	_, _ = DB.Exec("ALTER TABLE nodes ADD COLUMN ssh_host_key TEXT NOT NULL DEFAULT ''")
+
+	return nil
 }
 
 func initDefaults() error {
@@ -202,27 +213,29 @@ func initDefaults() error {
 // GetNode 获取单个节点信息
 func GetNode(id int64) (*Node, error) {
 	row := DB.QueryRow(
-		"SELECT id, name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, status, os_info, latency_ms, created_at, updated_at FROM nodes WHERE id = ?",
+		"SELECT id, name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, status, os_info, latency_ms, created_at, updated_at FROM nodes WHERE id = ?",
 		id,
 	)
 	var n Node
-	var isMasterInt int
+	var isMasterInt, useTLSInt int
 	err := row.Scan(
 		&n.ID, &n.Name, &n.Host, &n.SSHPort, &n.PanelPort, &n.SecretPath,
 		&n.Username, &n.PasswordEncrypted, &n.APIToken, &isMasterInt,
+		&useTLSInt, &n.CertFingerprint, &n.SSHHostKey,
 		&n.Status, &n.OSInfo, &n.LatencyMs, &n.CreatedAt, &n.UpdatedAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	n.IsMaster = isMasterInt == 1
+	n.UseTLS = useTLSInt == 1
 	return &n, nil
 }
 
 // ListNodes 列出所有节点（主控本机始终排在首位）
 func ListNodes() ([]Node, error) {
 	rows, err := DB.Query(
-		"SELECT id, name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, status, os_info, latency_ms, created_at, updated_at FROM nodes ORDER BY is_master DESC, id ASC",
+		"SELECT id, name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, status, os_info, latency_ms, created_at, updated_at FROM nodes ORDER BY is_master DESC, id ASC",
 	)
 	if err != nil {
 		return nil, err
@@ -232,15 +245,17 @@ func ListNodes() ([]Node, error) {
 	var nodes []Node
 	for rows.Next() {
 		var n Node
-		var isMasterInt int
+		var isMasterInt, useTLSInt int
 		if err := rows.Scan(
 			&n.ID, &n.Name, &n.Host, &n.SSHPort, &n.PanelPort, &n.SecretPath,
 			&n.Username, &n.PasswordEncrypted, &n.APIToken, &isMasterInt,
+			&useTLSInt, &n.CertFingerprint, &n.SSHHostKey,
 			&n.Status, &n.OSInfo, &n.LatencyMs, &n.CreatedAt, &n.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
 		n.IsMaster = isMasterInt == 1
+		n.UseTLS = useTLSInt == 1
 		nodes = append(nodes, n)
 	}
 	return nodes, nil
@@ -255,9 +270,13 @@ func CreateNode(n *Node) (int64, error) {
 	if n.IsMaster {
 		isMasterInt = 1
 	}
+	useTLSInt := 0
+	if n.UseTLS {
+		useTLSInt = 1
+	}
 	res, err := DB.Exec(
-		"INSERT INTO nodes (name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, status, os_info, latency_ms, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		n.Name, n.Host, n.SSHPort, n.PanelPort, n.SecretPath, n.Username, n.PasswordEncrypted, n.APIToken, isMasterInt, n.Status, n.OSInfo, n.LatencyMs, n.CreatedAt, n.UpdatedAt,
+		"INSERT INTO nodes (name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, status, os_info, latency_ms, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		n.Name, n.Host, n.SSHPort, n.PanelPort, n.SecretPath, n.Username, n.PasswordEncrypted, n.APIToken, isMasterInt, useTLSInt, n.CertFingerprint, n.SSHHostKey, n.Status, n.OSInfo, n.LatencyMs, n.CreatedAt, n.UpdatedAt,
 	)
 	if err != nil {
 		return 0, err
@@ -274,9 +293,13 @@ func CreateNode(n *Node) (int64, error) {
 func UpdateNode(n *Node) error {
 	now := time.Now()
 	n.UpdatedAt = now
+	useTLSInt := 0
+	if n.UseTLS {
+		useTLSInt = 1
+	}
 	_, err := DB.Exec(
-		"UPDATE nodes SET name = ?, host = ?, ssh_port = ?, panel_port = ?, secret_path = ?, username = ?, password_encrypted = ?, api_token = ?, status = ?, os_info = ?, latency_ms = ?, updated_at = ? WHERE id = ?",
-		n.Name, n.Host, n.SSHPort, n.PanelPort, n.SecretPath, n.Username, n.PasswordEncrypted, n.APIToken, n.Status, n.OSInfo, n.LatencyMs, n.UpdatedAt, n.ID,
+		"UPDATE nodes SET name = ?, host = ?, ssh_port = ?, panel_port = ?, secret_path = ?, username = ?, password_encrypted = ?, api_token = ?, use_tls = ?, cert_fingerprint = ?, ssh_host_key = ?, status = ?, os_info = ?, latency_ms = ?, updated_at = ? WHERE id = ?",
+		n.Name, n.Host, n.SSHPort, n.PanelPort, n.SecretPath, n.Username, n.PasswordEncrypted, n.APIToken, useTLSInt, n.CertFingerprint, n.SSHHostKey, n.Status, n.OSInfo, n.LatencyMs, n.UpdatedAt, n.ID,
 	)
 	return err
 }

@@ -97,7 +97,10 @@ type Node struct {
 	PasswordEncrypted string    `json:"-"`
 	APIToken          string    `json:"-"`
 	IsMaster          bool      `json:"is_master"`
-	Status            string    `json:"status"` // "online" | "offline" | "deploying" | "error"
+	UseTLS            bool      `json:"use_tls"`          // 是否启用 HTTPS 加密通信
+	CertFingerprint   string    `json:"cert_fingerprint"` // 目标节点 TLS 证书 SHA-256 锁定指纹 (防 MITM)
+	SSHHostKey        string    `json:"ssh_host_key"`     // 目标机器 SSH 主机指纹 (TOFU 防冒充)
+	Status            string    `json:"status"`           // "online" | "offline" | "deploying" | "error"
 	OSInfo            string    `json:"os_info"`
 	LatencyMs         int64     `json:"latency_ms"`
 	CreatedAt         time.Time `json:"created_at"`

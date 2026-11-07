@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -51,6 +52,9 @@ func TestNodeHandlers(t *testing.T) {
 		PasswordEncrypted: encPass,
 		APIToken:          "remote-jwt-token",
 		IsMaster:          false,
+		UseTLS:            true,
+		CertFingerprint:   "aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff:00:11:22:33:44:55:66:77:88:99",
+		SSHHostKey:        "SHA256:mockSSHHostKeyFingerprint123456789",
 		Status:            "online",
 		OSInfo:            "linux/amd64",
 		LatencyMs:         32,
@@ -113,17 +117,22 @@ func TestNodeHandlers(t *testing.T) {
 		}
 
 		var res struct {
-			Password   string `json:"password"`
-			Username   string `json:"username"`
-			SecretPath string `json:"secret_path"`
-			LoginURL   string `json:"login_url"`
+			Password        string `json:"password"`
+			Username        string `json:"username"`
+			SecretPath      string `json:"secret_path"`
+			LoginURL        string `json:"login_url"`
+			UseTLS          bool   `json:"use_tls"`
+			CertFingerprint string `json:"cert_fingerprint"`
 		}
 		_ = json.Unmarshal(w.Body.Bytes(), &res)
 		if res.Password != "RemotePass@999" {
 			t.Fatalf("Expected revealed password 'RemotePass@999', got '%s'", res.Password)
 		}
-		if res.Username != "admin" || res.SecretPath != "secret123" {
+		if res.Username != "admin" || res.SecretPath != "secret123" || !res.UseTLS {
 			t.Fatalf("Revealed fields mismatch: %+v", res)
+		}
+		if !strings.HasPrefix(res.LoginURL, "https://") {
+			t.Fatalf("Expected https login url, got %s", res.LoginURL)
 		}
 	}
 
@@ -158,3 +167,4 @@ func TestNodeHandlers(t *testing.T) {
 		}
 	}
 }
+

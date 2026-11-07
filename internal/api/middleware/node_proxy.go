@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/pkg/crypto"
 )
 
 // NodeProxyMiddleware 智能反向代理中间件：
@@ -50,7 +51,11 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		targetURL, err := url.Parse(fmt.Sprintf("http://%s:%d", targetNode.Host, targetNode.PanelPort))
+		scheme := "http"
+		if targetNode.UseTLS {
+			scheme = "https"
+		}
+		targetURL, err := url.Parse(fmt.Sprintf("%s://%s:%d", scheme, targetNode.Host, targetNode.PanelPort))
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "解析目标节点地址失败"})
 			return
@@ -63,6 +68,11 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 
 		proxy := httputil.NewSingleHostReverseProxy(targetURL)
 		proxy.FlushInterval = 50 * time.Millisecond // 确保 SSE 实时日志流不被缓冲卡顿
+
+		// 防中间人攻击 (Phase 1)：若启用 TLS，注入带有硬件证书指纹锁定的 Transport
+		if targetNode.UseTLS {
+			proxy.Transport = crypto.CreatePinnedTransport(targetNode.CertFingerprint)
+		}
 
 		originalDirector := proxy.Director
 		proxy.Director = func(req *http.Request) {
@@ -88,3 +98,4 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 		c.Abort()
 	}
 }
+

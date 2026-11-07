@@ -35,3 +35,4 @@ func TestAESGCMEncryptDecrypt(t *testing.T) {
 		t.Fatalf("Expected error when decrypting with wrong key, got nil")
 	}
 }
+

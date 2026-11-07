@@ -58,9 +58,10 @@
                   <div class="node-name-row">
                     <span class="card-name">{{ item.name }}</span>
                     <span v-if="item.is_master" class="tag-master">主控节点</span>
+                    <span v-if="item.use_tls" class="tag-tls" title="已启用自签 TLS 证书指纹锁定，抵御中间人劫持">🛡️ TLS 防劫持</span>
                     <span v-if="item.id === activeNodeId" class="tag-current">当前视角</span>
                   </div>
-                  <div class="card-host">{{ item.host }}:{{ item.panel_port }}</div>
+                  <div class="card-host">{{ item.use_tls ? 'https://' : 'http://' }}{{ item.host }}:{{ item.panel_port }}</div>
                 </div>
               </div>
 
@@ -92,6 +93,18 @@
               <div class="prop-item">
                 <span class="prop-label">管理账号:</span>
                 <span class="prop-val mono">{{ item.username }}</span>
+              </div>
+              <div v-if="item.use_tls && item.cert_fingerprint" class="prop-item">
+                <span class="prop-label">TLS 锁定指纹:</span>
+                <span class="prop-val mono text-fingerprint" :title="item.cert_fingerprint">
+                  {{ item.cert_fingerprint.slice(0, 17) }}...
+                </span>
+              </div>
+              <div v-if="item.ssh_host_key" class="prop-item">
+                <span class="prop-label">SSH 指纹(TOFU):</span>
+                <span class="prop-val mono text-fingerprint" :title="item.ssh_host_key">
+                  {{ item.ssh_host_key.slice(0, 19) }}...
+                </span>
               </div>
             </div>
 
@@ -225,6 +238,17 @@
               <label>安全访问路径 (留空随机生成)</label>
               <input v-model="deployReq.secret_path" type="text" placeholder="留空则生成 8 位随机前缀" />
             </div>
+
+            <!-- Phase 1 防中间人劫持选项 -->
+            <div class="form-group full-width" style="margin-top: 0.5rem; background: rgba(99, 102, 241, 0.08); padding: 0.75rem; border-radius: 0.5rem; border: 1px dashed rgba(99, 102, 241, 0.3);">
+              <label class="checkbox-container">
+                <input type="checkbox" v-model="deployReq.enable_tls" />
+                <span class="checkbox-title">🛡️ 启用自签名 TLS 证书与指纹强绑定 (强烈推荐 · 防中间人劫持)</span>
+              </label>
+              <div class="field-hint">
+                目标服务器将生成专属 ECDSA TLS 证书并提取 SHA-256 唯一指纹，主控端在所有日常 API 通信与日志流转发时强制校验指纹，杜绝公网流量窃听、篡改与 DNS 欺骗。
+              </div>
+            </div>
           </div>
 
           <div class="form-footer">
@@ -316,6 +340,18 @@
               <label>管理员密码 <span class="req">*</span></label>
               <input v-model="importReq.password" type="password" placeholder="输入该面板的管理员密码" />
             </div>
+
+            <div class="form-group full-width" style="margin-top: 0.25rem;">
+              <label class="checkbox-container">
+                <input type="checkbox" v-model="importReq.use_tls" />
+                <span class="checkbox-title">该节点已开启 TLS 加密 (HTTPS)</span>
+              </label>
+            </div>
+
+            <div v-if="importReq.use_tls" class="form-group full-width">
+              <label>TLS 证书锁定指纹 (可选，留空则在首次连接时信任并绑定)</label>
+              <input v-model="importReq.cert_fingerprint" type="text" placeholder="例如：7b:9c:8a... (SHA-256 指纹)" class="mono" />
+            </div>
           </div>
 
           <div class="form-footer">
@@ -401,6 +437,29 @@
               <div class="cred-val-copy">
                 <span class="mono">/{{ revealedData.secret_path }}/</span>
                 <button class="btn-mini-copy" @click="copyText(`/${revealedData.secret_path}/`, '安全路径')">复制</button>
+              </div>
+            </div>
+
+            <div v-if="revealedData.use_tls" class="cred-row">
+              <span class="cred-label">传输协议:</span>
+              <div class="cred-val-copy">
+                <span class="tag-tls" style="margin: 0;">🛡️ HTTPS (TLS 指纹锁定)</span>
+              </div>
+            </div>
+
+            <div v-if="revealedData.cert_fingerprint" class="cred-row">
+              <span class="cred-label">TLS 指纹:</span>
+              <div class="cred-val-copy">
+                <span class="mono text-fingerprint" :title="revealedData.cert_fingerprint">{{ revealedData.cert_fingerprint }}</span>
+                <button class="btn-mini-copy" @click="copyText(revealedData.cert_fingerprint, '证书指纹')">复制</button>
+              </div>
+            </div>
+
+            <div v-if="revealedData.ssh_host_key" class="cred-row">
+              <span class="cred-label">SSH 指纹(TOFU):</span>
+              <div class="cred-val-copy">
+                <span class="mono text-fingerprint" :title="revealedData.ssh_host_key">{{ revealedData.ssh_host_key }}</span>
+                <button class="btn-mini-copy" @click="copyText(revealedData.ssh_host_key, '主机指纹')">复制</button>
               </div>
             </div>
 
@@ -533,6 +592,7 @@ const deployReq = reactive({
   admin_username: 'admin',
   admin_password: '',
   secret_path: '',
+  enable_tls: true,
 })
 
 const deployTaskStatus = ref<'running' | 'success' | 'failed'>('running')
@@ -641,6 +701,8 @@ const importReq = reactive({
   secret_path: '',
   username: 'admin',
   password: '',
+  use_tls: false,
+  cert_fingerprint: '',
 })
 
 async function handleImport() {
@@ -925,6 +987,41 @@ onUnmounted(() => {
   color: #34d399;
   padding: 0.05rem 0.3rem;
   border-radius: 0.25rem;
+}
+
+.tag-tls {
+  font-size: 0.625rem;
+  background: rgba(168, 85, 247, 0.2);
+  color: #c084fc;
+  border: 1px solid rgba(168, 85, 247, 0.35);
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.25rem;
+  font-weight: 500;
+}
+
+.text-fingerprint {
+  font-size: 0.6875rem;
+  color: #a5b4fc;
+}
+
+.checkbox-container {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.checkbox-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.field-hint {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  line-height: 1.45;
+  margin-top: 0.25rem;
 }
 
 .card-host {
@@ -1442,3 +1539,4 @@ onUnmounted(() => {
   color: #ffffff;
 }
 </style>
+

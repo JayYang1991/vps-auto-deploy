@@ -108,12 +108,14 @@ func StreamDeployLogs(c *gin.Context) {
 // ImportNode 直接纳管已手动安装面板的服务器
 func ImportNode(c *gin.Context) {
 	var req struct {
-		Name       string `json:"name"`
-		Host       string `json:"host"`
-		PanelPort  int    `json:"panel_port"`
-		SecretPath string `json:"secret_path"`
-		Username   string `json:"username"`
-		Password   string `json:"password"`
+		Name            string `json:"name"`
+		Host            string `json:"host"`
+		PanelPort       int    `json:"panel_port"`
+		SecretPath      string `json:"secret_path"`
+		Username        string `json:"username"`
+		Password        string `json:"password"`
+		UseTLS          bool   `json:"use_tls"`
+		CertFingerprint string `json:"cert_fingerprint"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -131,8 +133,8 @@ func ImportNode(c *gin.Context) {
 		req.Name = req.Host
 	}
 
-	// 远程验证账号密码并获取通信 Token
-	token, err := node.LoginNode(req.Host, req.PanelPort, req.SecretPath, req.Username, req.Password)
+	// 远程验证账号密码并获取通信 Token (支持 TLS 指纹校验防 MITM)
+	token, err := node.LoginNode(req.Host, req.PanelPort, req.SecretPath, req.Username, req.Password, req.UseTLS, req.CertFingerprint)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "无法连接或登录该节点: " + err.Error()})
 		return
@@ -157,6 +159,8 @@ func ImportNode(c *gin.Context) {
 		PasswordEncrypted: encryptedPass,
 		APIToken:          token,
 		IsMaster:          false,
+		UseTLS:            req.UseTLS,
+		CertFingerprint:   req.CertFingerprint,
 		Status:            "online",
 		OSInfo:            "Remote Linux",
 		LatencyMs:         10,
@@ -287,17 +291,24 @@ func RevealNodeCredentials(c *gin.Context) {
 		return
 	}
 
-	loginURL := fmt.Sprintf("http://%s:%d/%s/", target.Host, target.PanelPort, strings.Trim(target.SecretPath, "/"))
+	scheme := "http"
+	if target.UseTLS {
+		scheme = "https"
+	}
+	loginURL := fmt.Sprintf("%s://%s:%d/%s/", scheme, target.Host, target.PanelPort, strings.Trim(target.SecretPath, "/"))
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":          target.ID,
-		"name":        target.Name,
-		"username":    target.Username,
-		"password":    decryptedPass,
-		"secret_path": target.SecretPath,
-		"panel_port":  target.PanelPort,
-		"host":        target.Host,
-		"login_url":   loginURL,
-		"is_master":   false,
+		"id":               target.ID,
+		"name":             target.Name,
+		"username":         target.Username,
+		"password":         decryptedPass,
+		"secret_path":      target.SecretPath,
+		"panel_port":       target.PanelPort,
+		"host":             target.Host,
+		"login_url":        loginURL,
+		"is_master":        false,
+		"use_tls":          target.UseTLS,
+		"cert_fingerprint": target.CertFingerprint,
+		"ssh_host_key":     target.SSHHostKey,
 	})
 }

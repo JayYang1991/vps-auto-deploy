@@ -67,3 +67,4 @@ func DecryptAESGCM(encryptedBase64 string, key []byte) (string, error) {
 
 	return string(plaintext), nil
 }
+
