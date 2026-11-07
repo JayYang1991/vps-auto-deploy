@@ -140,13 +140,21 @@ function handleClickOutside(e: MouseEvent) {
   }
 }
 
+let pollTimer: any = null
+
 onMounted(() => {
   fetchNodes()
   document.addEventListener('click', handleClickOutside)
+  pollTimer = setInterval(() => {
+    fetchNodes()
+  }, 30000)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  if (pollTimer) {
+    clearInterval(pollTimer)
+  }
 })
 </script>
 

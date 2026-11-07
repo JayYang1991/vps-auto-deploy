@@ -79,9 +79,15 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 			proxy.Transport = crypto.CreatePinnedTransport(targetNode.CertFingerprint)
 		}
 
-		// 当请求系统概览时，若远端检测到的公网 IP 为空或 127.0.0.1，自动补齐为已知节点的直连 Host
-		if strings.HasSuffix(reqPath, "/system/overview") {
-			proxy.ModifyResponse = func(resp *http.Response) error {
+		// 代理响应后置处理：节点在线自愈与系统概览 IP 兜底补齐
+		proxy.ModifyResponse = func(resp *http.Response) error {
+			// 若远端正常响应 (非 5xx 宕机)，自动自愈纠正节点在线状态
+			if resp.StatusCode < 500 && targetNode.Status != "online" {
+				_ = model.UpdateNodeStatus(targetNode.ID, "online", 50)
+			}
+
+			// 当请求系统概览时，若远端检测到的公网 IP 为空或 127.0.0.1，自动补齐为已知节点的直连 Host
+			if strings.HasSuffix(reqPath, "/system/overview") {
 				if resp.StatusCode == http.StatusOK && strings.Contains(resp.Header.Get("Content-Type"), "application/json") {
 					bodyBytes, err := io.ReadAll(resp.Body)
 					if err != nil {
@@ -103,8 +109,8 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 					}
 					resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 				}
-				return nil
 			}
+			return nil
 		}
 
 		originalDirector := proxy.Director

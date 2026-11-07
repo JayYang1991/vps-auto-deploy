@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"golang.org/x/crypto/bcrypt"
 	"vps-auto-deploy/internal/api"
@@ -14,6 +15,7 @@ import (
 	"vps-auto-deploy/internal/component/cloudflared"
 	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/node"
 	"vps-auto-deploy/internal/pkg/crypto"
 	"vps-auto-deploy/internal/pkg/netutil"
 )
@@ -105,6 +107,9 @@ func main() {
 			log.Fatalf("Failed to prepare TLS certificates: %v", err)
 		}
 	}
+
+	// 5. 启动后台受管节点心跳保活守护协程 (每 30 秒自动巡检与自愈)
+	node.StartHealthCheckWorker(30 * time.Second)
 
 	r := api.SetupRouter(WebFS)
 

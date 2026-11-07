@@ -40,6 +40,22 @@ export function useNodeContext() {
     return !activeNode.value || activeNode.value.id === 1 || activeNode.value.is_master
   })
 
+  async function pingNode(id: number) {
+    if (id <= 1) return
+    try {
+      const res = await api.post<{ latency_ms: number; status: 'online' | 'offline' | 'error' }>(`/nodes/${id}/ping`)
+      if (res.data) {
+        const target = nodes.value.find((n) => n.id === id)
+        if (target) {
+          target.status = res.data.status
+          target.latency_ms = res.data.latency_ms
+        }
+      }
+    } catch (err) {
+      // 忽略前端单独测速错误，避免阻塞主流程
+    }
+  }
+
   async function fetchNodes() {
     loadingNodes.value = true
     try {
@@ -49,6 +65,9 @@ export function useNodeContext() {
       if (!nodes.value.some((n) => n.id === activeNodeId.value)) {
         activeNodeId.value = 1
         localStorage.setItem('active_node_id', '1')
+      } else if (activeNodeId.value > 1) {
+        // 后台静默刷新当前活跃被纳管节点的真实延迟与在线状态
+        pingNode(activeNodeId.value)
       }
     } catch (err) {
       console.error('Failed to fetch nodes:', err)
@@ -62,6 +81,9 @@ export function useNodeContext() {
     activeNodeId.value = id
     localStorage.setItem('active_node_id', id.toString())
     window.dispatchEvent(new CustomEvent('node-context-changed', { detail: { nodeId: id } }))
+    if (id > 1) {
+      pingNode(id)
+    }
   }
 
   return {
@@ -72,6 +94,7 @@ export function useNodeContext() {
     loadingNodes,
     fetchNodes,
     switchNode,
+    pingNode,
   }
 }
 
