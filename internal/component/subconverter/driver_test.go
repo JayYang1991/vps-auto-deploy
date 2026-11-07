@@ -83,5 +83,10 @@ func TestExtractTarGzToDir(t *testing.T) {
 	if _, err := os.Stat(configFile); err != nil {
 		t.Fatalf("expected config/ACL4SSR_Online.ini extracted: %v", err)
 	}
+
+	// 再次解压，验证升级覆盖逻辑（包括已有文件原子替换）
+	if err := extractTarGzToDir(archivePath, destDir); err != nil {
+		t.Fatalf("re-extract (upgrade overwrite) failed: %v", err)
+	}
 }
 

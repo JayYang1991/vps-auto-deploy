@@ -176,7 +176,8 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 	if err := component.DownloadFile(downloadURL, tmpArchive); err != nil {
 		return fmt.Errorf("download failed: %w", err)
 	}
-	logFn("资产包下载完成，开始解压目录级资源与二进制...")
+	logFn("资产包下载完成，正在停止现有服务以释放文件锁并解压资产...")
+	_ = d.systemd.Stop()
 
 	compDir := GetComponentDir()
 	if err := os.MkdirAll(compDir, 0755); err != nil {
@@ -396,15 +397,26 @@ func extractTarGzToDir(archivePath, destDir string) error {
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 				return err
 			}
-			outFile, err := os.OpenFile(targetPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, header.FileInfo().Mode())
+			tmpPath := targetPath + ".tmp"
+			outFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, header.FileInfo().Mode())
 			if err != nil {
 				return err
 			}
 			if _, err := io.Copy(outFile, tarReader); err != nil {
 				outFile.Close()
+				_ = os.Remove(tmpPath)
 				return err
 			}
 			outFile.Close()
+
+			// 原子重命名替换，防止 Linux 报错 "text file busy"
+			if err := os.Rename(tmpPath, targetPath); err != nil {
+				_ = os.Remove(targetPath)
+				if err := os.Rename(tmpPath, targetPath); err != nil {
+					_ = os.Remove(tmpPath)
+					return err
+				}
+			}
 		}
 	}
 	return nil
