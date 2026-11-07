@@ -36,29 +36,44 @@ func (s *SystemdManager) IsActive() bool {
 	return false
 }
 
+// UnitInfo 描述 systemd 单元的完整载入与活跃状态
+type UnitInfo struct {
+	LoadState   string // "loaded" | "not-found" | "error"
+	ActiveState string // "active" | "inactive" | "activating" | "failed"
+	SubState    string // "running" | "auto-restart" | "dead"
+}
+
+// GetUnitInfo 获取服务的底层 systemd 状态详情
+func (s *SystemdManager) GetUnitInfo() UnitInfo {
+	info := UnitInfo{LoadState: "not-found", ActiveState: "inactive", SubState: "dead"}
+	out, err := s.runSystemctl(3*time.Second, "show", "-p", "LoadState,ActiveState,SubState", s.UnitName)
+	if err == nil && out != "" {
+		for _, line := range strings.Split(out, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "LoadState=") {
+				info.LoadState = strings.TrimPrefix(line, "LoadState=")
+			} else if strings.HasPrefix(line, "ActiveState=") {
+				info.ActiveState = strings.TrimPrefix(line, "ActiveState=")
+			} else if strings.HasPrefix(line, "SubState=") {
+				info.SubState = strings.TrimPrefix(line, "SubState=")
+			}
+		}
+	}
+	return info
+}
+
 // Status 获取服务当前状态
 // 精确识别正在崩溃重启中的 auto-restart 异常状态
 func (s *SystemdManager) Status() string {
-	out, err := s.runSystemctl(3*time.Second, "show", "-p", "ActiveState,SubState", s.UnitName)
-	if err == nil && out != "" {
-		var activeState, subState string
-		for _, line := range strings.Split(out, "\n") {
-			line = strings.TrimSpace(line)
-			if strings.HasPrefix(line, "ActiveState=") {
-				activeState = strings.TrimPrefix(line, "ActiveState=")
-			} else if strings.HasPrefix(line, "SubState=") {
-				subState = strings.TrimPrefix(line, "SubState=")
-			}
-		}
-		if subState == "auto-restart" {
-			return "failed"
-		}
-		if activeState != "" {
-			return activeState
-		}
+	info := s.GetUnitInfo()
+	if info.SubState == "auto-restart" {
+		return "failed"
+	}
+	if info.ActiveState != "" {
+		return info.ActiveState
 	}
 
-	out, _ = s.runSystemctl(3*time.Second, "is-active", s.UnitName)
+	out, _ := s.runSystemctl(3*time.Second, "is-active", s.UnitName)
 	return strings.TrimSpace(out)
 }
 

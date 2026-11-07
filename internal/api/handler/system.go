@@ -84,6 +84,28 @@ func StreamLogs(c *gin.Context) {
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("Transfer-Encoding", "chunked")
 
+	// 1. 检查服务的 systemd 注册状态与健康度
+	sysManager := component.NewSystemdManager(unit)
+	info := sysManager.GetUnitInfo()
+
+	// 立即发送握手连接成功消息，避免用户界面卡在“正在连接”
+	c.SSEvent("message", fmt.Sprintf("[系统提示] 已成功建立 %s 实时日志流连接 (SSE / journalctl)", unit))
+
+	if info.LoadState == "not-found" {
+		msg := fmt.Sprintf("[系统提示] 服务单元 %s 尚未在 Systemd 中注册。", unit)
+		if strings.HasPrefix(unit, "cloudflared") {
+			msg += " Cloudflared 客户端已安装，但尚未配置穿透隧道。请前往「配置中心 ➔ Cloudflared 隧道」创建并启动隧道后，系统才会自动生成该服务并输出运行日志。"
+		} else {
+			msg += " 请先在软件中心完成安装或前往业务配置中心初始化该服务。"
+		}
+		c.SSEvent("message", msg)
+	} else if info.ActiveState == "inactive" || info.ActiveState == "stopped" {
+		c.SSEvent("message", fmt.Sprintf("[系统提示] 服务 %s 当前处于「未激活 (已停止)」状态。正在监听历史日志与启动输出...", unit))
+	} else if info.ActiveState == "failed" || info.SubState == "auto-restart" {
+		c.SSEvent("message", fmt.Sprintf("[系统提示] 服务 %s 当前处于「异常 (failed)」状态，可能存在启动崩溃，请查看下方历史错误输出排查。", unit))
+	}
+	c.Writer.Flush()
+
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
 

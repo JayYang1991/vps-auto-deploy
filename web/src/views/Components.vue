@@ -276,10 +276,13 @@
           style="flex: 1; background-color: #0b0f19; border: 1px solid #1e293b; padding: 1rem; border-radius: 0.5rem; overflow-y: auto; font-family: 'JetBrains Mono', Consolas, Monaco, monospace; font-size: 0.8rem; line-height: 1.45;"
         >
           <div v-for="(line, idx) in logModal.lines" :key="idx" style="white-space: pre-wrap; word-break: break-all; margin-bottom: 2px;">
-            {{ line }}
+            <span v-if="line.startsWith('[系统提示]')" style="color: #38bdf8; font-weight: 500;">{{ line }}</span>
+            <span v-else-if="line.includes('FATAL') || line.includes('ERROR') || line.includes('Failed') || line.startsWith('[ERROR]')" style="color: #f87171; font-weight: 600;">{{ line }}</span>
+            <span v-else-if="line.includes('WARN')" style="color: #fbbf24;">{{ line }}</span>
+            <span v-else style="color: #cbd5e1;">{{ line }}</span>
           </div>
           <div v-if="logModal.lines.length === 0" style="color: #64748b; text-align: center; margin-top: 3rem;">
-            正在连接日志流...
+            <span style="display: inline-block; animation: pulse 1.5s infinite;">● 正在建立与主机日志流的连接...</span>
           </div>
         </div>
       </div>
