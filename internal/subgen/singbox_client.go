@@ -109,6 +109,9 @@ func GenerateSingboxClientConfig(member *model.Member) (string, error) {
 				"transport": map[string]interface{}{
 					"type": "ws",
 					"path": path,
+					"headers": map[string]string{
+						"Host": tunnelDomain,
+					},
 				},
 			}
 			outbounds = append(outbounds, outbound)
