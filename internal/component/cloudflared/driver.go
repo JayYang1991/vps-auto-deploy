@@ -15,7 +15,6 @@ const (
 	DriverName = "cloudflared"
 	Owner      = "cloudflare"
 	Repo       = "cloudflared"
-	BinaryPath = "/usr/local/bin/cloudflared"
 	UnitName   = "cloudflared.service"
 )
 
@@ -46,7 +45,7 @@ func (d *Driver) Category() string {
 }
 
 func GetBinaryPath() string {
-	return component.FindBinary("cloudflared", BinaryPath, "/usr/bin/cloudflared", "/bin/cloudflared")
+	return component.FindBinary(DriverName, component.GetDefaultBinaryPath(DriverName), "/usr/local/bin/cloudflared", "/usr/bin/cloudflared", "/bin/cloudflared")
 }
 
 func (d *Driver) GetInstalledVersion() (string, error) {
@@ -113,19 +112,20 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 	}
 	logFn("资产下载完成，开始安装...")
 
-	_ = os.MkdirAll(filepath.Dir(BinaryPath), 0755)
+	targetBinary := component.GetDefaultBinaryPath(DriverName)
+	_ = os.MkdirAll(filepath.Dir(targetBinary), 0755)
 
-	logFn(fmt.Sprintf("安装二进制文件至 %s...", BinaryPath))
-	if err := os.Rename(tmpBinary, BinaryPath); err != nil {
+	logFn(fmt.Sprintf("安装二进制文件至 %s...", targetBinary))
+	if err := os.Rename(tmpBinary, targetBinary); err != nil {
 		input, err := os.ReadFile(tmpBinary)
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(BinaryPath, input, 0755); err != nil {
+		if err := os.WriteFile(targetBinary, input, 0755); err != nil {
 			return fmt.Errorf("write binary error: %w", err)
 		}
 	}
-	_ = os.Chmod(BinaryPath, 0755)
+	_ = os.Chmod(targetBinary, 0755)
 
 	component.SetCachedLatestVersion(DriverName, rel.TagName)
 	logFn("cloudflared 安装/升级成功！可在「Argo 隧道」页面配置并启动隧道。")
@@ -145,7 +145,7 @@ func (d *Driver) Uninstall() error {
 func (d *Driver) ConfigureService(mode, token string, localPort int, protocol string) error {
 	bin := GetBinaryPath()
 	if bin == "" {
-		bin = BinaryPath
+		bin = component.GetDefaultBinaryPath(DriverName)
 	}
 
 	var execArgs string

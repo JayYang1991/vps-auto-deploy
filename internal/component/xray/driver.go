@@ -17,10 +17,16 @@ const (
 	DriverName = "xray"
 	Owner      = "XTLS"
 	Repo       = "Xray-core"
-	BinaryPath = "/usr/local/bin/xray"
 	UnitName   = "xray.service"
-	ConfigPath = "/etc/xray/config.json"
 )
+
+var (
+	ConfigPath = GetConfigPath()
+)
+
+func GetConfigPath() string {
+	return component.GetDefaultConfigPath(DriverName, "config.json")
+}
 
 type Driver struct {
 	systemd *component.SystemdManager
@@ -49,7 +55,7 @@ func (d *Driver) Category() string {
 }
 
 func GetBinaryPath() string {
-	return component.FindBinary("xray", BinaryPath, "/usr/bin/xray", "/bin/xray")
+	return component.FindBinary(DriverName, component.GetDefaultBinaryPath(DriverName), "/usr/local/bin/xray", "/usr/bin/xray", "/bin/xray")
 }
 
 func (d *Driver) GetInstalledVersion() (string, error) {
@@ -128,7 +134,9 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 	defer zr.Close()
 
 	var extracted bool
-	_ = os.MkdirAll(filepath.Dir(BinaryPath), 0755)
+	targetBinary := component.GetDefaultBinaryPath(DriverName)
+	targetConfig := GetConfigPath()
+	_ = os.MkdirAll(filepath.Dir(targetBinary), 0755)
 
 	for _, f := range zr.File {
 		if f.Name == "xray" {
@@ -136,7 +144,7 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 			if err != nil {
 				return err
 			}
-			out, err := os.OpenFile(BinaryPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+			out, err := os.OpenFile(targetBinary, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
 			if err != nil {
 				rc.Close()
 				return err
@@ -156,8 +164,8 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 		return fmt.Errorf("xray binary not found in zip archive")
 	}
 
-	_ = os.Chmod(BinaryPath, 0755)
-	_ = os.MkdirAll(filepath.Dir(ConfigPath), 0755)
+	_ = os.Chmod(targetBinary, 0755)
+	_ = os.MkdirAll(filepath.Dir(targetConfig), 0755)
 
 	logFn("注册并配置 Systemd 服务单元...")
 	unitContent := fmt.Sprintf(`[Unit]
@@ -178,7 +186,7 @@ LimitNOFILE=1000000
 
 [Install]
 WantedBy=multi-user.target
-`, BinaryPath, ConfigPath)
+`, targetBinary, targetConfig)
 
 	if err := component.WriteServiceUnit(UnitName, unitContent); err != nil {
 		logFn(fmt.Sprintf("[WARN] 写入服务单元失败: %v", err))

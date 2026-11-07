@@ -143,3 +143,14 @@ echo "Xray 26.9.1 (Custom)"
 		t.Errorf("expected xray to be reported as Installed=true")
 	}
 }
+
+func TestDefaultPaths(t *testing.T) {
+	installDir := component.GetDefaultInstallDir()
+	if installDir == "" {
+		t.Fatalf("expected non-empty installDir")
+	}
+	cfgPath := component.GetDefaultConfigPath("sing-box", "config.json")
+	if cfgPath == "" || !filepath.IsAbs(cfgPath) {
+		t.Fatalf("expected valid absolute config path, got %q", cfgPath)
+	}
+}

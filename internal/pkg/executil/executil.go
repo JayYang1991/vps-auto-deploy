@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"time"
 )
@@ -25,6 +26,9 @@ func RunCommand(timeout time.Duration, name string, args ...string) (string, err
 func StreamJournalctlLogs(ctx context.Context, unit string, lines int) (<-chan string, error) {
 	outChan := make(chan string, 100)
 	args := []string{"-u", unit, "-f", "-n", fmt.Sprintf("%d", lines), "--no-pager", "-o", "cat"}
+	if os.Geteuid() != 0 {
+		args = append([]string{"--user"}, args...)
+	}
 	cmd := exec.CommandContext(ctx, "journalctl", args...)
 
 	stdout, err := cmd.StdoutPipe()

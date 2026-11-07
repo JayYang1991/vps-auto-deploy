@@ -130,3 +130,4 @@ type ServiceStatus struct {
    - 若该组件赋能现有业务版块（如 `subconverter` 赋能 `/subscriptions`，`xray` 赋能 `/inbounds`），在对应业务页面通过 `/api/components` 检测其 `installed && active` 状态并渐进式解锁对应功能。
 4. **零原生弹窗检查**：运行 `grep -rnE "\b(alert|confirm|prompt)\(" web/src` 确保输出为空。
 5. **构建与验证**：执行 `go test ./...` 与 `bash build.sh`，确保前后端联编生成单一二进制 `bin/vps-panel` 无任何报错。
+

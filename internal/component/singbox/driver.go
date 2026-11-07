@@ -23,10 +23,16 @@ const (
 	DriverName = "sing-box"
 	Owner      = "SagerNet"
 	Repo       = "sing-box"
-	BinaryPath = "/usr/local/bin/sing-box"
 	UnitName   = "sing-box.service"
-	ConfigPath = "/etc/sing-box/config.json"
 )
+
+var (
+	ConfigPath = GetConfigPath()
+)
+
+func GetConfigPath() string {
+	return component.GetDefaultConfigPath(DriverName, "config.json")
+}
 
 type Driver struct {
 	systemd *component.SystemdManager
@@ -55,7 +61,7 @@ func (d *Driver) Category() string {
 }
 
 func GetBinaryPath() string {
-	return component.FindBinary("sing-box", BinaryPath, "/usr/bin/sing-box", "/bin/sing-box", "/snap/bin/sing-box")
+	return component.FindBinary(DriverName, component.GetDefaultBinaryPath(DriverName), "/usr/local/bin/sing-box", "/usr/bin/sing-box", "/bin/sing-box", "/snap/bin/sing-box")
 }
 
 func (d *Driver) GetInstalledVersion() (string, error) {
@@ -129,21 +135,24 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 	}
 	defer os.Remove(tmpBinary)
 
-	_ = os.MkdirAll(filepath.Dir(BinaryPath), 0755)
+	targetBinary := component.GetDefaultBinaryPath(DriverName)
+	targetConfig := GetConfigPath()
 
-	logFn(fmt.Sprintf("安装二进制文件至 %s...", BinaryPath))
-	if err := os.Rename(tmpBinary, BinaryPath); err != nil {
+	_ = os.MkdirAll(filepath.Dir(targetBinary), 0755)
+
+	logFn(fmt.Sprintf("安装二进制文件至 %s...", targetBinary))
+	if err := os.Rename(tmpBinary, targetBinary); err != nil {
 		input, err := os.ReadFile(tmpBinary)
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(BinaryPath, input, 0755); err != nil {
+		if err := os.WriteFile(targetBinary, input, 0755); err != nil {
 			return fmt.Errorf("write binary error: %w", err)
 		}
 	}
-	_ = os.Chmod(BinaryPath, 0755)
+	_ = os.Chmod(targetBinary, 0755)
 
-	_ = os.MkdirAll(filepath.Dir(ConfigPath), 0755)
+	_ = os.MkdirAll(filepath.Dir(targetConfig), 0755)
 
 	logFn("配置并更新 Systemd 服务单元...")
 	unitContent := fmt.Sprintf(`[Unit]
@@ -161,7 +170,7 @@ LimitNOFILE=infinity
 
 [Install]
 WantedBy=multi-user.target
-`, BinaryPath, ConfigPath)
+`, targetBinary, targetConfig)
 
 	if err := component.WriteServiceUnit(UnitName, unitContent); err != nil {
 		logFn(fmt.Sprintf("[WARN] 写入服务单元失败: %v", err))
@@ -169,7 +178,7 @@ WantedBy=multi-user.target
 	_ = d.systemd.Enable()
 
 	// 尝试启动服务（若配置文件已存在）
-	if _, err := os.Stat(ConfigPath); err == nil {
+	if _, err := os.Stat(targetConfig); err == nil {
 		logFn("检测到现有配置，正在启动 sing-box 服务...")
 		_ = d.systemd.Restart()
 	}

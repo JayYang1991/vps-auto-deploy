@@ -3,6 +3,7 @@ package component
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -10,9 +11,58 @@ import (
 	"vps-auto-deploy/internal/pkg/executil"
 )
 
+// IsUserMode 判断当前运行环境是否为普通用户空间 (非 Root)
+func IsUserMode() bool {
+	return os.Geteuid() != 0
+}
+
+// GetDefaultInstallDir 获取默认二进制安装路径
+func GetDefaultInstallDir() string {
+	if !IsUserMode() {
+		return "/usr/local/bin"
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "/usr/local/bin"
+	}
+	dir := filepath.Join(home, ".local", "bin")
+	_ = os.MkdirAll(dir, 0755)
+	return dir
+}
+
+// GetDefaultBinaryPath 获取组件可执行文件安装目标全路径
+func GetDefaultBinaryPath(name string) string {
+	return filepath.Join(GetDefaultInstallDir(), name)
+}
+
+// GetDefaultConfigDir 获取组件配置根目录
+func GetDefaultConfigDir(name string) string {
+	if !IsUserMode() {
+		return filepath.Join("/etc", name)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join("/etc", name)
+	}
+	dir := filepath.Join(home, ".config", name)
+	_ = os.MkdirAll(dir, 0755)
+	return dir
+}
+
+// GetDefaultConfigPath 获取组件默认配置文件路径
+func GetDefaultConfigPath(name, fileName string) string {
+	return filepath.Join(GetDefaultConfigDir(name), fileName)
+}
+
 // FindBinary 动态检测系统中的可执行文件路径
-// 优先在系统 PATH 中查找，其次查找常见的候选路径
+// 优先查找用户空间 ~/.local/bin，其次系统 PATH 与常见候选路径
 func FindBinary(name string, candidates ...string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		userBin := filepath.Join(home, ".local", "bin", name)
+		if fi, err := os.Stat(userBin); err == nil && !fi.IsDir() {
+			return userBin
+		}
+	}
 	if path, err := exec.LookPath(name); err == nil {
 		return path
 	}

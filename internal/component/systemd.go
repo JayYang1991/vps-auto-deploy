@@ -3,6 +3,7 @@ package component
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,9 +19,17 @@ func NewSystemdManager(unitName string) *SystemdManager {
 	return &SystemdManager{UnitName: unitName}
 }
 
+func (s *SystemdManager) runSystemctl(timeout time.Duration, args ...string) (string, error) {
+	cmdArgs := args
+	if IsUserMode() {
+		cmdArgs = append([]string{"--user"}, args...)
+	}
+	return executil.RunCommand(timeout, "systemctl", cmdArgs...)
+}
+
 // IsActive 检查服务是否活跃
 func (s *SystemdManager) IsActive() bool {
-	out, err := executil.RunCommand(3*time.Second, "systemctl", "is-active", s.UnitName)
+	out, err := s.runSystemctl(3*time.Second, "is-active", s.UnitName)
 	if err == nil && strings.TrimSpace(out) == "active" {
 		return true
 	}
@@ -29,65 +38,104 @@ func (s *SystemdManager) IsActive() bool {
 
 // Status 获取服务当前状态
 func (s *SystemdManager) Status() string {
-	out, _ := executil.RunCommand(3*time.Second, "systemctl", "is-active", s.UnitName)
+	out, _ := s.runSystemctl(3*time.Second, "is-active", s.UnitName)
 	return strings.TrimSpace(out)
 }
 
 // Start 启动服务
 func (s *SystemdManager) Start() error {
-	_, err := executil.RunCommand(10*time.Second, "systemctl", "start", s.UnitName)
+	_, err := s.runSystemctl(10*time.Second, "start", s.UnitName)
 	return err
 }
 
 // Stop 停止服务
 func (s *SystemdManager) Stop() error {
-	_, err := executil.RunCommand(10*time.Second, "systemctl", "stop", s.UnitName)
+	_, err := s.runSystemctl(10*time.Second, "stop", s.UnitName)
 	return err
 }
 
 // Restart 重启服务
 func (s *SystemdManager) Restart() error {
-	_, err := executil.RunCommand(15*time.Second, "systemctl", "restart", s.UnitName)
+	_, err := s.runSystemctl(15*time.Second, "restart", s.UnitName)
 	return err
 }
 
 // ReloadOrRestart 热重载或重启
 func (s *SystemdManager) ReloadOrRestart() error {
-	_, err := executil.RunCommand(15*time.Second, "systemctl", "reload-or-restart", s.UnitName)
+	_, err := s.runSystemctl(15*time.Second, "reload-or-restart", s.UnitName)
 	return err
 }
 
 // Enable 设为开机自启
 func (s *SystemdManager) Enable() error {
-	_, err := executil.RunCommand(5*time.Second, "systemctl", "enable", s.UnitName)
+	_, err := s.runSystemctl(5*time.Second, "enable", s.UnitName)
 	return err
 }
 
 // Disable 取消开机自启
 func (s *SystemdManager) Disable() error {
-	_, err := executil.RunCommand(5*time.Second, "systemctl", "disable", s.UnitName)
+	_, err := s.runSystemctl(5*time.Second, "disable", s.UnitName)
 	return err
 }
 
 // DaemonReload 重新载入 systemd 配置
 func DaemonReload() error {
-	_, err := executil.RunCommand(5*time.Second, "systemctl", "daemon-reload")
+	args := []string{"daemon-reload"}
+	if IsUserMode() {
+		args = []string{"--user", "daemon-reload"}
+	}
+	_, err := executil.RunCommand(5*time.Second, "systemctl", args...)
 	return err
 }
 
-// WriteServiceUnit 写入 /etc/systemd/system/<unit>.service
+// GetSystemdUnitPath 获取 service 文件写入路径
+func GetSystemdUnitPath(unitName string) string {
+	if !IsUserMode() {
+		return filepath.Join("/etc/systemd/system", unitName)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join("/etc/systemd/system", unitName)
+	}
+	dir := filepath.Join(home, ".config", "systemd", "user")
+	_ = os.MkdirAll(dir, 0755)
+	return filepath.Join(dir, unitName)
+}
+
+// WriteServiceUnit 写入服务单元并重载 daemon
 func WriteServiceUnit(unitName, content string) error {
-	path := fmt.Sprintf("/etc/systemd/system/%s", unitName)
+	if IsUserMode() {
+		// 用户模式下，WantedBy 不能为 multi-user.target，应为 default.target
+		content = strings.ReplaceAll(content, "WantedBy=multi-user.target", "WantedBy=default.target")
+		// 移除 root 模式特有的用户配置行与内核特权指令
+		lines := strings.Split(content, "\n")
+		var filtered []string
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "User=") ||
+				strings.HasPrefix(trimmed, "CapabilityBoundingSet=") ||
+				strings.HasPrefix(trimmed, "AmbientCapabilities=") {
+				continue
+			}
+			filtered = append(filtered, line)
+		}
+		content = strings.Join(filtered, "\n")
+	}
+
+	path := GetSystemdUnitPath(unitName)
+	_ = os.MkdirAll(filepath.Dir(path), 0755)
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
 		return fmt.Errorf("write systemd unit error: %w", err)
 	}
 	return DaemonReload()
 }
 
-// RemoveServiceUnit 移除 /etc/systemd/system/<unit>.service
+// RemoveServiceUnit 移除服务单元
 func RemoveServiceUnit(unitName string) error {
-	path := fmt.Sprintf("/etc/systemd/system/%s", unitName)
+	path := GetSystemdUnitPath(unitName)
 	_ = os.Remove(path)
+	if IsUserMode() {
+		_ = os.Remove(filepath.Join("/etc/systemd/system", unitName))
+	}
 	return DaemonReload()
 }
-
