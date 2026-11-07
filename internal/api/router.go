@@ -105,6 +105,12 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.POST("/members", handler.CreateMember)
 			api.POST("/members/:id/reset-token", handler.ResetMemberToken)
 			api.DELETE("/members/:id", handler.DeleteMember)
+
+			// Subconverter 订阅转换引擎与规则模板
+			api.GET("/subconverter/status", handler.GetSubconverterStatus)
+			api.GET("/subconverter/config", handler.GetSubconverterConfig)
+			api.POST("/subconverter/config", handler.SaveSubconverterConfig)
+			api.GET("/subconverter/templates", handler.ListSubconverterTemplates)
 		}
 	}
 

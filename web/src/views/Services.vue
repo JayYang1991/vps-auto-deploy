@@ -247,6 +247,10 @@ function parseRouteParams() {
     activeComponent.value = 'cloudflared'
     return
   }
+  if (tab === 'subconverter') {
+    activeComponent.value = 'subscriptions'
+    return
+  }
 
   if (componentTabs.some((c) => c.key === tab)) {
     activeComponent.value = tab

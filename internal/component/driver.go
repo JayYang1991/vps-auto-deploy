@@ -12,7 +12,10 @@ type ServiceStatus struct {
 	Name             string `json:"name"`
 	DisplayName      string `json:"display_name"`
 	Description      string `json:"description"`
-	Category         string `json:"category"` // "proxy" | "tunnel"
+	Category         string `json:"category"` // "proxy" | "tunnel" | "converter"
+	CategoryLabel    string `json:"category_label,omitempty"`
+	ConfigRoute      string `json:"config_route,omitempty"`
+	Order            int    `json:"order,omitempty"`
 	Installed        bool   `json:"installed"`
 	InstalledVersion string `json:"installed_version"`
 	LatestVersion    string `json:"latest_version"`
@@ -112,6 +115,19 @@ func ListAll(fetchLatest bool) ([]ServiceStatus, error) {
 			cleanLatest := strings.TrimPrefix(latest, "v")
 			if cleanInstalled != cleanLatest {
 				status.HasUpdate = true
+			}
+		}
+
+		if status.CategoryLabel == "" {
+			switch status.Category {
+			case "proxy":
+				status.CategoryLabel = "代理核心"
+			case "tunnel":
+				status.CategoryLabel = "隧道穿透"
+			case "converter":
+				status.CategoryLabel = "订阅与规则"
+			default:
+				status.CategoryLabel = "网络工具"
 			}
 		}
 

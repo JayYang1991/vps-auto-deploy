@@ -49,6 +49,26 @@ func GetDefaultConfigDir(name string) string {
 	return dir
 }
 
+// GetDefaultComponentDir 获取目录资产型组件的独立运行时工作目录
+// Root 模式: /etc/vps-auto-deploy/components/<name>
+// 非 Root 模式: ~/.config/vps-auto-deploy/components/<name>
+func GetDefaultComponentDir(name string) string {
+	if !IsUserMode() {
+		dir := filepath.Join("/etc/vps-auto-deploy/components", name)
+		_ = os.MkdirAll(dir, 0755)
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		dir := filepath.Join("/etc/vps-auto-deploy/components", name)
+		_ = os.MkdirAll(dir, 0755)
+		return dir
+	}
+	dir := filepath.Join(home, ".config", "vps-auto-deploy", "components", name)
+	_ = os.MkdirAll(dir, 0755)
+	return dir
+}
+
 // GetDefaultConfigPath 获取组件默认配置文件路径
 func GetDefaultConfigPath(name, fileName string) string {
 	return filepath.Join(GetDefaultConfigDir(name), fileName)

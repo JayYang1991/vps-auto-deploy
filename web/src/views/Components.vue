@@ -604,7 +604,7 @@ function getCategoryLabel(cat: string) {
 function getConfigRoute(name: string) {
   if (name === 'sing-box') return '/services?tab=singbox&sub=inbounds'
   if (name === 'cloudflared') return '/services?tab=cloudflared'
-  if (name === 'subconverter') return '/services?tab=subscriptions'
+  if (name === 'subconverter') return '/services?tab=subscriptions&sub=subconverter'
   return ''
 }
 

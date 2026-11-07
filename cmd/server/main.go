@@ -14,6 +14,7 @@ import (
 	"vps-auto-deploy/internal/component"
 	"vps-auto-deploy/internal/component/cloudflared"
 	"vps-auto-deploy/internal/component/singbox"
+	"vps-auto-deploy/internal/component/subconverter"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/node"
 	"vps-auto-deploy/internal/pkg/crypto"
@@ -39,6 +40,7 @@ func init() {
 	// 注册组件驱动
 	component.Register(singbox.NewDriver())
 	component.Register(cloudflared.NewDriver())
+	component.Register(subconverter.NewDriver())
 }
 
 func main() {
