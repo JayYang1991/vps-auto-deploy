@@ -16,8 +16,8 @@ type SubResult struct {
 	Content     string
 }
 
-// GenerateSubscription 根据 token 与 client 类型渲染对应的订阅数据
-func GenerateSubscription(token, target, userAgent string) (*SubResult, error) {
+// GetMemberByToken 根据 sub_token 获取有效成员
+func GetMemberByToken(token string) (*model.Member, error) {
 	var member model.Member
 	err := model.DB.QueryRow("SELECT id, name, uuid, sub_token, enabled FROM members WHERE sub_token = ?", token).
 		Scan(&member.ID, &member.Name, &member.UUID, &member.SubToken, &member.Enabled)
@@ -31,6 +31,16 @@ func GenerateSubscription(token, target, userAgent string) (*SubResult, error) {
 
 	if !member.Enabled {
 		return nil, fmt.Errorf("member subscription is disabled")
+	}
+
+	return &member, nil
+}
+
+// GenerateSubscription 根据 token 与 client 类型渲染对应的订阅数据
+func GenerateSubscription(token, target, userAgent string) (*SubResult, error) {
+	member, err := GetMemberByToken(token)
+	if err != nil {
+		return nil, err
 	}
 
 	ua := strings.ToLower(userAgent)
@@ -49,7 +59,7 @@ func GenerateSubscription(token, target, userAgent string) (*SubResult, error) {
 
 	switch clientType {
 	case "clash", "meta", "mihomo":
-		yamlContent, err := GenerateClashMetaConfig(&member)
+		yamlContent, err := GenerateClashMetaConfig(member)
 		if err != nil {
 			return nil, err
 		}
@@ -60,7 +70,7 @@ func GenerateSubscription(token, target, userAgent string) (*SubResult, error) {
 		}, nil
 
 	case "singbox", "sing-box":
-		jsonContent, err := GenerateSingboxClientConfig(&member)
+		jsonContent, err := GenerateSingboxClientConfig(member)
 		if err != nil {
 			return nil, err
 		}
@@ -71,7 +81,7 @@ func GenerateSubscription(token, target, userAgent string) (*SubResult, error) {
 		}, nil
 
 	case "base64", "uri", "v2ray":
-		b64Content, err := GenerateBase64Sub(&member)
+		b64Content, err := GenerateBase64Sub(member)
 		if err != nil {
 			return nil, err
 		}

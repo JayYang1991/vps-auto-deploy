@@ -17,7 +17,7 @@ import (
 
 const (
 	DriverName  = "subconverter"
-	Owner       = "tindy2013"
+	Owner       = "MetaCubeX"
 	Repo        = "subconverter"
 	UnitName    = "subconverter.service"
 	DefaultPort = 25500
@@ -200,8 +200,9 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 		if _, err := os.Stat(prefExample); err == nil {
 			logFn("初始化默认配置文件 pref.ini...")
 			if content, err := os.ReadFile(prefExample); err == nil {
-				// 替换默认监听地址为 127.0.0.1，保障单机安全性
+				// 替换默认监听地址为 127.0.0.1，并开启缓存保障分流规则集高性能解析
 				modified := strings.Replace(string(content), "listen=0.0.0.0", "listen=127.0.0.1", 1)
+				modified = strings.Replace(modified, "enable_cache=false", "enable_cache=true", 1)
 				_ = os.WriteFile(prefPath, []byte(modified), 0644)
 			}
 		} else {
@@ -210,7 +211,7 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 api_mode=false
 api_access_token=
 default_url=
-enable_cache=false
+enable_cache=true
 cache_subscription=60
 cache_config=300
 cache_ruleset=21600
@@ -237,7 +238,7 @@ port=%d
 	logFn("配置并更新 Systemd 服务单元...")
 	unitContent := fmt.Sprintf(`[Unit]
 Description=Subconverter - Advanced Subscription Converter
-Documentation=https://github.com/tindy2013/subconverter
+Documentation=https://github.com/MetaCubeX/subconverter
 After=network.target network-online.target
 
 [Service]

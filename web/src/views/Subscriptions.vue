@@ -406,7 +406,7 @@
           <div v-if="previewResult" style="margin-top: 1rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
               <span style="font-size: 0.8rem; color: #34d399; font-weight: 600;">
-                ✓ 转换成功 (HTTP 200 &middot; {{ previewResult.length }} 字节)
+                ✓ 转换成功 (HTTP 200 &middot; {{ previewResult.split('\n').length }} 行 &middot; {{ (previewResult.length / 1024).toFixed(1) }} KB)
               </span>
               <button @click="copyPreviewOutput" class="btn btn-secondary" style="font-size: 0.725rem; padding: 0.15rem 0.5rem;">
                 复制内容

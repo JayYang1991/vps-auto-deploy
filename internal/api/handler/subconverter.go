@@ -432,7 +432,7 @@ func ProxySubconverterConvert(target, sourceSubURL, configTemplate string, extra
 	}
 	u.RawQuery = q.Encode()
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	client := &http.Client{Timeout: 90 * time.Second}
 	req, err := http.NewRequest("GET", u.String(), nil)
 	if err != nil {
 		return nil, "", err
