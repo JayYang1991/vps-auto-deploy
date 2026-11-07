@@ -494,8 +494,13 @@ function openLogs(unit: string) {
       }
     })
   }
+  es.addEventListener('error', (e: any) => {
+    if (e.data) {
+      logModal.lines.push(`[ERROR] ${e.data}`)
+    }
+  })
   es.onerror = () => {
-    // 保持重连
+    // 保持静默重连
   }
   logModal.eventSource = es
 }

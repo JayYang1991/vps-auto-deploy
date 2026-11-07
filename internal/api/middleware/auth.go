@@ -48,18 +48,25 @@ func SecretPathMiddleware() gin.HandlerFunc {
 	}
 }
 
-// JWTAuthMiddleware 验证 Bearer Token
+// JWTAuthMiddleware 验证 Bearer Token (支持 Authorization Header 或 URL Query 中的 token 参数)
 func JWTAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		tokenStr := ""
 		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authorization header required"})
-			return
+		if authHeader != "" {
+			parts := strings.SplitN(authHeader, " ", 2)
+			if len(parts) == 2 && parts[0] == "Bearer" {
+				tokenStr = parts[1]
+			}
 		}
 
-		parts := strings.SplitN(authHeader, " ", 2)
-		if len(parts) != 2 || parts[0] != "Bearer" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid auth header format"})
+		// 若 Header 中无 Token，允许从 URL query 中的 token 参数获取 (针对 EventSource / SSE 场景)
+		if tokenStr == "" {
+			tokenStr = c.Query("token")
+		}
+
+		if tokenStr == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authorization header or token query required"})
 			return
 		}
 
@@ -69,7 +76,7 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		token, err := jwt.ParseWithClaims(parts[1], &Claims{}, func(t *jwt.Token) (interface{}, error) {
+		token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(t *jwt.Token) (interface{}, error) {
 			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
 			}
