@@ -71,9 +71,9 @@ func LoginNode(host string, port int, secretPath, username, password string, use
 
 	var client *http.Client
 	if useTLS {
-		client = crypto.CreatePinnedHTTPClient(certFingerprint, 10*time.Second)
+		client = crypto.CreatePinnedHTTPClient(certFingerprint, 4*time.Second)
 	} else {
-		client = &http.Client{Timeout: 10 * time.Second}
+		client = &http.Client{Timeout: 4 * time.Second}
 	}
 
 	resp, err := client.Post(loginURL, "application/json", bytes.NewReader(body))
@@ -416,6 +416,22 @@ func RunDeploySSH(task *DeployTask, req DeploySSHRequest) {
 
 	// 7. 配置并启动 Systemd 守护进程
 	task.AddLog("配置 Systemd 守护进程 (vps-panel.service)...")
+
+	// 自动放行主机防火墙端口 (ufw, firewalld, iptables)
+	firewallScript := fmt.Sprintf(`
+if command -v ufw >/dev/null 2>&1; then
+    ufw allow %d/tcp >/dev/null 2>&1 || true
+fi
+if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld 2>/dev/null; then
+    firewall-cmd --add-port=%d/tcp --permanent >/dev/null 2>&1 || true
+    firewall-cmd --reload >/dev/null 2>&1 || true
+fi
+if command -v iptables >/dev/null 2>&1; then
+    iptables -C INPUT -p tcp --dport %d -j ACCEPT >/dev/null 2>&1 || iptables -I INPUT -p tcp --dport %d -j ACCEPT >/dev/null 2>&1 || true
+fi
+`, req.PanelPort, req.PanelPort, req.PanelPort, req.PanelPort)
+	_, _ = runSSHCmd(firewallScript)
+
 	serviceContent := fmt.Sprintf(`[Unit]
 Description=VPS Auto Deploy Panel
 After=network.target
@@ -451,12 +467,14 @@ WantedBy=multi-user.target
 	// 8. 远端服务健康检查与 Token 交换 (带 TLS 指纹比对强校验)
 	var token string
 	var pingLatency int64
-	maxWait := 15 * time.Second
+	maxWait := 60 * time.Second
 	deadline := time.Now().Add(maxWait)
 	authenticated := false
+	startTime := time.Now()
+	var lastErr error
 
 	for time.Now().Before(deadline) {
-		time.Sleep(1500 * time.Millisecond)
+		time.Sleep(2 * time.Second)
 		startPing := time.Now()
 		tok, logErr := LoginNode(req.Host, req.PanelPort, req.SecretPath, req.AdminUsername, req.AdminPassword, enableTLS, certFingerprint)
 		if logErr == nil && tok != "" {
@@ -465,12 +483,24 @@ WantedBy=multi-user.target
 			authenticated = true
 			break
 		}
+		lastErr = logErr
+		elapsed := int(time.Since(startTime).Seconds())
+		if elapsed%10 == 0 || elapsed == 4 {
+			task.AddLog(fmt.Sprintf("正在等待远端服务端口监听与 TLS 握手建立 (%d/60秒)...", elapsed))
+		}
 	}
 
 	if !authenticated {
+		// 诊断远端 Systemd 服务状态与日志
+		statusOut, _ := runSSHCmd("systemctl is-active vps-panel 2>&1")
+		journalOut, _ := runSSHCmd("journalctl -u vps-panel -n 12 --no-pager 2>&1")
+
 		task.Status = "failed"
-		task.Error = "节点已启动但主控端在 15 秒内未能完成安全握手认证（请检查防火墙/端口是否开放）"
+		task.Error = fmt.Sprintf("主控端在 60 秒内未能完成安全握手认证 (错误: %v, 服务活跃状态: %s)", lastErr, strings.TrimSpace(statusOut))
 		task.AddLog("[ERROR] " + task.Error)
+		if strings.TrimSpace(journalOut) != "" {
+			task.AddLog("远端服务最近输出:\n" + strings.TrimSpace(journalOut))
+		}
 		return
 	}
 	task.AddLog(fmt.Sprintf("远端握手成功！获取到集群通信 Token，网络延迟: %d ms", pingLatency))
