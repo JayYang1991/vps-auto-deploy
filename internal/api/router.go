@@ -51,6 +51,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.GET("/nodes/cloud/vultr/config", handler.GetVultrConfig)
 			api.POST("/nodes/cloud/vultr/config", handler.SaveVultrConfig)
 			api.GET("/nodes/cloud/vultr/catalog", handler.GetVultrCatalog)
+			api.GET("/nodes/cloud/vultr/instances", handler.ListVultrInstances)
 			api.POST("/nodes/cloud/vultr/provision", handler.ProvisionVultrNode)
 
 			// 设置与密码

@@ -58,14 +58,18 @@ func GetDeployStatus(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"task_id":    task.ID,
-		"node_name":  task.NodeName,
-		"host":       task.Host,
-		"status":     task.Status,
-		"error":      task.Error,
-		"node_id":    task.NodeID,
-		"started_at": task.StartedAt,
-		"logs":       task.Logs,
+		"task_id":           task.ID,
+		"node_name":         task.NodeName,
+		"host":              task.Host,
+		"status":            task.Status,
+		"error":             task.Error,
+		"node_id":           task.NodeID,
+		"cloud_provider":    task.CloudProvider,
+		"cloud_instance_id": task.CloudInstanceID,
+		"cloud_region":      task.CloudRegion,
+		"cloud_plan":        task.CloudPlan,
+		"started_at":        task.StartedAt,
+		"logs":              task.Logs,
 	})
 }
 

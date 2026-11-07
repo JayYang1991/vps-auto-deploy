@@ -159,6 +159,78 @@ func GetVultrCatalog(c *gin.Context) {
 	})
 }
 
+// ListVultrInstances 查询当前 Vultr 账户下的所有云主机，并标注集群纳管状态
+func ListVultrInstances(c *gin.Context) {
+	apiKey, err := model.GetVultrAPIKey()
+	if err != nil || strings.TrimSpace(apiKey) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "尚未配置 Vultr API Token，请先在面板中绑定 Token"})
+		return
+	}
+
+	client := vultr.NewClient(apiKey)
+	instances, err := client.ListInstances()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取 Vultr 实例列表失败: " + err.Error()})
+		return
+	}
+
+	// 获取本地已纳管的所有节点，用于交叉比对
+	nodes, err := model.ListNodes()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取本地集群节点失败: " + err.Error()})
+		return
+	}
+
+	managedMap := make(map[string]*model.Node) // key: instance_id or host
+	for i := range nodes {
+		n := &nodes[i]
+		if n.CloudInstanceID != "" {
+			managedMap[n.CloudInstanceID] = n
+		}
+		if n.Host != "" {
+			managedMap[n.Host] = n
+		}
+	}
+
+	type EnrichedInstance struct {
+		vultr.Instance
+		IsManaged bool   `json:"is_managed"`
+		NodeID    int64  `json:"node_id,omitempty"`
+		NodeName  string `json:"node_name,omitempty"`
+		FlagEmoji string `json:"flag_emoji"`
+		CityZh    string `json:"city_zh"`
+	}
+
+	var res []EnrichedInstance
+	for _, inst := range instances {
+		flag, cityZh := getRegionMeta(inst.Region, "", "")
+		isManaged := false
+		var nodeID int64
+		var nodeName string
+
+		if matched, ok := managedMap[inst.ID]; ok {
+			isManaged = true
+			nodeID = matched.ID
+			nodeName = matched.Name
+		} else if matched, ok := managedMap[inst.MainIP]; ok {
+			isManaged = true
+			nodeID = matched.ID
+			nodeName = matched.Name
+		}
+
+		res = append(res, EnrichedInstance{
+			Instance:  inst,
+			IsManaged: isManaged,
+			NodeID:    nodeID,
+			NodeName:  nodeName,
+			FlagEmoji: flag,
+			CityZh:    cityZh,
+		})
+	}
+
+	c.JSON(http.StatusOK, res)
+}
+
 // ProvisionVultrNode 启动 Vultr 弹性创建与自动化纳管异步任务
 func ProvisionVultrNode(c *gin.Context) {
 	var req node.ProvisionVultrRequest
@@ -167,25 +239,37 @@ func ProvisionVultrNode(c *gin.Context) {
 		return
 	}
 
-	if strings.TrimSpace(req.Region) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请选择数据中心区域 (Region)"})
-		return
-	}
-	if strings.TrimSpace(req.Plan) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请选择实例规格套餐 (Plan)"})
-		return
-	}
-	if req.OSID <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "请选择合法的操作系统镜像 (OS)"})
-		return
+	// 如果指定了已有实例 ID，则无需提供 Region / Plan / OSID
+	if strings.TrimSpace(req.InstanceID) == "" {
+		if strings.TrimSpace(req.Region) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请选择数据中心区域 (Region)"})
+			return
+		}
+		if strings.TrimSpace(req.Plan) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请选择实例规格套餐 (Plan)"})
+			return
+		}
+		if req.OSID <= 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "请选择合法的操作系统镜像 (OS)"})
+			return
+		}
 	}
 
 	taskName := req.Name
 	if strings.TrimSpace(taskName) == "" {
-		taskName = fmt.Sprintf("Vultr-%s-%s", strings.ToUpper(req.Region), req.Plan)
+		if req.InstanceID != "" {
+			taskName = fmt.Sprintf("Vultr-%s", req.InstanceID[:8])
+		} else {
+			taskName = fmt.Sprintf("Vultr-%s-%s", strings.ToUpper(req.Region), req.Plan)
+		}
 	}
 
-	task := node.CreateDeployTask(taskName, "vultr-"+req.Region)
+	hostTag := "vultr-" + req.Region
+	if req.InstanceID != "" {
+		hostTag = req.InstanceID
+	}
+
+	task := node.CreateDeployTask(taskName, hostTag)
 	go node.RunProvisionVultr(task, req)
 
 	c.JSON(http.StatusOK, gin.H{
@@ -268,3 +352,4 @@ func getRegionMeta(id, country, city string) (string, string) {
 		return flag, fmt.Sprintf("%s (%s)", city, country)
 	}
 }
+

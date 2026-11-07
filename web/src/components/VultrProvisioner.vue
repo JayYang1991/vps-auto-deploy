@@ -65,8 +65,36 @@
       </div>
     </div>
 
-    <!-- 2. 主流程：创建表单 vs 实时终端 -->
-    <div v-if="cloudStep === 'form'" class="provision-flow">
+    <!-- 模式切换胶囊 Tab -->
+    <div v-if="vultrConfig.configured && !showUpdateToken && cloudStep === 'form'" class="mode-switch-wrapper">
+      <div class="provision-mode-bar">
+        <button
+          class="mode-pill-btn"
+          :class="{ 'mode-pill-active': provisionMode === 'create' }"
+          @click="provisionMode = 'create'"
+          type="button"
+        >
+          <span>🚀 购买创建全新 VPS</span>
+        </button>
+
+        <button
+          class="mode-pill-btn"
+          :class="{ 'mode-pill-active': provisionMode === 'existing' }"
+          @click="switchToExistingMode"
+          type="button"
+        >
+          <span>📦 纳管已有 Vultr 实例</span>
+          <span v-if="vultrInstances.length > 0 && unmanagedInstancesCount > 0" class="mode-badge">
+            {{ unmanagedInstancesCount }} 待纳管
+          </span>
+        </button>
+      </div>
+    </div>
+
+    <!-- 2. 主流程：创建表单 / 已有实例纳管 vs 实时终端 -->
+    <div v-if="cloudStep === 'form'" class="form-wrapper">
+      <!-- 模式 A：购买创建全新 VPS -->
+      <div v-if="provisionMode === 'create'" class="provision-flow">
       <!-- 步骤 1：选择区域 -->
       <section class="section-card">
         <div class="section-title-row">
@@ -321,6 +349,204 @@
       </div>
     </div>
 
+    <!-- 模式 B：纳管已有 Vultr 实例 -->
+    <div v-else class="existing-flow">
+      <!-- 头部工具栏 -->
+      <div class="existing-toolbar">
+        <div class="search-input-box">
+          <span class="search-icon">🔍</span>
+          <input
+            v-model="existingSearchQuery"
+            type="text"
+            placeholder="按实例名称、IP 地址、区域或操作系统搜索..."
+            class="existing-search-input"
+          />
+        </div>
+        <button
+          class="btn-refresh-instances"
+          @click="loadVultrInstances(true)"
+          :disabled="loadingInstances"
+          type="button"
+        >
+          <span>{{ loadingInstances ? '🔄 同步中...' : '🔄 刷新实例列表' }}</span>
+        </button>
+      </div>
+
+      <!-- 实例列表加载状态 -->
+      <div v-if="loadingInstances" class="loading-state">
+        <span>⏳ 正在查询您 Vultr 账户下的全部云主机...</span>
+      </div>
+
+      <!-- 无实例空状态 -->
+      <div v-else-if="filteredInstances.length === 0" class="empty-instances-state">
+        <div class="empty-icon">📦</div>
+        <div class="empty-text">未检索到匹配的 Vultr 实例</div>
+        <div class="empty-sub">您可以切换至「购买创建全新 VPS」开通一台新主机</div>
+      </div>
+
+      <!-- 实例卡片列表 -->
+      <div v-else class="instances-grid">
+        <div
+          v-for="inst in filteredInstances"
+          :key="inst.id"
+          class="instance-card"
+          :class="{
+            'instance-card-selected': selectedInstance?.id === inst.id,
+            'instance-card-managed': inst.is_managed
+          }"
+          @click="selectExistingInstance(inst)"
+        >
+          <div class="instance-card-top">
+            <div class="inst-region-box">
+              <span class="inst-flag">{{ inst.flag_emoji || '🌐' }}</span>
+              <span class="inst-city">{{ inst.city_zh || inst.region }}</span>
+            </div>
+            <span
+              v-if="inst.is_managed"
+              class="tag-managed"
+              title="该实例已被纳管入本集群"
+            >
+              ✓ 已在集群中
+            </span>
+            <span
+              v-else
+              class="tag-unmanaged"
+            >
+              待纳管
+            </span>
+          </div>
+
+          <div class="inst-name-row">
+            <span class="inst-label" :title="inst.label || inst.id">{{ inst.label || inst.id }}</span>
+            <span class="inst-power" :class="inst.power_status === 'running' ? 'power-running' : 'power-stopped'">
+              ● {{ inst.power_status === 'running' ? '开机' : '关机' }}
+            </span>
+          </div>
+
+          <div class="inst-props-list">
+            <div class="inst-prop">
+              <span class="prop-label">公网 IP:</span>
+              <span class="prop-val mono font-highlight">{{ inst.main_ip || '未分配' }}</span>
+            </div>
+            <div class="inst-prop">
+              <span class="prop-label">规格配置:</span>
+              <span class="prop-val">{{ inst.vcpu_count }}核 · {{ inst.ram }}MB · {{ inst.plan }}</span>
+            </div>
+            <div class="inst-prop">
+              <span class="prop-label">系统环境:</span>
+              <span class="prop-val text-truncate" :title="inst.os">{{ inst.os }}</span>
+            </div>
+          </div>
+
+          <div class="instance-card-bottom">
+            <button
+              v-if="!inst.is_managed"
+              class="btn-select-inst"
+              :class="{ 'btn-selected-active': selectedInstance?.id === inst.id }"
+              type="button"
+            >
+              {{ selectedInstance?.id === inst.id ? '✓ 当前已选中' : '选择纳管 ➔' }}
+            </button>
+            <span v-else class="managed-note">关联节点：{{ inst.node_name }}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 选中实例后的纳管配置面板 -->
+      <div v-if="selectedInstance && !selectedInstance.is_managed" class="existing-config-card">
+        <div class="config-card-header">
+          <span class="config-header-icon">🛠️</span>
+          <div>
+            <h4 class="config-header-title">配置纳管：{{ selectedInstance.label || selectedInstance.id }}</h4>
+            <span class="config-header-desc">
+              公网 IP: <strong>{{ selectedInstance.main_ip }}</strong> · {{ selectedInstance.city_zh }} · {{ selectedInstance.os }}
+            </span>
+          </div>
+        </div>
+
+        <div class="config-form-grid">
+          <div class="form-group">
+            <label>节点显示名称 <span class="req">*</span></label>
+            <input v-model="existingForm.name" type="text" placeholder="例如：东京 Vultr-01" />
+          </div>
+
+          <div class="form-group">
+            <label>面板监听端口</label>
+            <input v-model.number="existingForm.panel_port" type="number" placeholder="20888" />
+          </div>
+
+          <!-- SSH 认证方式选择 -->
+          <div class="form-group full-width">
+            <label>SSH 接入认证方式</label>
+            <div class="radio-group">
+              <label class="radio-label">
+                <input type="radio" value="master_key" v-model="existingForm.auth_type" />
+                <span>🔑 主控托管部署密钥 (推荐，若创建时已绑定)</span>
+              </label>
+              <label class="radio-label">
+                <input type="radio" value="password" v-model="existingForm.auth_type" />
+                <span>🔒 Root 密码认证</span>
+              </label>
+              <label class="radio-label">
+                <input type="radio" value="key" v-model="existingForm.auth_type" />
+                <span>📝 自定义 SSH 私钥</span>
+              </label>
+            </div>
+          </div>
+
+          <div v-if="existingForm.auth_type === 'password'" class="form-group full-width">
+            <div class="label-with-action">
+              <label>Root 密码 <span class="req">*</span></label>
+              <button
+                v-if="selectedInstance.default_password && existingForm.ssh_password !== selectedInstance.default_password"
+                class="btn-fill-default-pwd"
+                @click="existingForm.ssh_password = selectedInstance.default_password"
+                type="button"
+              >
+                ⚡ 填入 Vultr 初始 root 密码
+              </button>
+            </div>
+            <input
+              v-model="existingForm.ssh_password"
+              type="password"
+              placeholder="请输入目标主机的 root 密码"
+            />
+          </div>
+
+          <div v-else-if="existingForm.auth_type === 'key'" class="form-group full-width">
+            <label>SSH 私钥内容 (OpenSSH PEM) <span class="req">*</span></label>
+            <textarea
+              v-model="existingForm.ssh_private_key"
+              rows="4"
+              placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
+              class="mono"
+            ></textarea>
+          </div>
+
+          <div class="form-group full-width" style="margin-top: 0.5rem; background: rgba(99, 102, 241, 0.08); padding: 0.75rem; border-radius: 0.5rem; border: 1px dashed rgba(99, 102, 241, 0.3);">
+            <label class="checkbox-container">
+              <input type="checkbox" v-model="existingForm.enable_tls" />
+              <span class="checkbox-title">🛡️ 启用自签名 TLS 证书与指纹强绑定 (强烈推荐 · 防中间人劫持)</span>
+            </label>
+            <div class="field-hint">
+              主控将通过 SSH 信道在目标服务器部署轻量控制面板，自动签发 ECDSA 证书并锁定指纹，杜绝公网流量窃听与劫持。
+            </div>
+          </div>
+        </div>
+
+        <div class="config-submit-bar">
+          <button
+            class="btn-create-submit"
+            @click="startProvisionExisting(selectedInstance)"
+            :disabled="isSubmitting || !existingForm.name.trim() || (existingForm.auth_type === 'password' && !existingForm.ssh_password) || (existingForm.auth_type === 'key' && !existingForm.ssh_private_key)"
+          >
+            <span>🚀 立即通过 SSH 部署并纳管此实例</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
     <!-- 3. 部署中与实时日志流终端 -->
     <div v-else class="cloud-terminal-box">
       <!-- 6 阶段可视化步骤条 -->
@@ -366,15 +592,39 @@
           >
             <span>✅ 完成并切换至新节点管理视角</span>
           </button>
-          <button
-            v-else-if="taskStatus === 'failed'"
-            class="btn-secondary"
-            @click="cloudStep = 'form'"
-          >
-            <span>🔄 返回修改参数重试</span>
-          </button>
+          <div v-else-if="taskStatus === 'failed'" class="terminal-failed-actions">
+            <button
+              v-if="createdInstanceId"
+              class="btn-primary btn-retry-highlight"
+              @click="retryExistingInstanceProvision"
+              :disabled="isSubmitting"
+            >
+              <span>🔄 立即重试纳管此实例 (无需重新购机)</span>
+            </button>
+            <button
+              v-else
+              class="btn-primary"
+              @click="startProvision"
+              :disabled="isSubmitting"
+            >
+              <span>🔄 重新尝试</span>
+            </button>
+            <button
+              class="btn-secondary"
+              @click="cloudStep = 'form'"
+            >
+              <span>↩️ 返回配置</span>
+            </button>
+            <button
+              v-if="createdInstanceId"
+              class="btn-secondary"
+              @click="goToExistingInstances"
+            >
+              <span>📦 前往已有实例列表</span>
+            </button>
+          </div>
           <span v-else class="deploy-progress-hint">
-            实例启动与分配公网 IP 中，全流程通常需 45~90 秒，请保持页面开启...
+            正在等待网络路由贯通与 SSH 握手（包含 cloud-init 密钥写入），全流程通常需 45~90 秒，请保持页面开启...
           </span>
         </div>
       </div>
@@ -455,6 +705,27 @@ const terminalBodyRef = ref<HTMLElement | null>(null)
 let eventSource: EventSource | null = null
 let deployedNodeId = 0
 const isSubmitting = ref(false)
+const createdInstanceId = ref('')
+const createdInstanceIP = ref('')
+
+// 纳管已有实例状态
+const provisionMode = ref<'create' | 'existing'>('create')
+const vultrInstances = ref<any[]>([])
+const loadingInstances = ref(false)
+const existingSearchQuery = ref('')
+const selectedInstance = ref<any | null>(null)
+
+const existingForm = reactive({
+  name: '',
+  auth_type: 'master_key' as 'master_key' | 'password' | 'key',
+  ssh_password: '',
+  ssh_private_key: '',
+  panel_port: 20888,
+  admin_username: 'admin',
+  admin_password: '',
+  secret_path: '',
+  enable_tls: true,
+})
 
 const stages = [
   { num: 1, title: '绑定密钥' },
@@ -517,6 +788,61 @@ const currentOSText = computed(() => {
 const canSubmit = computed(() => {
   return selectedRegion.value && selectedPlan.value && selectedOSID.value && formReq.name.trim()
 })
+
+const unmanagedInstancesCount = computed(() => {
+  return vultrInstances.value.filter((i) => !i.is_managed).length
+})
+
+const filteredInstances = computed(() => {
+  let list = vultrInstances.value
+  if (existingSearchQuery.value.trim()) {
+    const q = existingSearchQuery.value.toLowerCase().trim()
+    list = list.filter((i) =>
+      (i.label || '').toLowerCase().includes(q) ||
+      (i.main_ip || '').toLowerCase().includes(q) ||
+      (i.region || '').toLowerCase().includes(q) ||
+      (i.os || '').toLowerCase().includes(q) ||
+      (i.city_zh || '').toLowerCase().includes(q)
+    )
+  }
+  return list
+})
+
+async function switchToExistingMode() {
+  provisionMode.value = 'existing'
+  if (vultrInstances.value.length === 0) {
+    await loadVultrInstances(false)
+  }
+}
+
+async function loadVultrInstances(refresh = false) {
+  loadingInstances.value = true
+  try {
+    const res = await api.get('/nodes/cloud/vultr/instances')
+    vultrInstances.value = res.data || []
+  } catch (err: any) {
+    toast.error('获取 Vultr 实例列表失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    loadingInstances.value = false
+  }
+}
+
+function selectExistingInstance(inst: any) {
+  if (inst.is_managed) return
+  selectedInstance.value = inst
+  existingForm.name = inst.label || `Vultr-${inst.region.toUpperCase()}`
+  existingForm.ssh_password = inst.default_password || ''
+  if (inst.default_password) {
+    existingForm.auth_type = 'password'
+  } else {
+    existingForm.auth_type = 'master_key'
+  }
+}
+
+function goToExistingInstances() {
+  cloudStep.value = 'form'
+  switchToExistingMode()
+}
 
 function isPlanInRegion(plan: any): boolean {
   if (!plan.locations || !Array.isArray(plan.locations)) return true
@@ -622,6 +948,66 @@ function getLineClass(line: string) {
   return ''
 }
 
+// 订阅部署日志流
+function subscribeDeployLogs(taskId: string) {
+  const secret = getSecretPath()
+  const token = localStorage.getItem('token') || ''
+  const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&token=${token}`
+
+  if (eventSource) eventSource.close()
+  eventSource = new EventSource(streamURL)
+
+  eventSource.onmessage = (event) => {
+    const line = event.data
+    taskLogs.value.push(line)
+    scrollToBottom()
+
+    // 实例信息提取（用于在失败时重试）
+    if (line.includes('实例 UUID: ')) {
+      const match = line.match(/实例 UUID:\s*([a-zA-Z0-9-]+)/)
+      if (match) createdInstanceId.value = match[1]
+    }
+    if (line.includes('分配公网 IP: ')) {
+      const ipMatch = line.match(/分配公网 IP:\s*([0-9.]+)/)
+      if (ipMatch) createdInstanceIP.value = ipMatch[1]
+    }
+
+    // 阶段推进识别
+    if (line.includes('【阶段 1/6】')) currentStage.value = 1
+    else if (line.includes('【阶段 2/6】')) currentStage.value = 2
+    else if (line.includes('【阶段 3/6】')) currentStage.value = 3
+    else if (line.includes('【阶段 4/6】')) currentStage.value = 4
+    else if (line.includes('【阶段 5/6】')) currentStage.value = 5
+    else if (line.includes('【阶段 6/6】')) currentStage.value = 6
+
+    if (line.includes('[SUCCESS]')) {
+      taskStatus.value = 'success'
+      currentStage.value = 6
+      eventSource?.close()
+      fetchNodes().then(() => {
+        const match = useNodeContext().nodes.value.find((n) =>
+          (createdInstanceId.value && n.cloud_instance_id === createdInstanceId.value) ||
+          (createdInstanceIP.value && n.host === createdInstanceIP.value) ||
+          n.name === formReq.name ||
+          n.name === existingForm.name
+        )
+        if (match) deployedNodeId = match.id
+      })
+    } else if (line.includes('[ERROR]')) {
+      taskStatus.value = 'failed'
+      eventSource?.close()
+    }
+  }
+
+  eventSource.onerror = () => {
+    eventSource?.close()
+    if (taskStatus.value === 'running') {
+      taskStatus.value = 'failed'
+      taskLogs.value.push('[ERROR] 日志流异常中断')
+    }
+  }
+}
+
 // 启动弹性开机流水线
 async function startProvision() {
   if (!canSubmit.value) return
@@ -631,6 +1017,8 @@ async function startProvision() {
   currentStage.value = 1
   taskStatus.value = 'running'
   taskLogs.value = []
+  createdInstanceId.value = ''
+  createdInstanceIP.value = ''
 
   try {
     const res = await api.post('/nodes/cloud/vultr/provision', {
@@ -644,50 +1032,74 @@ async function startProvision() {
     })
 
     const taskId = res.data.task_id
-    const secret = getSecretPath()
-    const token = localStorage.getItem('token') || ''
-    const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&token=${token}`
-
-    if (eventSource) eventSource.close()
-    eventSource = new EventSource(streamURL)
-
-    eventSource.onmessage = (event) => {
-      const line = event.data
-      taskLogs.value.push(line)
-      scrollToBottom()
-
-      // 阶段推进识别
-      if (line.includes('【阶段 1/6】')) currentStage.value = 1
-      else if (line.includes('【阶段 2/6】')) currentStage.value = 2
-      else if (line.includes('【阶段 3/6】')) currentStage.value = 3
-      else if (line.includes('【阶段 4/6】')) currentStage.value = 4
-      else if (line.includes('【阶段 5/6】')) currentStage.value = 5
-      else if (line.includes('【阶段 6/6】')) currentStage.value = 6
-
-      if (line.includes('[SUCCESS]')) {
-        taskStatus.value = 'success'
-        currentStage.value = 6
-        eventSource?.close()
-        fetchNodes().then(() => {
-          const match = useNodeContext().nodes.value.find((n) => n.name === formReq.name)
-          if (match) deployedNodeId = match.id
-        })
-      } else if (line.includes('[ERROR]')) {
-        taskStatus.value = 'failed'
-        eventSource?.close()
-      }
-    }
-
-    eventSource.onerror = () => {
-      eventSource?.close()
-      if (taskStatus.value === 'running') {
-        taskStatus.value = 'failed'
-        taskLogs.value.push('[ERROR] 日志流异常中断')
-      }
-    }
+    subscribeDeployLogs(taskId)
   } catch (err: any) {
     taskStatus.value = 'failed'
     taskLogs.value.push('[ERROR] 启动任务失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
+// 启动已有实例纳管流水线
+async function startProvisionExisting(inst: any) {
+  if (!inst) return
+
+  isSubmitting.value = true
+  cloudStep.value = 'terminal'
+  currentStage.value = 1
+  taskStatus.value = 'running'
+  taskLogs.value = []
+  createdInstanceId.value = inst.id
+  createdInstanceIP.value = inst.main_ip
+
+  try {
+    const res = await api.post('/nodes/cloud/vultr/provision', {
+      instance_id: inst.id,
+      name: existingForm.name.trim() || inst.label,
+      region: inst.region,
+      plan: inst.plan,
+      auth_type: existingForm.auth_type,
+      ssh_password: existingForm.auth_type === 'password' ? existingForm.ssh_password : '',
+      ssh_private_key: existingForm.auth_type === 'key' ? existingForm.ssh_private_key : '',
+      panel_port: existingForm.panel_port || 20888,
+      enable_tls: existingForm.enable_tls,
+    })
+
+    const taskId = res.data.task_id
+    subscribeDeployLogs(taskId)
+  } catch (err: any) {
+    taskStatus.value = 'failed'
+    taskLogs.value.push('[ERROR] 启动纳管任务失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    isSubmitting.value = false
+  }
+}
+
+// 失败重试已有实例纳管（无需重新购买 VPS）
+async function retryExistingInstanceProvision() {
+  if (!createdInstanceId.value) return
+
+  isSubmitting.value = true
+  currentStage.value = 1
+  taskStatus.value = 'running'
+  taskLogs.value = []
+
+  try {
+    const res = await api.post('/nodes/cloud/vultr/provision', {
+      instance_id: createdInstanceId.value,
+      name: formReq.name.trim() || existingForm.name.trim(),
+      region: selectedRegion.value,
+      plan: selectedPlan.value,
+      panel_port: formReq.panel_port || existingForm.panel_port || 20888,
+      enable_tls: formReq.enable_tls,
+    })
+
+    const taskId = res.data.task_id
+    subscribeDeployLogs(taskId)
+  } catch (err: any) {
+    taskStatus.value = 'failed'
+    taskLogs.value.push('[ERROR] 重试纳管失败: ' + (err.response?.data?.error || err.message))
   } finally {
     isSubmitting.value = false
   }
@@ -1507,7 +1919,393 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
+.terminal-failed-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.btn-retry-highlight {
+  background: #0284c7;
+  color: #ffffff;
+}
+.btn-retry-highlight:hover:not(:disabled) {
+  background: #0369a1;
+}
+
+/* 模式切换 Tab 样式 */
+.mode-switch-wrapper {
+  display: flex;
+  margin-bottom: 0.25rem;
+}
+
+.provision-mode-bar {
+  display: flex;
+  background: #0f172a;
+  padding: 0.25rem;
+  border-radius: 0.6rem;
+  border: 1px solid #1e293b;
+  gap: 0.35rem;
+}
+
+.mode-pill-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.45rem 1rem;
+  border-radius: 0.45rem;
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mode-pill-btn:hover {
+  color: #f1f5f9;
+}
+
+.mode-pill-active {
+  background: #1e293b;
+  color: #38bdf8;
+  font-weight: 600;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+}
+
+.mode-badge {
+  font-size: 0.675rem;
+  background: rgba(245, 158, 11, 0.2);
+  color: #fbbf24;
+  padding: 0.05rem 0.35rem;
+  border-radius: 9999px;
+  font-weight: 600;
+}
+
+/* 纳管已有实例工作区样式 */
+.existing-flow {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.existing-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.search-input-box {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  padding: 0.45rem 0.75rem;
+  gap: 0.5rem;
+}
+
+.search-icon {
+  font-size: 0.85rem;
+  color: #64748b;
+}
+
+.existing-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #f8fafc;
+  font-size: 0.8125rem;
+}
+
+.btn-refresh-instances {
+  background: #1e293b;
+  border: 1px solid #334155;
+  color: #94a3b8;
+  padding: 0.45rem 0.85rem;
+  border-radius: 0.5rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.btn-refresh-instances:hover:not(:disabled) {
+  color: #ffffff;
+  border-color: #64748b;
+}
+
+.empty-instances-state {
+  background: #1e293b;
+  border: 1px dashed #334155;
+  border-radius: 0.75rem;
+  padding: 2.5rem 1rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.empty-icon {
+  font-size: 2.2rem;
+}
+
+.empty-text {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #cbd5e1;
+}
+
+.empty-sub {
+  font-size: 0.775rem;
+  color: #64748b;
+}
+
+.instances-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.85rem;
+}
+
+.instance-card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 0.65rem;
+  padding: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.instance-card:hover {
+  border-color: #475569;
+}
+
+.instance-card-selected {
+  border-color: #0ea5e9;
+  background: rgba(14, 165, 233, 0.08);
+}
+
+.instance-card-managed {
+  opacity: 0.75;
+  cursor: default;
+  border-style: dashed;
+}
+
+.instance-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.inst-region-box {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.inst-flag {
+  font-size: 1.1rem;
+}
+
+.inst-city {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #cbd5e1;
+}
+
+.tag-managed {
+  font-size: 0.65rem;
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.25rem;
+  font-weight: 500;
+}
+
+.tag-unmanaged {
+  font-size: 0.65rem;
+  background: rgba(14, 165, 233, 0.15);
+  color: #38bdf8;
+  padding: 0.1rem 0.4rem;
+  border-radius: 0.25rem;
+  font-weight: 500;
+}
+
+.inst-name-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.inst-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #f1f5f9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 180px;
+}
+
+.inst-power {
+  font-size: 0.675rem;
+  font-family: ui-monospace, monospace;
+}
+
+.power-running {
+  color: #34d399;
+}
+
+.power-stopped {
+  color: #94a3b8;
+}
+
+.inst-props-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background: #0f172a;
+  padding: 0.5rem 0.65rem;
+  border-radius: 0.45rem;
+  font-size: 0.725rem;
+}
+
+.inst-prop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.font-highlight {
+  color: #38bdf8;
+  font-weight: 600;
+}
+
+.text-truncate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 170px;
+}
+
+.instance-card-bottom {
+  margin-top: auto;
+  padding-top: 0.35rem;
+}
+
+.btn-select-inst {
+  width: 100%;
+  padding: 0.35rem;
+  background: rgba(14, 165, 233, 0.12);
+  border: 1px solid rgba(14, 165, 233, 0.35);
+  color: #38bdf8;
+  border-radius: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-select-inst:hover {
+  background: rgba(14, 165, 233, 0.25);
+  color: #ffffff;
+}
+
+.btn-selected-active {
+  background: #0ea5e9;
+  color: #ffffff;
+  border-color: #0ea5e9;
+}
+
+.managed-note {
+  font-size: 0.7rem;
+  color: #64748b;
+  display: block;
+  text-align: center;
+}
+
+/* 纳管配置卡片样式 */
+.existing-config-card {
+  background: #1e293b;
+  border: 1px solid #0ea5e9;
+  border-radius: 0.75rem;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  box-shadow: 0 10px 25px -5px rgba(14, 165, 233, 0.15);
+  animation: slideUp 0.2s ease-out;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.config-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  border-bottom: 1px solid #334155;
+  padding-bottom: 0.85rem;
+}
+
+.config-header-icon {
+  font-size: 1.6rem;
+}
+
+.config-header-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.config-header-desc {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.config-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+
+.label-with-action {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.btn-fill-default-pwd {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  color: #fbbf24;
+  font-size: 0.675rem;
+  padding: 0.1rem 0.45rem;
+  border-radius: 0.3rem;
+  cursor: pointer;
+}
+.btn-fill-default-pwd:hover {
+  background: rgba(245, 158, 11, 0.25);
+}
+
+.config-submit-bar {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid #334155;
+  padding-top: 0.85rem;
+}
+
 .mono {
   font-family: ui-monospace, monospace;
 }
 </style>
+

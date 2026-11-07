@@ -338,6 +338,22 @@ func (c *Client) CreateInstance(req CreateInstanceRequest) (*Instance, error) {
 	return &res.Instance, nil
 }
 
+// ListInstances 查询当前账户下的所有虚拟机实例
+func (c *Client) ListInstances() ([]Instance, error) {
+	respBytes, _, err := c.doRequest(http.MethodGet, "/instances?per_page=500", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var res struct {
+		Instances []Instance `json:"instances"`
+	}
+	if err := json.Unmarshal(respBytes, &res); err != nil {
+		return nil, err
+	}
+	return res.Instances, nil
+}
+
 // GetInstance 查询单个实例详情
 func (c *Client) GetInstance(id string) (*Instance, error) {
 	respBytes, _, err := c.doRequest(http.MethodGet, "/instances/"+id, nil)
@@ -362,3 +378,4 @@ func (c *Client) DeleteInstance(id string) error {
 	_, _, err := c.doRequest(http.MethodDelete, "/instances/"+id, nil)
 	return err
 }
+

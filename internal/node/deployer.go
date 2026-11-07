@@ -237,7 +237,18 @@ func RunDeploySSH(task *DeployTask, req DeploySSHRequest) {
 	}
 
 	addr := net.JoinHostPort(req.Host, strconv.Itoa(req.SSHPort))
-	client, err := ssh.Dial("tcp", addr, sshConfig)
+	var client *ssh.Client
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		client, err = ssh.Dial("tcp", addr, sshConfig)
+		if err == nil {
+			break
+		}
+		if attempt < 3 {
+			task.AddLog(fmt.Sprintf("SSH 握手初次建立未成功 (%v)，正在重试 (%d/3)...", err, attempt))
+			time.Sleep(3 * time.Second)
+		}
+	}
 	if err != nil {
 		task.Status = "failed"
 		task.Error = fmt.Sprintf("SSH 握手连接失败: %v", err)

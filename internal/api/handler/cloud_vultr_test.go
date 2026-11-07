@@ -19,6 +19,7 @@ func TestCloudVultrHandlers(t *testing.T) {
 	r.GET("/api/nodes/cloud/vultr/config", GetVultrConfig)
 	r.POST("/api/nodes/cloud/vultr/config", SaveVultrConfig)
 	r.GET("/api/nodes/cloud/vultr/catalog", GetVultrCatalog)
+	r.GET("/api/nodes/cloud/vultr/instances", ListVultrInstances)
 	r.POST("/api/nodes/cloud/vultr/provision", ProvisionVultrNode)
 
 	// 1. GetVultrConfig (Initially unconfigured)
@@ -90,4 +91,28 @@ func TestCloudVultrHandlers(t *testing.T) {
 			t.Fatalf("Expected 400 Bad Request for empty region, got %d", w.Code)
 		}
 	}
+
+	// 5. ProvisionVultrNode with instance_id -> 200 OK (accepts existing instance onboarding)
+	{
+		body, _ := json.Marshal(map[string]any{
+			"instance_id": "inst-test-existing-12345",
+			"name":        "Test Existing",
+		})
+		req, _ := http.NewRequest(http.MethodPost, "/api/nodes/cloud/vultr/provision", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected 200 OK for instance_id provision, got %d: %s", w.Code, w.Body.String())
+		}
+		var res struct {
+			TaskID string `json:"task_id"`
+		}
+		_ = json.Unmarshal(w.Body.Bytes(), &res)
+		if res.TaskID == "" {
+			t.Fatalf("Expected non-empty task_id")
+		}
+	}
 }
+

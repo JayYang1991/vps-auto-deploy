@@ -61,7 +61,22 @@ func TestVultrClientMock(t *testing.T) {
 				_, _ = w.Write([]byte(`{"ssh_key": {"id": "key-uuid-123", "name": "test-key"}}`))
 			}
 		case "/instances":
-			if r.Method == http.MethodPost {
+			if r.Method == http.MethodGet {
+				w.WriteHeader(http.StatusOK)
+				_, _ = w.Write([]byte(`{
+					"instances": [
+						{
+							"id": "inst-uuid-456",
+							"main_ip": "149.28.10.20",
+							"status": "active",
+							"power_status": "running",
+							"label": "my-test-vps",
+							"region": "nrt",
+							"plan": "vc2-1c-1gb"
+						}
+					]
+				}`))
+			} else if r.Method == http.MethodPost {
 				w.WriteHeader(http.StatusAccepted)
 				_, _ = w.Write([]byte(`{
 					"instance": {
@@ -152,7 +167,13 @@ func TestVultrClientMock(t *testing.T) {
 		t.Fatalf("GetInstance failed: %v, polled: %+v", err, polled)
 	}
 
-	// 8. DeleteInstance
+	// 8. ListInstances
+	allInsts, err := client.ListInstances()
+	if err != nil || len(allInsts) != 1 || allInsts[0].ID != "inst-uuid-456" {
+		t.Fatalf("ListInstances failed: %v, allInsts: %+v", err, allInsts)
+	}
+
+	// 9. DeleteInstance
 	err = client.DeleteInstance(inst.ID)
 	if err != nil {
 		t.Fatalf("DeleteInstance failed: %v", err)

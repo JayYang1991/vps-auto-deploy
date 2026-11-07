@@ -16,8 +16,12 @@ type DeployTask struct {
 	Status    string    `json:"status"` // "running" | "success" | "failed"
 	Logs      []string  `json:"logs"`
 	Error     string    `json:"error,omitempty"`
-	NodeID    int64     `json:"node_id,omitempty"`
-	StartedAt time.Time `json:"started_at"`
+	NodeID          int64     `json:"node_id,omitempty"`
+	CloudProvider   string    `json:"cloud_provider,omitempty"`
+	CloudInstanceID string    `json:"cloud_instance_id,omitempty"`
+	CloudRegion     string    `json:"cloud_region,omitempty"`
+	CloudPlan       string    `json:"cloud_plan,omitempty"`
+	StartedAt       time.Time `json:"started_at"`
 
 	listeners []chan string
 	mu        sync.Mutex
