@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,6 +18,12 @@ import (
 type MemberCreateRequest struct {
 	Name    string `json:"name" binding:"required"`
 	Enabled bool   `json:"enabled"`
+}
+
+type MemberUpdateRequest struct {
+	Name    string `json:"name"`
+	UUID    string `json:"uuid"`
+	Enabled *bool  `json:"enabled"`
 }
 
 func ListMembers(c *gin.Context) {
@@ -90,6 +97,69 @@ func ResetMemberToken(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"sub_token": newToken,
 		"message":   "token reset successfully",
+	})
+}
+
+func UpdateMember(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid member id"})
+		return
+	}
+
+	var req MemberUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var existing model.Member
+	err = model.DB.QueryRow("SELECT id, name, uuid, enabled FROM members WHERE id = ?", id).
+		Scan(&existing.ID, &existing.Name, &existing.UUID, &existing.Enabled)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "member not found"})
+		return
+	}
+
+	name := existing.Name
+	if strings.TrimSpace(req.Name) != "" {
+		name = strings.TrimSpace(req.Name)
+	}
+
+	u := existing.UUID
+	if strings.TrimSpace(req.UUID) != "" {
+		if _, err := uuid.Parse(req.UUID); err == nil {
+			u = req.UUID
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid uuid format"})
+			return
+		}
+	}
+
+	enabled := existing.Enabled
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	_, err = model.DB.Exec(
+		"UPDATE members SET name = ?, uuid = ?, enabled = ?, updated_at = ? WHERE id = ?",
+		name, u, enabled, time.Now(), id,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// 重新生成 sing-box 配置以更新 inbounds 中的 users[].name
+	_ = configgen.ApplyAndReload(singbox.ConfigPath)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "member updated successfully",
+		"id":      id,
+		"name":    name,
+		"uuid":    u,
+		"enabled": enabled,
 	})
 }
 

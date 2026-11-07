@@ -103,6 +103,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			// 成员与订阅
 			api.GET("/members", handler.ListMembers)
 			api.POST("/members", handler.CreateMember)
+			api.PUT("/members/:id", handler.UpdateMember)
 			api.POST("/members/:id/reset-token", handler.ResetMemberToken)
 			api.DELETE("/members/:id", handler.DeleteMember)
 

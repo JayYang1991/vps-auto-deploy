@@ -107,7 +107,7 @@
       </div>
 
       <div style="display: flex; justify-content: flex-end; margin-bottom: 1rem;">
-        <button @click="modal.show = true" class="btn btn-primary">+ 添加成员</button>
+        <button @click="openCreateMemberModal" class="btn btn-primary">+ 添加成员</button>
       </div>
 
       <!-- 加载中指示器 -->
@@ -120,7 +120,7 @@
       <div v-else-if="members.length === 0" class="card" style="text-align: center; padding: 3rem;">
         <div style="font-size: 2.25rem; margin-bottom: 0.5rem;">👥</div>
         <p style="color: #94a3b8; margin-bottom: 1.25rem;">暂无团队成员，点击下方按钮添加首个成员以生成客户端专属订阅。</p>
-        <button @click="modal.show = true" class="btn btn-primary">+ 添加首个成员</button>
+        <button @click="openCreateMemberModal" class="btn btn-primary">+ 添加首个成员</button>
       </div>
 
       <!-- 成员卡片列表 -->
@@ -140,6 +140,9 @@
             </div>
 
             <div style="display: flex; gap: 0.5rem;">
+              <button @click="openEditMemberModal(m)" class="btn btn-secondary" style="font-size: 0.8rem;">
+                ✏️ 编辑
+              </button>
               <button @click="resetToken(m.id)" class="btn btn-secondary" style="font-size: 0.8rem;">
                 🔄 重置订阅码
               </button>
@@ -1109,20 +1112,46 @@
       </div>
     </div>
 
-    <!-- 添加成员弹窗 -->
+    <!-- 成员添加与编辑弹窗 -->
     <div v-if="modal.show" class="modal-overlay" @click.self="modal.show = false">
       <div class="modal-content">
-        <h3 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 1.25rem;">添加团队成员</h3>
+        <h3 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 1.25rem;">
+          {{ modal.isEdit ? '编辑成员配置' : '添加团队成员' }}
+        </h3>
 
-        <form @submit.prevent="createMember" style="display: flex; flex-direction: column; gap: 1rem;">
+        <form @submit.prevent="saveMember" style="display: flex; flex-direction: column; gap: 1rem;">
           <div>
-            <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.35rem;">成员名称 / 设备备注</label>
+            <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.35rem;">
+              成员名称 / 用户标识 (Name)
+            </label>
             <input v-model="form.name" class="input" required placeholder="如 Jason-iPhone 或 团队成员A" />
+            <div style="font-size: 0.725rem; color: #64748b; margin-top: 0.25rem;">
+              对应各入站节点（包括 VLESS-WS 与 Reality）配置中 <code style="color: #cbd5e1;">users[].name</code> 属性。
+            </div>
+          </div>
+
+          <div v-if="modal.isEdit">
+            <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.35rem;">
+              专属连接凭据 (UUID)
+            </label>
+            <input v-model="form.uuid" class="input" required placeholder="标准 UUID 格式" />
+            <div style="font-size: 0.725rem; color: #64748b; margin-top: 0.25rem;">
+              修改后各入站中该成员的连接密码将同步更新，需重新分发或更新客户端。
+            </div>
+          </div>
+
+          <div v-if="modal.isEdit">
+            <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; color: #cbd5e1; cursor: pointer;">
+              <input type="checkbox" v-model="form.enabled" />
+              <span>启用此成员 (停用后该成员无法通过各入站连接)</span>
+            </label>
           </div>
 
           <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1rem;">
             <button type="button" @click="modal.show = false" class="btn btn-secondary">取消</button>
-            <button type="submit" class="btn btn-primary">添加并分配专属订阅</button>
+            <button type="submit" class="btn btn-primary">
+              {{ modal.isEdit ? '保存并同步节点配置' : '添加并分配专属订阅' }}
+            </button>
           </div>
         </form>
       </div>
@@ -1233,11 +1262,33 @@ const testingPreview = ref(false)
 
 const modal = reactive({
   show: false,
+  isEdit: false,
+  id: 0,
 })
 
 const form = reactive({
   name: '',
+  uuid: '',
+  enabled: true,
 })
+
+function openCreateMemberModal() {
+  modal.isEdit = false
+  modal.id = 0
+  form.name = ''
+  form.uuid = ''
+  form.enabled = true
+  modal.show = true
+}
+
+function openEditMemberModal(m: any) {
+  modal.isEdit = true
+  modal.id = m.id
+  form.name = m.name
+  form.uuid = m.uuid
+  form.enabled = !!m.enabled
+  modal.show = true
+}
 
 const qrModal = reactive({
   show: false,
@@ -1500,18 +1551,26 @@ function openSubQR(memberName: string, subToken: string, target: string) {
   qrModal.show = true
 }
 
-async function createMember() {
+async function saveMember() {
   try {
-    await api.post('/members', {
-      name: form.name,
-      enabled: true,
-    })
+    if (modal.isEdit) {
+      await api.put(`/members/${modal.id}`, {
+        name: form.name,
+        uuid: form.uuid,
+        enabled: form.enabled,
+      })
+      toast.success(`成员 ${form.name} 更新成功，底层节点 users 配置已同步热重载`)
+    } else {
+      await api.post('/members', {
+        name: form.name,
+        enabled: true,
+      })
+      toast.success(`成员 ${form.name} 创建成功！`)
+    }
     modal.show = false
-    toast.success(`成员 ${form.name} 创建成功！`)
-    form.name = ''
     await loadMembers()
   } catch (err: any) {
-    toast.error('添加失败: ' + (err.response?.data?.error || err.message))
+    toast.error((modal.isEdit ? '更新失败: ' : '添加失败: ') + (err.response?.data?.error || err.message))
   }
 }
 

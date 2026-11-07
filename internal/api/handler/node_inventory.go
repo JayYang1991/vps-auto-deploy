@@ -376,3 +376,4 @@ func fetchRemoteNodeInventory(node *model.Node) ([]model.Inbound, map[int64]stri
 
 	return inbounds, tunnelsMap, nil
 }
+

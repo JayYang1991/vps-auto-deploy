@@ -174,6 +174,19 @@
             </div>
           </div>
 
+          <!-- 用户鉴权与 Name 来源说明 -->
+          <div style="background-color: rgba(30, 41, 59, 0.5); border: 1px dashed #334155; padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 0.8rem; color: #94a3b8;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
+              <span>👥 <strong>用户列表 (users)</strong>：已自动绑定当前所有启用的团队成员。</span>
+              <router-link to="/services?tab=subscriptions&sub=members" class="btn btn-secondary" style="font-size: 0.725rem; padding: 0.2rem 0.5rem; text-decoration: none;">
+                管理成员与 Name ↗
+              </router-link>
+            </div>
+            <div style="font-size: 0.725rem; color: #64748b; margin-top: 0.35rem; line-height: 1.4;">
+              底层 sing-box 节点中的 <code style="color: #cbd5e1;">users[].name</code> 与 <code style="color: #cbd5e1;">uuid</code> 由系统全局多租户统一管理并自动同步生效，无需在每个入站中重复录入。
+            </div>
+          </div>
+
           <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1rem;">
             <button type="button" @click="modal.show = false" class="btn btn-secondary">取消</button>
             <button type="submit" class="btn btn-primary">保存并应用</button>
