@@ -7,7 +7,6 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -55,22 +54,20 @@ func (d *Driver) Category() string {
 	return "proxy"
 }
 
+func GetBinaryPath() string {
+	return component.FindBinary("sing-box", BinaryPath, "/usr/bin/sing-box", "/bin/sing-box", "/snap/bin/sing-box")
+}
+
 func (d *Driver) GetInstalledVersion() (string, error) {
-	if _, err := os.Stat(BinaryPath); errors.Is(err, os.ErrNotExist) {
+	bin := GetBinaryPath()
+	if bin == "" {
 		return "", nil
 	}
-	out, err := executil.RunCommand(3*time.Second, BinaryPath, "version")
+	out, err := executil.RunCommand(3*time.Second, bin, "version")
 	if err != nil {
 		return "", err
 	}
-	lines := strings.Split(out, "\n")
-	if len(lines) > 0 {
-		parts := strings.Fields(lines[0])
-		if len(parts) >= 3 {
-			return parts[2], nil
-		}
-	}
-	return strings.TrimSpace(out), nil
+	return component.ExtractVersion(out), nil
 }
 
 func (d *Driver) GetLatestRelease() (string, error) {
@@ -186,7 +183,9 @@ func (d *Driver) Uninstall() error {
 	_ = d.systemd.Stop()
 	_ = d.systemd.Disable()
 	_ = component.RemoveServiceUnit(UnitName)
-	_ = os.Remove(BinaryPath)
+	if bin := GetBinaryPath(); bin != "" {
+		_ = os.Remove(bin)
+	}
 	return nil
 }
 
@@ -197,12 +196,12 @@ func (d *Driver) Status() (component.ServiceStatus, error) {
 	runningStatus := "not_installed"
 
 	if installed {
-		active = d.systemd.IsActive()
+		active = d.systemd.IsActive() || component.IsProcessRunning("sing-box")
 		if active {
 			runningStatus = "running"
 		} else {
 			runningStatus = d.systemd.Status()
-			if runningStatus == "" {
+			if runningStatus == "" || runningStatus == "unknown" {
 				runningStatus = "stopped"
 			}
 		}
@@ -238,10 +237,11 @@ func (d *Driver) ReloadOrRestart() error {
 
 // CheckConfig 校验配置文件格式是否合法
 func CheckConfig(cfgPath string) error {
-	if _, err := os.Stat(BinaryPath); errors.Is(err, os.ErrNotExist) {
+	bin := GetBinaryPath()
+	if bin == "" {
 		return fmt.Errorf("sing-box is not installed yet")
 	}
-	out, err := executil.RunCommand(5*time.Second, BinaryPath, "check", "-c", cfgPath)
+	out, err := executil.RunCommand(5*time.Second, bin, "check", "-c", cfgPath)
 	if err != nil {
 		return fmt.Errorf("%s: %s", err.Error(), out)
 	}
@@ -250,8 +250,8 @@ func CheckConfig(cfgPath string) error {
 
 // GenerateRealityKeypair 生成 Reality 公私钥对与随机 short_id
 func GenerateRealityKeypair() (privateKey, publicKey, shortID string, err error) {
-	if _, statErr := os.Stat(BinaryPath); statErr == nil {
-		out, runErr := executil.RunCommand(3*time.Second, BinaryPath, "generate", "reality-keypair")
+	if bin := GetBinaryPath(); bin != "" {
+		out, runErr := executil.RunCommand(3*time.Second, bin, "generate", "reality-keypair")
 		if runErr == nil {
 			lines := strings.Split(out, "\n")
 			for _, line := range lines {

@@ -1,12 +1,10 @@
 package cloudflared
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"vps-auto-deploy/internal/component"
@@ -47,22 +45,20 @@ func (d *Driver) Category() string {
 	return "tunnel"
 }
 
+func GetBinaryPath() string {
+	return component.FindBinary("cloudflared", BinaryPath, "/usr/bin/cloudflared", "/bin/cloudflared")
+}
+
 func (d *Driver) GetInstalledVersion() (string, error) {
-	if _, err := os.Stat(BinaryPath); errors.Is(err, os.ErrNotExist) {
+	bin := GetBinaryPath()
+	if bin == "" {
 		return "", nil
 	}
-	out, err := executil.RunCommand(3*time.Second, BinaryPath, "version")
+	out, err := executil.RunCommand(3*time.Second, bin, "version")
 	if err != nil {
 		return "", err
 	}
-	lines := strings.Split(out, "\n")
-	if len(lines) > 0 {
-		parts := strings.Fields(lines[0])
-		if len(parts) >= 3 {
-			return parts[2], nil
-		}
-	}
-	return strings.TrimSpace(out), nil
+	return component.ExtractVersion(out), nil
 }
 
 func (d *Driver) GetLatestRelease() (string, error) {
@@ -140,11 +136,18 @@ func (d *Driver) Uninstall() error {
 	_ = d.systemd.Stop()
 	_ = d.systemd.Disable()
 	_ = component.RemoveServiceUnit(UnitName)
-	_ = os.Remove(BinaryPath)
+	if bin := GetBinaryPath(); bin != "" {
+		_ = os.Remove(bin)
+	}
 	return nil
 }
 
 func (d *Driver) ConfigureService(mode, token string, localPort int, protocol string) error {
+	bin := GetBinaryPath()
+	if bin == "" {
+		bin = BinaryPath
+	}
+
 	var execArgs string
 	if mode == "token" && token != "" {
 		protoArg := ""
@@ -169,7 +172,7 @@ RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
-`, BinaryPath, execArgs)
+`, bin, execArgs)
 
 	if err := component.WriteServiceUnit(UnitName, unitContent); err != nil {
 		return err
@@ -185,12 +188,12 @@ func (d *Driver) Status() (component.ServiceStatus, error) {
 	runningStatus := "not_installed"
 
 	if installed {
-		active = d.systemd.IsActive()
+		active = d.systemd.IsActive() || component.IsProcessRunning("cloudflared")
 		if active {
 			runningStatus = "running"
 		} else {
 			runningStatus = d.systemd.Status()
-			if runningStatus == "" {
+			if runningStatus == "" || runningStatus == "unknown" {
 				runningStatus = "stopped"
 			}
 		}

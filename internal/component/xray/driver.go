@@ -2,13 +2,11 @@ package xray
 
 import (
 	"archive/zip"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"time"
 
 	"vps-auto-deploy/internal/component"
@@ -50,22 +48,20 @@ func (d *Driver) Category() string {
 	return "proxy"
 }
 
+func GetBinaryPath() string {
+	return component.FindBinary("xray", BinaryPath, "/usr/bin/xray", "/bin/xray")
+}
+
 func (d *Driver) GetInstalledVersion() (string, error) {
-	if _, err := os.Stat(BinaryPath); errors.Is(err, os.ErrNotExist) {
+	bin := GetBinaryPath()
+	if bin == "" {
 		return "", nil
 	}
-	out, err := executil.RunCommand(3*time.Second, BinaryPath, "version")
+	out, err := executil.RunCommand(3*time.Second, bin, "version")
 	if err != nil {
 		return "", err
 	}
-	lines := strings.Split(out, "\n")
-	if len(lines) > 0 {
-		parts := strings.Fields(lines[0])
-		if len(parts) >= 2 {
-			return parts[1], nil
-		}
-	}
-	return strings.TrimSpace(out), nil
+	return component.ExtractVersion(out), nil
 }
 
 func (d *Driver) GetLatestRelease() (string, error) {
@@ -198,7 +194,9 @@ func (d *Driver) Uninstall() error {
 	_ = d.systemd.Stop()
 	_ = d.systemd.Disable()
 	_ = component.RemoveServiceUnit(UnitName)
-	_ = os.Remove(BinaryPath)
+	if bin := GetBinaryPath(); bin != "" {
+		_ = os.Remove(bin)
+	}
 	return nil
 }
 
@@ -209,12 +207,12 @@ func (d *Driver) Status() (component.ServiceStatus, error) {
 	runningStatus := "not_installed"
 
 	if installed {
-		active = d.systemd.IsActive()
+		active = d.systemd.IsActive() || component.IsProcessRunning("xray")
 		if active {
 			runningStatus = "running"
 		} else {
 			runningStatus = d.systemd.Status()
-			if runningStatus == "" {
+			if runningStatus == "" || runningStatus == "unknown" {
 				runningStatus = "stopped"
 			}
 		}
@@ -243,3 +241,4 @@ func (d *Driver) Stop() error {
 func (d *Driver) Restart() error {
 	return d.systemd.Restart()
 }
+
