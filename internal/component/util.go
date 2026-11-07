@@ -55,16 +55,16 @@ func GetDefaultConfigPath(name, fileName string) string {
 }
 
 // FindBinary 动态检测系统中的可执行文件路径
-// 优先查找用户空间 ~/.local/bin，其次系统 PATH 与常见候选路径
+// 优先查找系统 PATH，其次用户空间 ~/.local/bin 与常见候选路径
 func FindBinary(name string, candidates ...string) string {
+	if path, err := exec.LookPath(name); err == nil {
+		return path
+	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
 		userBin := filepath.Join(home, ".local", "bin", name)
 		if fi, err := os.Stat(userBin); err == nil && !fi.IsDir() {
 			return userBin
 		}
-	}
-	if path, err := exec.LookPath(name); err == nil {
-		return path
 	}
 	for _, c := range candidates {
 		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
@@ -80,7 +80,7 @@ func IsProcessRunning(name string) bool {
 	return err == nil && strings.TrimSpace(out) != ""
 }
 
-var versionRegex = regexp.MustCompile(`(?:version\s+|Xray\s+|v)?(\d+\.\d+(?:\.\d+)?(?:-[a-zA-Z0-9.]+)?|\d{4}\.\d+\.\d+)`)
+var versionRegex = regexp.MustCompile(`(?:version\s+|v)?(\d+\.\d+(?:\.\d+)?(?:-[a-zA-Z0-9.]+)?|\d{4}\.\d+\.\d+)`)
 
 // ExtractVersion 从命令输出中提取版本号
 func ExtractVersion(output string) string {

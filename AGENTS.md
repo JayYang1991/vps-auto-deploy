@@ -26,7 +26,7 @@
 
 ```go
 type ServiceStatus struct {
-    Name             string `json:"name"`              // 唯一标识，如 "sing-box", "xray", "cloudflared", "subconverter"
+    Name             string `json:"name"`              // 唯一标识，如 "sing-box", "cloudflared", "subconverter"
     DisplayName      string `json:"display_name"`      // 界面展示名，如 "Subconverter 订阅转换"
     Description      string `json:"description"`       // 简短职责描述
     Category         string `json:"category"`          // 分类枚举: "proxy" | "tunnel" | "converter" | "network"
@@ -52,7 +52,7 @@ type ServiceStatus struct {
 受管软件按分发形态分为两类，驱动实现必须区分处理：
 - **单二进制型**（如 `cloudflared`、`sing-box`）：
   - 解压后直接将二进制安装至 `/usr/local/bin/<name>`（或非 Root 模式下的 `~/.local/bin/<name>`）。
-- **目录资产依赖型**（如 `subconverter`、`xray` 含 `geoip.dat/geosite.dat`）：
+- **目录资产依赖型**（如 `subconverter` 含 `rules/`、`snippets/` 等资源）：
   - 例如 `subconverter` 运行时强依赖同级目录下的 `base/`、`rules/`、`snippets/`、`pref.ini`。
   - **规范**：必须将其完整解压至独立运行时工作目录 `/etc/vps-auto-deploy/components/<name>/`（非 Root 为 `~/.config/vps-auto-deploy/components/<name>/`）。
   - 注册 Systemd 服务时，必须显式设置 `WorkingDirectory=/etc/vps-auto-deploy/components/<name>`，确保相对路径资源加载正常。
@@ -143,7 +143,7 @@ type ServiceStatus struct {
 3. **前端分类与联动适配**：
    - 确认 `web/src/views/Components.vue` 的 `categories` 与分类徽标字典包含该组件的 `category`。
    - 若该组件具备业务配置能力，统一归类挂载进 `web/src/views/Services.vue`（业务配置中心）的对应 Tab 分类下，**严禁在 `App.vue` 顶栏新增平铺导航**。
-   - 若该组件赋能现有业务版块（如 `subconverter` 赋能 `订阅与规则`，`xray` 赋能 `代理入站`），通过 `/api/components` 检测其 `installed && active` 状态并渐进式解锁对应功能。
+   - 若该组件赋能现有业务版块（如 `subconverter` 赋能 `订阅与规则`，`hysteria` 赋能 `代理入站`），通过 `/api/components` 检测其 `installed && active` 状态并渐进式解锁对应功能。
 4. **零原生弹窗检查**：运行 `grep -rnE "\b(alert|confirm|prompt)\(" web/src` 确保输出为空。
 5. **构建与验证**：执行 `go test ./...` 与 `bash build.sh`，确保前后端联编生成单一二进制 `bin/vps-panel` 无任何报错。
 

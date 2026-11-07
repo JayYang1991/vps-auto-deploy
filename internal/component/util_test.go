@@ -8,7 +8,6 @@ import (
 	"vps-auto-deploy/internal/component"
 	"vps-auto-deploy/internal/component/cloudflared"
 	"vps-auto-deploy/internal/component/singbox"
-	"vps-auto-deploy/internal/component/xray"
 )
 
 func TestExtractVersion(t *testing.T) {
@@ -31,10 +30,6 @@ func TestExtractVersion(t *testing.T) {
 		{
 			input:    "cloudflared version 2026.10.7",
 			expected: "2026.10.7",
-		},
-		{
-			input:    "Xray 26.10.31 (Xray, Penetrates Everything.) OpenSSL (go1.23.2 linux/amd64)",
-			expected: "26.10.31",
 		},
 		{
 			input:    "v1.2.3",
@@ -80,15 +75,6 @@ echo "cloudflared version 2026.5.1"
 		t.Fatalf("write fake cloudflared: %v", err)
 	}
 
-	// 模拟已预装在 PATH 中的 xray
-	fakeXray := filepath.Join(tmpDir, "xray")
-	xrayScript := `#!/bin/sh
-echo "Xray 26.9.1 (Custom)"
-`
-	if err := os.WriteFile(fakeXray, []byte(xrayScript), 0755); err != nil {
-		t.Fatalf("write fake xray: %v", err)
-	}
-
 	// 测试 sing-box 驱动检测
 	sbDriver := singbox.NewDriver()
 	sbVer, err := sbDriver.GetInstalledVersion()
@@ -123,24 +109,6 @@ echo "Xray 26.9.1 (Custom)"
 	}
 	if !cfStatus.Installed {
 		t.Errorf("expected cloudflared to be reported as Installed=true")
-	}
-
-	// 测试 xray 驱动检测
-	xrayDriver := xray.NewDriver()
-	xrayVer, err := xrayDriver.GetInstalledVersion()
-	if err != nil {
-		t.Fatalf("xray.GetInstalledVersion() error: %v", err)
-	}
-	if xrayVer != "26.9.1" {
-		t.Errorf("expected xray version 26.9.1, got %q", xrayVer)
-	}
-
-	xrayStatus, err := xrayDriver.Status()
-	if err != nil {
-		t.Fatalf("xray.Status() error: %v", err)
-	}
-	if !xrayStatus.Installed {
-		t.Errorf("expected xray to be reported as Installed=true")
 	}
 }
 

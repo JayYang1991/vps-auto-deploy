@@ -84,7 +84,7 @@
 
     <!-- 页脚 -->
     <footer style="border-top: 1px solid #1e293b; padding: 1.25rem; text-align: center; color: #64748b; font-size: 0.75rem;">
-      VPS Auto Deploy &copy; 2026 &middot; Sing-box / Xray &amp; Cloudflared 一体化管理面板
+      VPS Auto Deploy &copy; 2026 &middot; Sing-box &amp; Cloudflared 一体化管理面板
     </footer>
 
     <!-- 全局非阻塞反馈组件 -->
