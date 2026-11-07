@@ -68,6 +68,18 @@
             {{ cfPrefStatus.total_count }}
           </span>
         </button>
+
+        <button
+          @click="activeSubSection = 'inventory'"
+          :class="['btn', activeSubSection === 'inventory' ? 'btn-primary' : 'btn-secondary']"
+          style="padding: 0.35rem 0.85rem; font-size: 0.8rem; border: none;"
+          type="button"
+        >
+          <span>📋 节点清单</span>
+          <span v-if="inventoryData?.total_inbounds" class="badge badge-secondary" style="margin-left: 0.35rem; font-size: 0.7rem;">
+            {{ inventoryData.total_inbounds }}
+          </span>
+        </button>
       </div>
     </div>
 
@@ -810,6 +822,293 @@
       </div>
     </div>
 
+    <!-- ==================== 版块四：节点清单 (按节点主机分组) ==================== -->
+    <div v-if="activeSubSection === 'inventory'">
+      <!-- 控制与操作栏 -->
+      <div class="card" style="margin-bottom: 1.25rem;">
+        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 1rem;">
+          <!-- 左侧：成员凭据切换与搜索 -->
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; flex: 1;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span style="font-size: 0.85rem; color: #94a3b8; white-space: nowrap;">订阅凭据成员:</span>
+              <select
+                v-model="inventoryMemberId"
+                @change="loadInventory"
+                class="input"
+                style="padding: 0.35rem 0.75rem; font-size: 0.85rem; min-width: 140px;"
+              >
+                <option v-for="m in members" :key="m.id" :value="m.id">
+                  {{ m.name }}
+                </option>
+              </select>
+            </div>
+
+            <div style="position: relative; flex: 1; max-width: 320px;">
+              <input
+                v-model="inventorySearchKeyword"
+                type="text"
+                placeholder="搜索节点名 / 主机 / 标签 / 端口 / 协议..."
+                class="input"
+                style="padding: 0.35rem 0.75rem; font-size: 0.85rem; width: 100%;"
+              />
+            </div>
+
+            <button
+              @click="loadInventory"
+              :disabled="loadingInventory"
+              class="btn btn-secondary"
+              style="font-size: 0.8rem; padding: 0.35rem 0.75rem;"
+              title="重新抓取全集群最新节点状态与配置"
+            >
+              {{ loadingInventory ? '⏳ 刷新中...' : '🔄 刷新' }}
+            </button>
+          </div>
+
+          <!-- 右侧：概览与全局批量操作 -->
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <div v-if="inventoryData" style="display: flex; gap: 0.5rem; font-size: 0.8rem; color: #94a3b8;">
+              <span class="badge badge-secondary">🖥️ {{ inventoryData.total_nodes }} 台主机</span>
+              <span class="badge badge-primary">🌐 {{ inventoryData.total_inbounds }} 个入站节点</span>
+            </div>
+            <button
+              @click="copyAllInventoryLinks"
+              class="btn btn-primary"
+              style="font-size: 0.8rem; padding: 0.4rem 0.85rem;"
+            >
+              📋 复制全集群所有链接
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 加载中状态 -->
+      <div v-if="loadingInventory && !inventoryData" class="card" style="text-align: center; padding: 3rem 1rem;">
+        <div style="color: #94a3b8; font-size: 0.95rem;">正在聚合多节点入站配置与实时状态...</div>
+      </div>
+
+      <!-- 空状态 -->
+      <div v-else-if="filteredGroups.length === 0" class="card" style="text-align: center; padding: 3rem 1rem;">
+        <div style="font-size: 2.5rem; margin-bottom: 0.75rem;">📭</div>
+        <div style="font-size: 1rem; font-weight: 600; color: #f1f5f9; margin-bottom: 0.35rem;">
+          {{ inventorySearchKeyword ? '未找到匹配的节点或主机' : '全集群暂无可用入站节点' }}
+        </div>
+        <p style="color: #64748b; font-size: 0.85rem;">
+          {{ inventorySearchKeyword ? '请尝试更换关键词搜索' : '请先在「业务配置 -> Sing-box 核心 -> 入站节点」中添加入站' }}
+        </p>
+      </div>
+
+      <!-- 分组展示节点清单 -->
+      <div v-else style="display: flex; flex-direction: column; gap: 1.25rem;">
+        <div
+          v-for="group in filteredGroups"
+          :key="group.node_id"
+          class="card"
+          style="padding: 0; overflow: hidden; border: 1px solid #1e293b;"
+        >
+          <!-- 节点主机头部 -->
+          <div
+            style="display: flex; justify-content: space-between; align-items: center; padding: 0.85rem 1.25rem; background: #0f172a; border-bottom: 1px solid #1e293b; cursor: pointer;"
+            @click="toggleGroupCollapse(group.node_id)"
+          >
+            <!-- 左侧：主机标识与属性 -->
+            <div style="display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;">
+              <span style="font-size: 0.9rem; color: #64748b; transition: transform 0.2s;" :style="{ transform: collapsedGroups[group.node_id] ? 'rotate(-90deg)' : 'rotate(0deg)' }">
+                ▼
+              </span>
+              <span style="font-size: 1.05rem; font-weight: 600; color: #f8fafc;">
+                🖥️ {{ group.node_name }}
+              </span>
+
+              <!-- 主控 / 被纳管节点标签 -->
+              <span v-if="group.is_master" class="badge badge-primary" style="font-size: 0.7rem;">
+                ⭐ 本机主控
+              </span>
+              <span v-else class="badge badge-secondary" style="font-size: 0.7rem;">
+                🌐 纳管节点
+              </span>
+
+              <!-- 在线状态标签 -->
+              <span
+                v-if="group.status === 'online'"
+                class="badge badge-success"
+                style="font-size: 0.7rem;"
+              >
+                🟢 在线 <span v-if="group.latency_ms > 0">({{ group.latency_ms }}ms)</span>
+              </span>
+              <span
+                v-else-if="group.status === 'offline'"
+                class="badge badge-danger"
+                style="font-size: 0.7rem;"
+              >
+                🔴 离线
+              </span>
+              <span
+                v-else
+                class="badge badge-warning"
+                style="font-size: 0.7rem;"
+              >
+                ⚠️ 异常
+              </span>
+
+              <span v-if="group.region" class="badge badge-secondary" style="font-size: 0.7rem;">
+                📍 {{ group.region }}
+              </span>
+
+              <span style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #64748b;">
+                {{ group.host }}
+              </span>
+            </div>
+
+            <!-- 右侧：该主机快捷批量操作 -->
+            <div style="display: flex; align-items: center; gap: 0.5rem;" @click.stop>
+              <span class="badge badge-secondary" style="font-size: 0.75rem;">
+                {{ group.inbounds.length }} 个入站
+              </span>
+              <button
+                v-if="group.inbounds.length > 0"
+                @click="copyGroupLinks(group)"
+                class="btn btn-secondary"
+                style="font-size: 0.75rem; padding: 0.25rem 0.6rem;"
+                title="复制该主机下的所有入站链接"
+              >
+                📋 复制该主机全部链接
+              </button>
+            </div>
+          </div>
+
+          <!-- 展开内容区域 -->
+          <div v-show="!collapsedGroups[group.node_id]">
+            <!-- 异常告警 -->
+            <div
+              v-if="group.error"
+              style="padding: 0.75rem 1.25rem; background: rgba(239, 68, 68, 0.1); border-bottom: 1px solid rgba(239, 68, 68, 0.2); color: #fca5a5; font-size: 0.8rem;"
+            >
+              ⚠️ 连接该节点异常: {{ group.error }}
+            </div>
+
+            <!-- 主机内无入站 -->
+            <div
+              v-if="group.inbounds.length === 0"
+              style="padding: 2rem; text-align: center; color: #64748b; font-size: 0.85rem;"
+            >
+              该主机暂未配置任何入站规则
+            </div>
+
+            <!-- 入站列表表格 -->
+            <div v-else class="table-container" style="border: none; border-radius: 0;">
+              <table>
+                <thead>
+                  <tr>
+                    <th style="width: 70px;">状态</th>
+                    <th>节点标识 (Tag)</th>
+                    <th>协议类型</th>
+                    <th>监听端口 / 伪装网络</th>
+                    <th>SNI / 路径</th>
+                    <th>客户端连接链接</th>
+                    <th style="width: 220px; text-align: right;">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in group.inbounds" :key="item.inbound_id">
+                    <td>
+                      <span
+                        :class="['badge', item.enabled ? 'badge-success' : 'badge-danger']"
+                        style="font-size: 0.7rem;"
+                      >
+                        {{ item.enabled ? '已启用' : '已停用' }}
+                      </span>
+                    </td>
+                    <td>
+                      <span style="font-weight: 600; color: #f8fafc; font-size: 0.85rem;">
+                        {{ item.tag }}
+                      </span>
+                    </td>
+                    <td>
+                      <span class="badge badge-primary" style="font-size: 0.7rem;">
+                        {{ item.protocol_label || item.protocol }}
+                      </span>
+                    </td>
+                    <td>
+                      <div style="font-family: 'JetBrains Mono', monospace; font-size: 0.8rem;">
+                        <span style="color: #38bdf8;">{{ item.port }}</span>
+                        <span v-if="item.protocol === 'vless-ws'" style="color: #64748b; margin-left: 0.35rem; font-size: 0.725rem;">
+                          (WS)
+                        </span>
+                        <span v-else-if="item.protocol === 'vless-reality'" style="color: #64748b; margin-left: 0.35rem; font-size: 0.725rem;">
+                          (TCP Reality)
+                        </span>
+                      </div>
+                    </td>
+                    <td>
+                      <div v-if="item.server_name" style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #94a3b8;">
+                        SNI: {{ item.server_name }}
+                      </div>
+                      <div v-if="item.path" style="font-family: 'JetBrains Mono', monospace; font-size: 0.725rem; color: #64748b;">
+                        Path: {{ item.path }}
+                      </div>
+                      <div v-if="item.tunnel_domain && item.tunnel_domain !== item.server_name" style="font-family: 'JetBrains Mono', monospace; font-size: 0.725rem; color: #64748b;">
+                        Host: {{ item.tunnel_domain }}
+                      </div>
+                      <span v-if="!item.server_name && !item.path && !item.tunnel_domain" style="color: #475569; font-size: 0.75rem;">-</span>
+                    </td>
+                    <td>
+                      <div
+                        v-if="item.link"
+                        style="max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #94a3b8; background: #0b0f19; padding: 0.2rem 0.4rem; border-radius: 0.25rem;"
+                        :title="item.link"
+                      >
+                        {{ item.link }}
+                      </div>
+                      <span v-else style="color: #64748b; font-size: 0.75rem;">无连接链接</span>
+                    </td>
+                    <td>
+                      <div style="display: flex; justify-content: flex-end; gap: 0.35rem; flex-wrap: wrap;">
+                        <button
+                          v-if="item.link"
+                          @click="copyInboundLink(item.link, item.tag)"
+                          class="btn btn-secondary"
+                          style="font-size: 0.7rem; padding: 0.2rem 0.45rem;"
+                          title="复制客户端连接链接 (URL)"
+                        >
+                          📋 链接
+                        </button>
+                        <button
+                          v-if="item.link"
+                          @click="openInboundQR(item.link, item.tag)"
+                          class="btn btn-secondary"
+                          style="font-size: 0.7rem; padding: 0.2rem 0.45rem;"
+                          title="查看二维码扫码导入"
+                        >
+                          📱 扫码
+                        </button>
+                        <button
+                          v-if="item.clash_snippet"
+                          @click="copyInboundClashSnippet(item.clash_snippet, item.tag)"
+                          class="btn btn-secondary"
+                          style="font-size: 0.7rem; padding: 0.2rem 0.45rem;"
+                          title="复制该节点 Clash 代理节点 YAML 配置片段"
+                        >
+                          📄 Clash
+                        </button>
+                        <button
+                          @click="copyToClipboard(`${item.server_host || group.host}:${item.port}`, '节点地址')"
+                          class="btn btn-secondary"
+                          style="font-size: 0.7rem; padding: 0.2rem 0.45rem;"
+                          title="复制 主机:端口"
+                        >
+                          🌐 地址
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 添加成员弹窗 -->
     <div v-if="modal.show" class="modal-overlay" @click.self="modal.show = false">
       <div class="modal-content">
@@ -871,7 +1170,7 @@ const route = useRoute()
 const { toast } = useToast()
 const { showConfirm } = useConfirm()
 
-const activeSubSection = ref<'members' | 'subconverter' | 'cf_preferred'>('members')
+const activeSubSection = ref<'members' | 'subconverter' | 'cf_preferred' | 'inventory'>('members')
 const members = ref<any[]>([])
 const loading = ref(true)
 
@@ -1392,6 +1691,167 @@ function copySingleCFLink(link: string) {
   copyToClipboard(link, 'VLESS 优选节点链接')
 }
 
+// ================= 节点清单 (按照节点分组) =================
+interface NodeInventoryItem {
+  inbound_id: number
+  tag: string
+  protocol: string
+  protocol_label: string
+  port: number
+  listen: string
+  enabled: boolean
+  server_host: string
+  server_name?: string
+  path?: string
+  tunnel_domain?: string
+  flow?: string
+  fingerprint?: string
+  link: string
+  clash_snippet: string
+}
+
+interface NodeInventoryGroup {
+  node_id: number
+  node_name: string
+  host: string
+  is_master: boolean
+  status: string
+  region: string
+  cloud_provider: string
+  latency_ms: number
+  inbounds: NodeInventoryItem[]
+  inbound_count: number
+  error?: string
+}
+
+interface NodeInventoryData {
+  member: any
+  groups: NodeInventoryGroup[]
+  total_nodes: number
+  total_inbounds: number
+  preferred_ip_count: number
+}
+
+const inventoryData = ref<NodeInventoryData | null>(null)
+const inventoryMemberId = ref<number | ''>('')
+const loadingInventory = ref(false)
+const inventorySearchKeyword = ref('')
+const collapsedGroups = ref<Record<number, boolean>>({})
+
+async function loadInventory() {
+  loadingInventory.value = true
+  try {
+    const params: Record<string, any> = {}
+    if (inventoryMemberId.value) {
+      params.member_id = inventoryMemberId.value
+    }
+    const res = await api.get('/subscription/inventory', { params })
+    inventoryData.value = res.data
+    if (!inventoryMemberId.value && res.data.member?.id) {
+      inventoryMemberId.value = res.data.member.id
+    }
+  } catch (err: any) {
+    toast.error('获取节点清单失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    loadingInventory.value = false
+  }
+}
+
+const filteredGroups = computed(() => {
+  if (!inventoryData.value?.groups) return []
+  const kw = inventorySearchKeyword.value.trim().toLowerCase()
+  if (!kw) return inventoryData.value.groups
+
+  return inventoryData.value.groups
+    .map((group) => {
+      const groupMatches =
+        group.node_name.toLowerCase().includes(kw) ||
+        group.host.toLowerCase().includes(kw) ||
+        (group.region && group.region.toLowerCase().includes(kw))
+
+      if (groupMatches) return group
+
+      const matchedInbounds = (group.inbounds || []).filter(
+        (item) =>
+          item.tag.toLowerCase().includes(kw) ||
+          item.protocol.toLowerCase().includes(kw) ||
+          (item.protocol_label && item.protocol_label.toLowerCase().includes(kw)) ||
+          String(item.port).includes(kw) ||
+          (item.server_name && item.server_name.toLowerCase().includes(kw)) ||
+          (item.path && item.path.toLowerCase().includes(kw)) ||
+          (item.tunnel_domain && item.tunnel_domain.toLowerCase().includes(kw))
+      )
+      return {
+        ...group,
+        inbounds: matchedInbounds,
+      }
+    })
+    .filter(
+      (group) =>
+        group.inbounds.length > 0 ||
+        group.node_name.toLowerCase().includes(kw) ||
+        group.host.toLowerCase().includes(kw)
+    )
+})
+
+function toggleGroupCollapse(nodeId: number) {
+  collapsedGroups.value[nodeId] = !collapsedGroups.value[nodeId]
+}
+
+function copyAllInventoryLinks() {
+  if (!inventoryData.value?.groups) return
+  const links: string[] = []
+  for (const group of inventoryData.value.groups) {
+    for (const item of group.inbounds || []) {
+      if (item.enabled && item.link) {
+        links.push(item.link)
+      }
+    }
+  }
+  if (links.length === 0) {
+    toast.warning('当前无可用节点链接')
+    return
+  }
+  copyToClipboard(links.join('\n'), `全集群 ${links.length} 个节点链接`)
+}
+
+function copyGroupLinks(group: NodeInventoryGroup) {
+  const links = (group.inbounds || [])
+    .filter((item) => item.enabled && item.link)
+    .map((item) => item.link)
+  if (links.length === 0) {
+    toast.warning(`节点 [${group.node_name}] 无可用连接`)
+    return
+  }
+  copyToClipboard(links.join('\n'), `[${group.node_name}] ${links.length} 个节点链接`)
+}
+
+function copyInboundLink(link: string, tag: string) {
+  if (!link) {
+    toast.warning('该节点暂无有效连接链接')
+    return
+  }
+  copyToClipboard(link, `节点 ${tag} 链接`)
+}
+
+function copyInboundClashSnippet(snippet: string, tag: string) {
+  if (!snippet) {
+    toast.warning('该节点暂无 Clash 配置片段')
+    return
+  }
+  copyToClipboard(snippet, `节点 ${tag} Clash 片段`)
+}
+
+function openInboundQR(link: string, tag: string) {
+  if (!link) {
+    toast.warning('该节点暂无有效连接链接')
+    return
+  }
+  qrModal.title = `节点连接二维码 - ${tag}`
+  qrModal.url = link
+  qrModal.show = true
+}
+
 watch(
   () => route.query,
   (query) => {
@@ -1400,6 +1860,9 @@ watch(
     } else if (query.sub === 'cf_preferred' || query.tab === 'cf_preferred' || query.sub === 'cfip') {
       activeSubSection.value = 'cf_preferred'
       loadCFIps()
+    } else if (query.sub === 'inventory' || query.tab === 'inventory' || query.sub === 'nodelist') {
+      activeSubSection.value = 'inventory'
+      loadInventory()
     }
   },
   { immediate: true }
@@ -1409,6 +1872,8 @@ watch(activeSubSection, (sec) => {
   if (sec === 'cf_preferred') {
     loadCFPrefStatus()
     loadCFIps()
+  } else if (sec === 'inventory') {
+    loadInventory()
   }
 })
 
@@ -1423,6 +1888,8 @@ onMounted(async () => {
   ])
   if (activeSubSection.value === 'cf_preferred') {
     await loadCFIps()
+  } else if (activeSubSection.value === 'inventory') {
+    await loadInventory()
   }
   window.addEventListener('node-context-changed', loadMembers)
 })

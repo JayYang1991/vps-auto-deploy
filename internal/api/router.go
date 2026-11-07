@@ -121,6 +121,9 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.GET("/cf-preferred/ips", handler.ListCFPreferredIPs)
 			api.DELETE("/cf-preferred/ips", handler.ClearCFPreferredIPs)
 			api.DELETE("/cf-preferred/ips/:id", handler.DeleteCFPreferredIP)
+
+			// 全集群节点清单聚合分发 (按节点分组)
+			api.GET("/subscription/inventory", handler.GetNodeInventory)
 		}
 	}
 

@@ -247,7 +247,7 @@ function parseRouteParams() {
     activeComponent.value = 'cloudflared'
     return
   }
-  if (tab === 'subconverter' || tab === 'cf_preferred' || tab === 'cfip') {
+  if (tab === 'subconverter' || tab === 'cf_preferred' || tab === 'cfip' || tab === 'inventory' || tab === 'nodelist') {
     activeComponent.value = 'subscriptions'
     return
   }
