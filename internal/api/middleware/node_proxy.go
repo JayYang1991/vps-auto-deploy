@@ -1,7 +1,10 @@
 package middleware
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -74,6 +77,34 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 		// 防中间人攻击 (Phase 1)：若启用 TLS，注入带有硬件证书指纹锁定的 Transport
 		if targetNode.UseTLS {
 			proxy.Transport = crypto.CreatePinnedTransport(targetNode.CertFingerprint)
+		}
+
+		// 当请求系统概览时，若远端检测到的公网 IP 为空或 127.0.0.1，自动补齐为已知节点的直连 Host
+		if strings.HasSuffix(reqPath, "/system/overview") {
+			proxy.ModifyResponse = func(resp *http.Response) error {
+				if resp.StatusCode == http.StatusOK && strings.Contains(resp.Header.Get("Content-Type"), "application/json") {
+					bodyBytes, err := io.ReadAll(resp.Body)
+					if err != nil {
+						return err
+					}
+					_ = resp.Body.Close()
+
+					var data map[string]interface{}
+					if err := json.Unmarshal(bodyBytes, &data); err == nil {
+						pubIP, _ := data["public_ip"].(string)
+						if (pubIP == "" || pubIP == "127.0.0.1") && targetNode.Host != "" && targetNode.Host != "127.0.0.1" && targetNode.Host != "localhost" {
+							data["public_ip"] = targetNode.Host
+							newBody, _ := json.Marshal(data)
+							resp.Body = io.NopCloser(bytes.NewReader(newBody))
+							resp.ContentLength = int64(len(newBody))
+							resp.Header.Set("Content-Length", strconv.Itoa(len(newBody)))
+							return nil
+						}
+					}
+					resp.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+				}
+				return nil
+			}
 		}
 
 		originalDirector := proxy.Director

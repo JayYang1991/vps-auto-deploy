@@ -29,7 +29,7 @@
           <span>🌐</span>
         </div>
         <div style="font-size: 1.35rem; font-weight: 700; margin-top: 0.5rem; color: #38bdf8;">
-          {{ overview.public_ip || '检测中...' }}
+          {{ displayPublicIP }}
         </div>
         <div style="color: #64748b; font-size: 0.75rem; margin-top: 0.35rem;">用于入站连接与 DNS 解析</div>
       </div>
@@ -175,11 +175,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import api from '../api'
 import { useToast } from '../composables/useToast'
+import { useNodeContext } from '../composables/useNodeContext'
 
 const { toast } = useToast()
+const { activeNode } = useNodeContext()
 
 const overview = ref<any>({
   public_ip: '',
@@ -191,17 +193,37 @@ const overview = ref<any>({
   secret_path: '',
 })
 
+// 优先采用系统实际检测的公网 IP；若检测值为空或 127.0.0.1 且当前为受管节点，优雅回退至该节点的直连 Host
+const displayPublicIP = computed(() => {
+  if (overview.value.public_ip && overview.value.public_ip !== '127.0.0.1') {
+    return overview.value.public_ip
+  }
+  if (activeNode.value && !activeNode.value.is_master && activeNode.value.host) {
+    return activeNode.value.host
+  }
+  return overview.value.public_ip || '检测中...'
+})
+
 async function loadOverview() {
   try {
     const res = await api.get('/system/overview')
-    overview.value = res.data
+    if (res.data) {
+      overview.value = {
+        ...overview.value,
+        ...res.data,
+      }
+    }
+  } catch (err: any) {
+    console.error('加载系统概览失败', err)
+  }
 
+  try {
     const compRes = await api.get('/components')
     if (compRes.data) {
       overview.value.components = compRes.data
     }
   } catch (err: any) {
-    console.error('加载系统概览失败', err)
+    console.error('加载组件概览失败', err)
   }
 }
 
@@ -272,5 +294,10 @@ function getStatusText(status: string) {
 
 onMounted(() => {
   loadOverview()
+  window.addEventListener('node-context-changed', loadOverview)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('node-context-changed', loadOverview)
 })
 </script>

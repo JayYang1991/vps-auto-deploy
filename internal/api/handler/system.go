@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"runtime"
@@ -31,6 +32,14 @@ func GetSystemOverview(c *gin.Context) {
 	pubIP, _ := model.GetSetting("public_ip")
 	if pubIP == "" {
 		pubIP = netutil.GetPublicIP()
+	}
+	if pubIP == "" || pubIP == "127.0.0.1" {
+		host, _, err := net.SplitHostPort(c.Request.Host)
+		if err == nil && host != "127.0.0.1" && host != "localhost" && host != "" {
+			if parsed := net.ParseIP(host); parsed != nil && parsed.To4() != nil {
+				pubIP = host
+			}
+		}
 	}
 
 	secretPath, _ := model.GetSetting("secret_path")
