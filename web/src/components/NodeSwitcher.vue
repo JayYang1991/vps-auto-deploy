@@ -74,9 +74,13 @@
       </div>
 
       <div class="dropdown-footer">
+        <button class="deploy-shortcut-btn btn-cloud-shortcut" @click="handleCloudShortcut">
+          <span>☁️</span>
+          <span>云端创建 VPS</span>
+        </button>
         <button class="deploy-shortcut-btn" @click="handleDeployShortcut">
           <span>➕</span>
-          <span>SSH 部署新节点</span>
+          <span>SSH 部署</span>
         </button>
       </div>
     </div>
@@ -88,7 +92,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { useNodeContext } from '../composables/useNodeContext'
 
 const emit = defineEmits<{
-  (e: 'open-cluster-modal', initialTab?: 'nodes' | 'deploy'): void
+  (e: 'open-cluster-modal', initialTab?: 'nodes' | 'cloud' | 'deploy'): void
 }>()
 
 const {
@@ -118,6 +122,11 @@ function selectNode(id: number) {
 function handleOpenCluster() {
   isOpen.value = false
   emit('open-cluster-modal', 'nodes')
+}
+
+function handleCloudShortcut() {
+  isOpen.value = false
+  emit('open-cluster-modal', 'cloud')
 }
 
 function handleDeployShortcut() {
@@ -411,29 +420,44 @@ onUnmounted(() => {
   padding: 0.45rem 0.5rem;
   border-top: 1px solid #1e293b;
   background: #0b1120;
+  display: flex;
+  gap: 0.4rem;
 }
 
 .deploy-shortcut-btn {
-  width: 100%;
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 0.4rem;
+  gap: 0.35rem;
   background: rgba(99, 102, 241, 0.12);
   border: 1px dashed rgba(99, 102, 241, 0.4);
   color: #a5b4fc;
-  padding: 0.45rem;
+  padding: 0.4rem 0.25rem;
   border-radius: 0.45rem;
-  font-size: 0.775rem;
+  font-size: 0.725rem;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.15s ease;
+  white-space: nowrap;
 }
 
 .deploy-shortcut-btn:hover {
   background: rgba(99, 102, 241, 0.22);
   color: #ffffff;
   border-color: #6366f1;
+}
+
+.btn-cloud-shortcut {
+  background: rgba(14, 165, 233, 0.12);
+  border-color: rgba(14, 165, 233, 0.4);
+  color: #7dd3fc;
+}
+
+.btn-cloud-shortcut:hover {
+  background: rgba(14, 165, 233, 0.22);
+  color: #ffffff;
+  border-color: #0ea5e9;
 }
 </style>
 

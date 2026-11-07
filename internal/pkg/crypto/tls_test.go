@@ -75,3 +75,4 @@ func TestTLSGenerationAndPinning(t *testing.T) {
 		t.Fatalf("Expected MITM security intercept message, got: %v", err)
 	}
 }
+

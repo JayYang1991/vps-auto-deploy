@@ -186,3 +186,4 @@ func CreatePinnedHTTPClient(pinnedFingerprint string, timeout time.Duration) *ht
 		Timeout:   timeout,
 	}
 }
+

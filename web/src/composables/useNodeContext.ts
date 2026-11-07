@@ -13,6 +13,10 @@ export interface NodeItem {
   use_tls: boolean
   cert_fingerprint: string
   ssh_host_key: string
+  cloud_provider?: string
+  cloud_instance_id?: string
+  region?: string
+  plan?: string
   status: 'online' | 'offline' | 'deploying' | 'error'
   os_info: string
   latency_ms: number

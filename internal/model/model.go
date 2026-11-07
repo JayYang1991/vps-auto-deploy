@@ -100,6 +100,10 @@ type Node struct {
 	UseTLS            bool      `json:"use_tls"`          // 是否启用 HTTPS 加密通信
 	CertFingerprint   string    `json:"cert_fingerprint"` // 目标节点 TLS 证书 SHA-256 锁定指纹 (防 MITM)
 	SSHHostKey        string    `json:"ssh_host_key"`     // 目标机器 SSH 主机指纹 (TOFU 防冒充)
+	CloudProvider     string    `json:"cloud_provider"`   // "" (自建/手动) | "vultr"
+	CloudInstanceID   string    `json:"cloud_instance_id"`// 云厂商实例唯一 ID
+	Region            string    `json:"region"`           // 数据中心区域代码 (如 nrt, sgp)
+	Plan              string    `json:"plan"`             // 实例规格代码 (如 vc2-1c-1gb)
 	Status            string    `json:"status"`           // "online" | "offline" | "deploying" | "error"
 	OSInfo            string    `json:"os_info"`
 	LatencyMs         int64     `json:"latency_ms"`

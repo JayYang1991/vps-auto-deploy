@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"golang.org/x/crypto/bcrypt"
 	_ "modernc.org/sqlite"
+	"vps-auto-deploy/internal/pkg/crypto"
 )
 
 // InitDB 初始化 SQLite 数据库与数据迁移
@@ -113,6 +114,10 @@ func migrate() error {
 		use_tls INTEGER NOT NULL DEFAULT 0,
 		cert_fingerprint TEXT NOT NULL DEFAULT '',
 		ssh_host_key TEXT NOT NULL DEFAULT '',
+		cloud_provider TEXT NOT NULL DEFAULT '',
+		cloud_instance_id TEXT NOT NULL DEFAULT '',
+		region TEXT NOT NULL DEFAULT '',
+		plan TEXT NOT NULL DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'online',
 		os_info TEXT NOT NULL DEFAULT '',
 		latency_ms INTEGER NOT NULL DEFAULT 0,
@@ -124,10 +129,14 @@ func migrate() error {
 		return err
 	}
 
-	// 增量字段平滑迁移 (防御 MITM 指纹字段)
+	// 增量字段平滑迁移 (防御 MITM 指纹字段与云主机元数据)
 	_, _ = DB.Exec("ALTER TABLE nodes ADD COLUMN use_tls INTEGER NOT NULL DEFAULT 0")
 	_, _ = DB.Exec("ALTER TABLE nodes ADD COLUMN cert_fingerprint TEXT NOT NULL DEFAULT ''")
 	_, _ = DB.Exec("ALTER TABLE nodes ADD COLUMN ssh_host_key TEXT NOT NULL DEFAULT ''")
+	_, _ = DB.Exec("ALTER TABLE nodes ADD COLUMN cloud_provider TEXT NOT NULL DEFAULT ''")
+	_, _ = DB.Exec("ALTER TABLE nodes ADD COLUMN cloud_instance_id TEXT NOT NULL DEFAULT ''")
+	_, _ = DB.Exec("ALTER TABLE nodes ADD COLUMN region TEXT NOT NULL DEFAULT ''")
+	_, _ = DB.Exec("ALTER TABLE nodes ADD COLUMN plan TEXT NOT NULL DEFAULT ''")
 
 	return nil
 }
@@ -213,7 +222,7 @@ func initDefaults() error {
 // GetNode 获取单个节点信息
 func GetNode(id int64) (*Node, error) {
 	row := DB.QueryRow(
-		"SELECT id, name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, status, os_info, latency_ms, created_at, updated_at FROM nodes WHERE id = ?",
+		"SELECT id, name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, cloud_provider, cloud_instance_id, region, plan, status, os_info, latency_ms, created_at, updated_at FROM nodes WHERE id = ?",
 		id,
 	)
 	var n Node
@@ -222,6 +231,7 @@ func GetNode(id int64) (*Node, error) {
 		&n.ID, &n.Name, &n.Host, &n.SSHPort, &n.PanelPort, &n.SecretPath,
 		&n.Username, &n.PasswordEncrypted, &n.APIToken, &isMasterInt,
 		&useTLSInt, &n.CertFingerprint, &n.SSHHostKey,
+		&n.CloudProvider, &n.CloudInstanceID, &n.Region, &n.Plan,
 		&n.Status, &n.OSInfo, &n.LatencyMs, &n.CreatedAt, &n.UpdatedAt,
 	)
 	if err != nil {
@@ -235,7 +245,7 @@ func GetNode(id int64) (*Node, error) {
 // ListNodes 列出所有节点（主控本机始终排在首位）
 func ListNodes() ([]Node, error) {
 	rows, err := DB.Query(
-		"SELECT id, name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, status, os_info, latency_ms, created_at, updated_at FROM nodes ORDER BY is_master DESC, id ASC",
+		"SELECT id, name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, cloud_provider, cloud_instance_id, region, plan, status, os_info, latency_ms, created_at, updated_at FROM nodes ORDER BY is_master DESC, id ASC",
 	)
 	if err != nil {
 		return nil, err
@@ -250,6 +260,7 @@ func ListNodes() ([]Node, error) {
 			&n.ID, &n.Name, &n.Host, &n.SSHPort, &n.PanelPort, &n.SecretPath,
 			&n.Username, &n.PasswordEncrypted, &n.APIToken, &isMasterInt,
 			&useTLSInt, &n.CertFingerprint, &n.SSHHostKey,
+			&n.CloudProvider, &n.CloudInstanceID, &n.Region, &n.Plan,
 			&n.Status, &n.OSInfo, &n.LatencyMs, &n.CreatedAt, &n.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -275,8 +286,8 @@ func CreateNode(n *Node) (int64, error) {
 		useTLSInt = 1
 	}
 	res, err := DB.Exec(
-		"INSERT INTO nodes (name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, status, os_info, latency_ms, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		n.Name, n.Host, n.SSHPort, n.PanelPort, n.SecretPath, n.Username, n.PasswordEncrypted, n.APIToken, isMasterInt, useTLSInt, n.CertFingerprint, n.SSHHostKey, n.Status, n.OSInfo, n.LatencyMs, n.CreatedAt, n.UpdatedAt,
+		"INSERT INTO nodes (name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, cloud_provider, cloud_instance_id, region, plan, status, os_info, latency_ms, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		n.Name, n.Host, n.SSHPort, n.PanelPort, n.SecretPath, n.Username, n.PasswordEncrypted, n.APIToken, isMasterInt, useTLSInt, n.CertFingerprint, n.SSHHostKey, n.CloudProvider, n.CloudInstanceID, n.Region, n.Plan, n.Status, n.OSInfo, n.LatencyMs, n.CreatedAt, n.UpdatedAt,
 	)
 	if err != nil {
 		return 0, err
@@ -298,8 +309,8 @@ func UpdateNode(n *Node) error {
 		useTLSInt = 1
 	}
 	_, err := DB.Exec(
-		"UPDATE nodes SET name = ?, host = ?, ssh_port = ?, panel_port = ?, secret_path = ?, username = ?, password_encrypted = ?, api_token = ?, use_tls = ?, cert_fingerprint = ?, ssh_host_key = ?, status = ?, os_info = ?, latency_ms = ?, updated_at = ? WHERE id = ?",
-		n.Name, n.Host, n.SSHPort, n.PanelPort, n.SecretPath, n.Username, n.PasswordEncrypted, n.APIToken, useTLSInt, n.CertFingerprint, n.SSHHostKey, n.Status, n.OSInfo, n.LatencyMs, n.UpdatedAt, n.ID,
+		"UPDATE nodes SET name = ?, host = ?, ssh_port = ?, panel_port = ?, secret_path = ?, username = ?, password_encrypted = ?, api_token = ?, use_tls = ?, cert_fingerprint = ?, ssh_host_key = ?, cloud_provider = ?, cloud_instance_id = ?, region = ?, plan = ?, status = ?, os_info = ?, latency_ms = ?, updated_at = ? WHERE id = ?",
+		n.Name, n.Host, n.SSHPort, n.PanelPort, n.SecretPath, n.Username, n.PasswordEncrypted, n.APIToken, useTLSInt, n.CertFingerprint, n.SSHHostKey, n.CloudProvider, n.CloudInstanceID, n.Region, n.Plan, n.Status, n.OSInfo, n.LatencyMs, n.UpdatedAt, n.ID,
 	)
 	return err
 }
@@ -320,6 +331,28 @@ func UpdateNodeToken(id int64, token string) error {
 func DeleteNode(id int64) error {
 	_, err := DB.Exec("DELETE FROM nodes WHERE id = ? AND is_master = 0", id)
 	return err
+}
+
+// GetVultrAPIKey 获取解密后的 Vultr API Token
+func GetVultrAPIKey() (string, error) {
+	enc, err := GetSetting("vultr_api_key_encrypted")
+	if err != nil || enc == "" {
+		return "", err
+	}
+	jwtSecret, _ := GetSetting("jwt_secret")
+	key := crypto.DeriveKey(jwtSecret)
+	return crypto.DecryptAESGCM(enc, key)
+}
+
+// SetVultrAPIKey 加密存储 Vultr API Token
+func SetVultrAPIKey(apiKey string) error {
+	jwtSecret, _ := GetSetting("jwt_secret")
+	key := crypto.DeriveKey(jwtSecret)
+	enc, err := crypto.EncryptAESGCM(apiKey, key)
+	if err != nil {
+		return err
+	}
+	return SetSetting("vultr_api_key_encrypted", enc)
 }
 
 // GetSetting 获取单个配置

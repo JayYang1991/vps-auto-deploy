@@ -121,9 +121,9 @@ const currentRoute = computed(() => route.path)
 const viewKey = computed(() => `${route.fullPath}_node_${activeNodeId.value}`)
 
 const showClusterModal = ref(false)
-const clusterModalTab = ref<'nodes' | 'deploy' | 'import'>('nodes')
+const clusterModalTab = ref<'nodes' | 'cloud' | 'deploy' | 'import'>('nodes')
 
-function openClusterModal(tab: 'nodes' | 'deploy' | 'import' = 'nodes') {
+function openClusterModal(tab: 'nodes' | 'cloud' | 'deploy' | 'import' = 'nodes') {
   clusterModalTab.value = tab
   showClusterModal.value = true
 }

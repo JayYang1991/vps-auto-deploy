@@ -209,7 +209,7 @@ func PingNode(c *gin.Context) {
 	})
 }
 
-// DeleteNode 删除指定纳管节点
+// DeleteNode 删除指定纳管节点（支持联动彻底销毁云端实例）
 func DeleteNode(c *gin.Context) {
 	idStr := c.Param("id")
 	id, err := strconv.ParseInt(idStr, 10, 64)
@@ -223,12 +223,45 @@ func DeleteNode(c *gin.Context) {
 		return
 	}
 
+	// 检查是否要求同时销毁云端实例
+	destroyCloud := c.Query("destroy_cloud") == "true" || c.Query("destroy_cloud") == "1"
+	if destroyCloud {
+		masterPassword := c.Query("master_password")
+		if masterPassword == "" {
+			var body struct {
+				MasterPassword string `json:"master_password"`
+			}
+			_ = c.ShouldBindJSON(&body)
+			masterPassword = body.MasterPassword
+		}
+
+		if masterPassword == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "彻底销毁云端实例需提供主控管理员密码进行二次安全校验"})
+			return
+		}
+
+		masterPassHash, err := model.GetSetting("admin_password_hash")
+		if err != nil || bcrypt.CompareHashAndPassword([]byte(masterPassHash), []byte(masterPassword)) != nil {
+			c.JSON(http.StatusForbidden, gin.H{"error": "主控管理员密码错误，二次安全验证失败！拒绝销毁云主机"})
+			return
+		}
+
+		if err := node.DestroyVultrInstanceIfBound(id); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "销毁云厂商主机失败: " + err.Error()})
+			return
+		}
+	}
+
 	if err := model.DeleteNode(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "删除失败: " + err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "从数据库删除节点失败: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "节点已移出集群"})
+	msg := "节点已移出集群"
+	if destroyCloud {
+		msg = "节点已移出集群，且云端实例已成功向云厂商提交销毁请求并停止计费"
+	}
+	c.JSON(http.StatusOK, gin.H{"message": msg})
 }
 
 // RevealNodeCredentials 二次安全鉴权：验证主控密码后解密查看被纳管节点凭据

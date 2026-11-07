@@ -27,6 +27,14 @@
 
         <button
           class="tab-btn"
+          :class="{ 'tab-btn-active': activeTab === 'cloud' }"
+          @click="activeTab = 'cloud'"
+        >
+          <span>☁️ 云端弹性创建</span>
+        </button>
+
+        <button
+          class="tab-btn"
           :class="{ 'tab-btn-active': activeTab === 'deploy' }"
           @click="activeTab = 'deploy'"
         >
@@ -58,6 +66,7 @@
                   <div class="node-name-row">
                     <span class="card-name">{{ item.name }}</span>
                     <span v-if="item.is_master" class="tag-master">主控节点</span>
+                    <span v-if="item.cloud_provider === 'vultr'" class="tag-vultr">☁️ Vultr · {{ (item.region || '').toUpperCase() }}</span>
                     <span v-if="item.use_tls" class="tag-tls" title="已启用自签 TLS 证书指纹锁定，抵御中间人劫持">🛡️ TLS 防劫持</span>
                     <span v-if="item.id === activeNodeId" class="tag-current">当前视角</span>
                   </div>
@@ -82,6 +91,10 @@
 
             <!-- 节点参数属性明细 -->
             <div class="node-props">
+              <div v-if="item.cloud_provider" class="prop-item">
+                <span class="prop-label">云端规格:</span>
+                <span class="prop-val mono">{{ item.cloud_provider }} · {{ item.plan || 'VPS' }}</span>
+              </div>
               <div class="prop-item">
                 <span class="prop-label">系统环境:</span>
                 <span class="prop-val">{{ item.os_info || 'Linux' }}</span>
@@ -153,7 +166,12 @@
         </div>
       </div>
 
-      <!-- Tab 2: SSH 远程一键部署 -->
+      <!-- Tab 2: 云端弹性创建 -->
+      <div v-else-if="activeTab === 'cloud'" class="tab-content" style="padding: 1.25rem;">
+        <VultrProvisioner @deployed="handleCloudDeployed" @close="close" />
+      </div>
+
+      <!-- Tab 3: SSH 远程一键部署 -->
       <div v-else-if="activeTab === 'deploy'" class="tab-content">
         <!-- 部署配置表单 -->
         <div v-if="deployStep === 'form'" class="deploy-form">
@@ -478,6 +496,61 @@
         </div>
       </div>
     </div>
+
+    <!-- 云端节点销毁二次安全确认模态框 -->
+    <div v-if="cloudDeleteModalVisible" class="reveal-overlay" @click.self="closeCloudDeleteModal">
+      <div class="reveal-card">
+        <div class="reveal-header">
+          <div class="reveal-title-box">
+            <span class="reveal-icon">☁️</span>
+            <div>
+              <h4 class="reveal-title">移出/销毁云端实例确认</h4>
+              <p class="reveal-desc">节点由 Vultr 云平台纳管创建，请选择处理策略</p>
+            </div>
+          </div>
+          <button class="close-btn" @click="closeCloudDeleteModal" type="button">✕</button>
+        </div>
+
+        <div class="reveal-body">
+          <div class="reveal-prompt">
+            您正在操作云节点 <strong>{{ targetDeleteNode?.name }}</strong> ({{ targetDeleteNode?.host }} · {{ (targetDeleteNode?.region || '').toUpperCase() }})。
+          </div>
+
+          <div class="cloud-delete-option-box" style="margin-top: 1rem; background: rgba(239, 68, 68, 0.08); border: 1px dashed rgba(239, 68, 68, 0.35); padding: 0.85rem; border-radius: 0.5rem;">
+            <label class="checkbox-container">
+              <input type="checkbox" v-model="destroyCloudInstance" />
+              <span class="checkbox-title" style="color: #fca5a5;">💥 同时彻底销毁 Vultr 云端服务器实例 (立即停止扣费)</span>
+            </label>
+            <div class="field-hint" style="color: #cbd5e1; margin-top: 0.35rem;">
+              {{ destroyCloudInstance ? '警告：此操作不可逆！Vultr 远端服务器与系统磁盘将被永久删除并终止计费。' : '仅解除集群纳管，保留 Vultr 云服务器继续运行（将持续产生计费）。' }}
+            </div>
+          </div>
+
+          <!-- 若选择彻底销毁云服务器，必须二次验证主控管理员密码 -->
+          <div v-if="destroyCloudInstance" class="form-group" style="margin-top: 1rem;">
+            <label>主控管理员密码 <span class="req">*</span></label>
+            <input
+              v-model="deleteMasterPassword"
+              type="password"
+              placeholder="请输入当前主控端管理员密码以授权销毁"
+              @keyup.enter="submitCloudDelete"
+            />
+          </div>
+
+          <div class="reveal-footer" style="margin-top: 1.25rem;">
+            <button class="btn-secondary" @click="closeCloudDeleteModal">取消</button>
+            <button
+              class="btn-action"
+              :class="destroyCloudInstance ? 'btn-danger-strong' : 'btn-primary'"
+              @click="submitCloudDelete"
+              :disabled="deletingNode || (destroyCloudInstance && !deleteMasterPassword)"
+            >
+              <span>{{ deletingNode ? '⏳ 正在处理...' : (destroyCloudInstance ? '💥 确认销毁并移出' : '🔗 仅解除纳管') }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -487,10 +560,11 @@ import api, { getSecretPath } from '../api'
 import { useNodeContext, NodeItem } from '../composables/useNodeContext'
 import { useToast, copyToClipboard } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
+import VultrProvisioner from './VultrProvisioner.vue'
 
 const props = defineProps<{
   modelValue: boolean
-  initialTab?: 'nodes' | 'deploy' | 'import'
+  initialTab?: 'nodes' | 'cloud' | 'deploy' | 'import'
 }>()
 
 const emit = defineEmits<{
@@ -506,7 +580,7 @@ const {
   switchNode,
 } = useNodeContext()
 
-const activeTab = ref<'nodes' | 'deploy' | 'import'>('nodes')
+const activeTab = ref<'nodes' | 'cloud' | 'deploy' | 'import'>('nodes')
 
 watch(
   () => props.initialTab,
@@ -555,8 +629,74 @@ async function handlePing(id: number) {
   }
 }
 
+// ==================== 云端 VPS 创建完成回调 ====================
+async function handleCloudDeployed(nodeId: number) {
+  await fetchNodes()
+  activeTab.value = 'nodes'
+  if (nodeId) {
+    switchNode(nodeId)
+    toast.success('云服务器已创建并完成纳管，已切换管理视角')
+    close()
+  }
+}
+
+// ==================== 云节点销毁与移出 ====================
+const cloudDeleteModalVisible = ref(false)
+const targetDeleteNode = ref<NodeItem | null>(null)
+const destroyCloudInstance = ref(true)
+const deleteMasterPassword = ref('')
+const deletingNode = ref(false)
+
+function closeCloudDeleteModal() {
+  cloudDeleteModalVisible.value = false
+  targetDeleteNode.value = null
+  deleteMasterPassword.value = ''
+}
+
+async function submitCloudDelete() {
+  if (!targetDeleteNode.value) return
+  if (destroyCloudInstance.value && !deleteMasterPassword.value) {
+    toast.warning('请输入主控管理员密码')
+    return
+  }
+
+  deletingNode.value = true
+  try {
+    const nodeId = targetDeleteNode.value.id
+    await api.delete(`/nodes/${nodeId}`, {
+      params: {
+        destroy_cloud: destroyCloudInstance.value,
+        master_password: deleteMasterPassword.value,
+      },
+    })
+
+    toast.success(
+      destroyCloudInstance.value
+        ? '云服务器已成功销毁并移出集群'
+        : '节点已成功解除纳管'
+    )
+    if (activeNodeId.value === nodeId) {
+      switchNode(1)
+    }
+    closeCloudDeleteModal()
+    await fetchNodes()
+  } catch (err: any) {
+    toast.error('操作失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    deletingNode.value = false
+  }
+}
+
 // 删除节点
 async function handleDelete(item: NodeItem) {
+  if (item.cloud_provider === 'vultr') {
+    targetDeleteNode.value = item
+    destroyCloudInstance.value = true
+    deleteMasterPassword.value = ''
+    cloudDeleteModalVisible.value = true
+    return
+  }
+
   const ok = await showConfirm({
     title: '移出集群确认',
     message: `确定要将节点「${item.name}」(${item.host}) 移出本主控集群吗？（此操作仅解除纳管，不会删除远端服务器上的数据）`,
@@ -1537,6 +1677,25 @@ onUnmounted(() => {
 .btn-mini-copy:hover {
   background: rgba(99, 102, 241, 0.35);
   color: #ffffff;
+}
+
+.tag-vultr {
+  font-size: 0.625rem;
+  background: rgba(14, 165, 233, 0.2);
+  color: #38bdf8;
+  border: 1px solid rgba(14, 165, 233, 0.35);
+  padding: 0.05rem 0.35rem;
+  border-radius: 0.25rem;
+  font-weight: 500;
+}
+
+.btn-danger-strong {
+  background: #dc2626;
+  color: #ffffff;
+  border-color: #ef4444;
+}
+.btn-danger-strong:hover:not(:disabled) {
+  background: #b91c1c;
 }
 </style>
 

@@ -42,6 +42,13 @@ func TestNodeCRUD(t *testing.T) {
 		PasswordEncrypted: "enc-password-base64",
 		APIToken:          "mock-token-abc",
 		IsMaster:          false,
+		UseTLS:            true,
+		CertFingerprint:   "aa:bb:cc",
+		SSHHostKey:        "ssh-ed25519-mock",
+		CloudProvider:     "vultr",
+		CloudInstanceID:   "subid-12345",
+		Region:            "nrt",
+		Plan:              "vc2-1c-1gb",
 		Status:            "online",
 		OSInfo:            "linux/amd64",
 		LatencyMs:         45,
@@ -60,8 +67,18 @@ func TestNodeCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetNode failed: %v", err)
 	}
-	if fetched.Name != "Tokyo JP-1" || fetched.Host != "1.2.3.4" || fetched.IsMaster {
+	if fetched.Name != "Tokyo JP-1" || fetched.Host != "1.2.3.4" || fetched.IsMaster || fetched.CloudProvider != "vultr" || fetched.Region != "nrt" {
 		t.Fatalf("Fetched node mismatch: %+v", fetched)
+	}
+
+	// Test Vultr API Key Encrypt / Decrypt
+	err = SetVultrAPIKey("VULTR_SECRET_TOKEN_XYZ_123")
+	if err != nil {
+		t.Fatalf("SetVultrAPIKey failed: %v", err)
+	}
+	apiKey, err := GetVultrAPIKey()
+	if err != nil || apiKey != "VULTR_SECRET_TOKEN_XYZ_123" {
+		t.Fatalf("GetVultrAPIKey failed: got %s, err: %v", apiKey, err)
 	}
 
 	// Update status
