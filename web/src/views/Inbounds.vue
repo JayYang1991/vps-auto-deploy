@@ -142,7 +142,7 @@
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
               <div>
                 <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">伪装目标域名 (SNI)</label>
-                <input v-model="realitySpec.server_name" class="input" placeholder="www.microsoft.com" required />
+                <input v-model="realitySpec.server_name" class="input" placeholder="dl.google.com" required />
               </div>
               <div>
                 <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">客户端指纹 (Fingerprint)</label>
@@ -242,8 +242,8 @@ const form = reactive({
 
 const realitySpec = reactive({
   flow: 'xtls-rprx-vision',
-  server_name: 'www.microsoft.com',
-  handshake_server: 'www.microsoft.com',
+  server_name: 'dl.google.com',
+  handshake_server: 'dl.google.com',
   handshake_port: 443,
   private_key: '',
   public_key: '',
@@ -296,6 +296,8 @@ async function openCreateModal() {
   form.port = 443
   form.tag = 'vless-reality-443'
   form.enabled = true
+  realitySpec.server_name = 'dl.google.com'
+  realitySpec.handshake_server = 'dl.google.com'
   await generateRealityKeys()
 }
 
@@ -311,8 +313,8 @@ function openEditModal(ib: any) {
   const spec = parseSpec(ib.spec_json)
   if (ib.protocol === 'vless-reality') {
     realitySpec.flow = spec.flow || 'xtls-rprx-vision'
-    realitySpec.server_name = spec.server_name || 'www.microsoft.com'
-    realitySpec.handshake_server = spec.handshake_server || spec.server_name || 'www.microsoft.com'
+    realitySpec.server_name = spec.server_name || 'dl.google.com'
+    realitySpec.handshake_server = spec.handshake_server || spec.server_name || 'dl.google.com'
     realitySpec.handshake_port = spec.handshake_port || 443
     realitySpec.private_key = spec.private_key || ''
     realitySpec.public_key = spec.public_key || ''
@@ -363,8 +365,14 @@ function onProtocolChange() {
 }
 
 async function submitInbound() {
-  let specObj = {}
+  let specObj: any = {}
   if (form.protocol === 'vless-reality') {
+    if (!realitySpec.server_name) {
+      realitySpec.server_name = 'dl.google.com'
+    }
+    if (!realitySpec.handshake_server) {
+      realitySpec.handshake_server = realitySpec.server_name
+    }
     specObj = realitySpec
   } else {
     specObj = wsSpec

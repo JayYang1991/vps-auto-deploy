@@ -53,8 +53,8 @@ type Outbound struct {
 // VLESSRealitySpec 是 VLESS-Reality 协议特定的参数
 type VLESSRealitySpec struct {
 	Flow            string `json:"flow"`             // 默认 xtls-rprx-vision
-	ServerName      string `json:"server_name"`      // SNI (如 www.microsoft.com)
-	HandshakeServer string `json:"handshake_server"` // 目标服务器
+	ServerName      string `json:"server_name"`      // SNI (默认 dl.google.com)
+	HandshakeServer string `json:"handshake_server"` // 目标服务器 (默认 dl.google.com)
 	HandshakePort   int    `json:"handshake_port"`   // 目标端口 (默认 443)
 	PrivateKey      string `json:"private_key"`      // Reality 私钥 (服务端)
 	PublicKey       string `json:"public_key"`       // Reality 公钥 (客户端)

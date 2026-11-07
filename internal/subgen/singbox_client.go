@@ -50,6 +50,11 @@ func GenerateSingboxClientConfig(member *model.Member) (string, error) {
 				fp = "chrome"
 			}
 
+			serverName := spec.ServerName
+			if serverName == "" {
+				serverName = "dl.google.com"
+			}
+
 			outbound := map[string]interface{}{
 				"type":        "vless",
 				"tag":         tag,
@@ -59,7 +64,7 @@ func GenerateSingboxClientConfig(member *model.Member) (string, error) {
 				"flow":        flow,
 				"tls": map[string]interface{}{
 					"enabled":     true,
-					"server_name": spec.ServerName,
+					"server_name": serverName,
 					"utls": map[string]interface{}{
 						"enabled":     true,
 						"fingerprint": fp,

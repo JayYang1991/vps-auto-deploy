@@ -48,12 +48,17 @@ func GenerateURIs(member *model.Member) ([]string, error) {
 				fp = "chrome"
 			}
 
+			sni := spec.ServerName
+			if sni == "" {
+				sni = "dl.google.com"
+			}
+
 			// vless://<uuid>@<server>:<port>?encryption=none&flow=xtls-rprx-vision&security=reality&sni=<sni>&fp=chrome&pbk=<pbk>&sid=<sid>&type=tcp#<remark>
 			q := url.Values{}
 			q.Set("encryption", "none")
 			q.Set("flow", flow)
 			q.Set("security", "reality")
-			q.Set("sni", spec.ServerName)
+			q.Set("sni", sni)
 			q.Set("fp", fp)
 			q.Set("pbk", spec.PublicKey)
 			q.Set("sid", spec.ShortID)

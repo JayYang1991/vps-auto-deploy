@@ -64,6 +64,11 @@ func GenerateClashMetaConfig(member *model.Member) (string, error) {
 				fp = "chrome"
 			}
 
+			serverName := spec.ServerName
+			if serverName == "" {
+				serverName = "dl.google.com"
+			}
+
 			proxy := map[string]interface{}{
 				"name":               name,
 				"type":               "vless",
@@ -74,7 +79,7 @@ func GenerateClashMetaConfig(member *model.Member) (string, error) {
 				"tls":                true,
 				"udp":                true,
 				"flow":               flow,
-				"servername":         spec.ServerName,
+				"servername":         serverName,
 				"client-fingerprint": fp,
 				"reality-opts": map[string]interface{}{
 					"public-key": spec.PublicKey,

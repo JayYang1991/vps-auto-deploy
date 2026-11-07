@@ -196,13 +196,22 @@ func GenerateServerConfig() (*SingboxConfig, error) {
 				hsPort = 443
 			}
 
+			serverName := spec.ServerName
+			if serverName == "" {
+				serverName = "dl.google.com"
+			}
+			handshakeServer := spec.HandshakeServer
+			if handshakeServer == "" {
+				handshakeServer = serverName
+			}
+
 			inboundCfg.TLS = &InboundTLSConfig{
 				Enabled:    true,
-				ServerName: spec.ServerName,
+				ServerName: serverName,
 				Reality: &InboundRealityConfig{
 					Enabled: true,
 					Handshake: map[string]interface{}{
-						"server":      spec.HandshakeServer,
+						"server":      handshakeServer,
 						"server_port": hsPort,
 					},
 					PrivateKey: spec.PrivateKey,
