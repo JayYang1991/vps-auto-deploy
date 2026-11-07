@@ -103,7 +103,7 @@
             <div style="display: flex; align-items: center; gap: 0.5rem;">
               <span style="font-weight: 600; font-size: 0.95rem; color: #f8fafc;">{{ c.display_name || c.name }}</span>
               <span class="badge badge-secondary" style="font-size: 0.65rem;">
-                {{ c.category === 'proxy' ? '代理核心' : '隧道穿透' }}
+                {{ getCategoryLabel(c.category) }}
               </span>
             </div>
             <div style="color: #94a3b8; font-size: 0.8rem; margin-top: 0.35rem;">
@@ -207,6 +207,16 @@ async function enableBBR() {
   } catch (err: any) {
     toast.error('开启失败: ' + (err.response?.data?.error || err.message))
   }
+}
+
+function getCategoryLabel(cat: string) {
+  const map: Record<string, string> = {
+    proxy: '代理核心',
+    tunnel: '隧道穿透',
+    converter: '订阅与规则',
+    network: '网络工具',
+  }
+  return map[cat] || cat
 }
 
 function getStatusBadge(status: string) {

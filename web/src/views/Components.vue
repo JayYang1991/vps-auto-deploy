@@ -57,7 +57,7 @@
               <div style="display: flex; align-items: center; gap: 0.5rem;">
                 <h3 style="font-size: 1.2rem; font-weight: 600; color: #f8fafc;">{{ c.display_name || c.name }}</h3>
                 <span class="badge badge-secondary" style="font-size: 0.7rem;">
-                  {{ c.category === 'proxy' ? '代理核心' : '隧道穿透' }}
+                  {{ getCategoryLabel(c.category) }}
                 </span>
               </div>
               <p style="color: #94a3b8; font-size: 0.825rem; margin-top: 0.4rem; line-height: 1.45;">
@@ -272,6 +272,7 @@ const categories = [
   { key: 'all', label: '全部服务' },
   { key: 'proxy', label: '代理核心' },
   { key: 'tunnel', label: '隧道穿透' },
+  { key: 'converter', label: '订阅与规则' },
 ]
 const activeCategory = ref('all')
 const checkingUpdates = ref(false)
@@ -498,6 +499,16 @@ function closeLogs() {
   logModal.show = false
 }
 
+function getCategoryLabel(cat: string) {
+  const map: Record<string, string> = {
+    proxy: '代理核心',
+    tunnel: '隧道穿透',
+    converter: '订阅与规则',
+    network: '网络工具',
+  }
+  return map[cat] || cat
+}
+
 function getStatusBadge(status: string) {
   if (status === 'running') return 'badge-success'
   if (status === 'stopped') return 'badge-secondary'
@@ -536,3 +547,4 @@ onMounted(async () => {
   50% { opacity: 0.4; }
 }
 </style>
+

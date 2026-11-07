@@ -65,3 +65,4 @@ export async function copyToClipboard(text: string, label = '内容'): Promise<b
     return false
   }
 }
+

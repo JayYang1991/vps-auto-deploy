@@ -40,6 +40,7 @@ type ComponentDriver interface {
 var (
 	driversLock sync.RWMutex
 	drivers     = make(map[string]ComponentDriver)
+	driverOrder []string
 
 	// 版本缓存，避免频繁触发 GitHub API 限流
 	versionCacheLock sync.RWMutex
@@ -55,10 +56,13 @@ type cacheItem struct {
 	FetchedAt time.Time
 }
 
-// Register 注册组件驱动
+// Register 注册组件驱动（保持注册顺序稳定）
 func Register(d ComponentDriver) {
 	driversLock.Lock()
 	defer driversLock.Unlock()
+	if _, exists := drivers[d.Name()]; !exists {
+		driverOrder = append(driverOrder, d.Name())
+	}
 	drivers[d.Name()] = d
 }
 
@@ -73,13 +77,14 @@ func Get(name string) (ComponentDriver, error) {
 	return d, nil
 }
 
-// ListAll 列出所有组件状态
+// ListAll 按注册顺序稳定列出所有组件状态
 func ListAll(fetchLatest bool) ([]ServiceStatus, error) {
 	driversLock.RLock()
 	defer driversLock.RUnlock()
 
 	var list []ServiceStatus
-	for _, d := range drivers {
+	for _, name := range driverOrder {
+		d := drivers[name]
 		status, err := d.Status()
 		if err != nil {
 			status = ServiceStatus{
