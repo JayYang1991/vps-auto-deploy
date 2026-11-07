@@ -41,6 +41,15 @@ func ListTunnels(c *gin.Context) {
 	c.JSON(http.StatusOK, list)
 }
 
+func extractToken(raw string) string {
+	raw = regexp.MustCompile(`[\r\n\t]+`).ReplaceAllString(raw, " ")
+	re := regexp.MustCompile(`(?:--token|install)\s+([A-Za-z0-9_\-\.]+)`)
+	if matches := re.FindStringSubmatch(raw); len(matches) > 1 {
+		return matches[1]
+	}
+	return regexp.MustCompile(`\s+`).ReplaceAllString(raw, "")
+}
+
 func CreateTunnel(c *gin.Context) {
 	var req TunnelCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -48,6 +57,7 @@ func CreateTunnel(c *gin.Context) {
 		return
 	}
 
+	token := extractToken(req.Token)
 	edgeIP := req.EdgeIPVersion
 	if edgeIP == "" {
 		edgeIP = "auto"
@@ -60,7 +70,7 @@ func CreateTunnel(c *gin.Context) {
 	now := time.Now()
 	res, err := model.DB.Exec(
 		"INSERT INTO tunnels (name, mode, token, domain, target_port, edge_ip_version, protocol, status, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'stopped', 1, ?, ?)",
-		req.Name, req.Mode, req.Token, req.Domain, req.TargetPort, edgeIP, proto, now, now,
+		req.Name, req.Mode, token, req.Domain, req.TargetPort, edgeIP, proto, now, now,
 	)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -73,7 +83,7 @@ func CreateTunnel(c *gin.Context) {
 	drv := cloudflared.NewDriver()
 	ver, _ := drv.GetInstalledVersion()
 	if ver != "" {
-		_ = drv.ConfigureService(req.Mode, req.Token, req.TargetPort, proto)
+		_ = drv.ConfigureService(req.Mode, token, req.TargetPort, proto)
 		_ = drv.Start()
 
 		// 若为 quick 模式，异步从日志中提取 trycloudflare 域名

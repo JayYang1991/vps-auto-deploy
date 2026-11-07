@@ -93,11 +93,29 @@
           </div>
 
           <div v-if="form.mode === 'token'">
-            <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.35rem;">Zero Trust Token</label>
-            <textarea v-model="form.token" class="input" rows="3" placeholder="eyJhIjoi..." required></textarea>
-            <div style="margin-top: 0.5rem;">
-              <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.35rem;">绑定的自定义域名</label>
-              <input v-model="form.domain" class="input" placeholder="argo.yourdomain.com" required />
+            <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.35rem;">
+              Zero Trust Token 或安装命令
+            </label>
+            <textarea
+              v-model="form.token"
+              class="input"
+              rows="3"
+              placeholder="支持直接粘贴 CF 页面生成的完整命令 (如 cloudflared.exe service install eyJh...) 或只填入 Token"
+              required
+            ></textarea>
+            <p style="color: #64748b; font-size: 0.75rem; margin-top: 0.25rem;">
+              💡 系统会自动从命令中提取 Token。隧道连通后，请在 Cloudflare 网页下一步的「Public Hostname」页面将域名反代到本地端口。
+            </p>
+
+            <div style="margin-top: 0.75rem;">
+              <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.35rem;">
+                绑定的自定义域名 (选填)
+              </label>
+              <input
+                v-model="form.domain"
+                class="input"
+                placeholder="如 argo.yourdomain.com（在 CF 控制台 Public Hostname 绑定的域名，用于面板展示与订阅导出）"
+              />
             </div>
           </div>
 
@@ -163,9 +181,23 @@ function openCreateModal() {
   form.target_port = 10086
 }
 
+function cleanToken(raw: string): string {
+  if (!raw) return ''
+  const oneLine = raw.replace(/[\r\n\t]+/g, ' ').trim()
+  const match = oneLine.match(/(?:--token|install)\s+([A-Za-z0-9_\-\.]+)/)
+  if (match && match[1]) {
+    return match[1]
+  }
+  return oneLine.replace(/\s+/g, '')
+}
+
 async function submitTunnel() {
   try {
-    await api.post('/tunnels', form)
+    const payload = {
+      ...form,
+      token: cleanToken(form.token),
+    }
+    await api.post('/tunnels', payload)
     modal.show = false
     toast.success('隧道创建成功，正在启动...')
     await loadTunnels()
