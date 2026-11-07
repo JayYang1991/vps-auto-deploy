@@ -526,19 +526,47 @@ function getConfigRoute(name: string) {
 }
 
 function getStatusBadge(status: string) {
-  if (status === 'running') return 'badge-success'
-  if (status === 'stopped') return 'badge-secondary'
-  if (status === 'not_installed') return 'badge-warning'
-  return 'badge-danger'
+  switch (status) {
+    case 'running':
+    case 'active':
+      return 'badge-success'
+    case 'activating':
+    case 'reloading':
+      return 'badge-info'
+    case 'deactivating':
+      return 'badge-warning'
+    case 'stopped':
+    case 'inactive':
+      return 'badge-secondary'
+    case 'not_installed':
+      return 'badge-warning'
+    case 'failed':
+      return 'badge-danger'
+    default:
+      return 'badge-secondary'
+  }
 }
 
 function getStatusText(status: string) {
   switch (status) {
-    case 'running': return '运行中'
-    case 'stopped': return '已停止'
-    case 'not_installed': return '未安装'
-    case 'failed': return '异常'
-    default: return status
+    case 'running':
+    case 'active':
+      return '已激活 (运行中)'
+    case 'activating':
+      return '激活中 (启动中)'
+    case 'reloading':
+      return '重载中'
+    case 'deactivating':
+      return '停止中'
+    case 'stopped':
+    case 'inactive':
+      return '未激活 (已停止)'
+    case 'not_installed':
+      return '未安装'
+    case 'failed':
+      return '异常 (失败)'
+    default:
+      return status || '未激活'
   }
 }
 

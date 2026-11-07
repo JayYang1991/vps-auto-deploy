@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"vps-auto-deploy/internal/component"
@@ -192,9 +193,21 @@ func (d *Driver) Status() (component.ServiceStatus, error) {
 		if active {
 			runningStatus = "running"
 		} else {
-			runningStatus = d.systemd.Status()
-			if runningStatus == "" || runningStatus == "unknown" {
+			rawStatus := strings.TrimSpace(d.systemd.Status())
+			switch rawStatus {
+			case "active":
+				runningStatus = "running"
+				active = true
+			case "inactive", "stopped", "":
 				runningStatus = "stopped"
+			case "activating":
+				runningStatus = "activating"
+			case "deactivating":
+				runningStatus = "deactivating"
+			case "failed":
+				runningStatus = "failed"
+			default:
+				runningStatus = rawStatus
 			}
 		}
 	}
