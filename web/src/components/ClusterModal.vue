@@ -1,5 +1,5 @@
 <template>
-  <div v-if="modelValue" class="modal-overlay" @click.self="close">
+  <div v-show="modelValue" class="modal-overlay" @click.self="handleOverlayClick">
     <div class="cluster-modal">
       <!-- 模态框头部 -->
       <div class="modal-header">
@@ -51,7 +51,7 @@
       </div>
 
       <!-- Tab 1: 节点列表 -->
-      <div v-if="activeTab === 'nodes'" class="tab-content">
+      <div v-show="activeTab === 'nodes'" class="tab-content">
         <div class="nodes-grid">
           <div
             v-for="item in nodes"
@@ -167,12 +167,12 @@
       </div>
 
       <!-- Tab 2: 云端弹性创建 -->
-      <div v-else-if="activeTab === 'cloud'" class="tab-content" style="padding: 1.25rem;">
-        <VultrProvisioner @deployed="handleCloudDeployed" @close="close" />
+      <div v-show="activeTab === 'cloud'" class="tab-content" style="padding: 1.25rem;">
+        <VultrProvisioner @deployed="handleCloudDeployed" @close="close" @task-change="handleVultrTaskChange" />
       </div>
 
       <!-- Tab 3: SSH 远程一键部署 -->
-      <div v-else-if="activeTab === 'deploy'" class="tab-content">
+      <div v-show="activeTab === 'deploy'" class="tab-content">
         <!-- 部署配置表单 -->
         <div v-if="deployStep === 'form'" class="deploy-form">
           <div class="form-alert-info">
@@ -317,8 +317,8 @@
         </div>
       </div>
 
-      <!-- Tab 3: 纳管已有节点 -->
-      <div v-else-if="activeTab === 'import'" class="tab-content">
+      <!-- Tab 4: 纳管已有节点 -->
+      <div v-show="activeTab === 'import'" class="tab-content">
         <div class="deploy-form">
           <div class="form-alert-info">
             <span>🔗</span>
@@ -555,7 +555,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, watch, nextTick, onUnmounted } from 'vue'
+import { ref, reactive, watch, nextTick, onUnmounted, computed } from 'vue'
 import api, { getSecretPath } from '../api'
 import { useNodeContext, NodeItem } from '../composables/useNodeContext'
 import { useToast, copyToClipboard } from '../composables/useToast'
@@ -569,6 +569,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:modelValue', val: boolean): void
+  (e: 'task-status-change', info: { running: boolean; name: string; tab: 'cloud' | 'deploy' }): void
 }>()
 
 const { toast } = useToast()
@@ -582,10 +583,68 @@ const {
 
 const activeTab = ref<'nodes' | 'cloud' | 'deploy' | 'import'>('nodes')
 
+// 云端创建/部署任务状态监听
+const vultrTaskInfo = reactive({
+  running: false,
+  name: '',
+  tab: 'cloud' as const,
+})
+
+function handleVultrTaskChange(info: { running: boolean; name: string; tab: 'cloud' }) {
+  vultrTaskInfo.running = info.running
+  vultrTaskInfo.name = info.name
+  vultrTaskInfo.tab = info.tab
+}
+
+const isSSHDeployRunning = computed(() => deployStep.value === 'terminal' && deployTaskStatus.value === 'running')
+
+const activeRunningTask = computed(() => {
+  if (isSSHDeployRunning.value) {
+    return {
+      running: true,
+      name: deployReq.name || deployReq.host || 'SSH 部署目标',
+      tab: 'deploy' as const,
+    }
+  }
+  if (vultrTaskInfo.running) {
+    return {
+      running: true,
+      name: vultrTaskInfo.name || 'Vultr 云主机',
+      tab: 'cloud' as const,
+    }
+  }
+  return {
+    running: false,
+    name: '',
+    tab: 'cloud' as const,
+  }
+})
+
+watch(
+  activeRunningTask,
+  (val) => {
+    emit('task-status-change', val)
+  },
+  { deep: true, immediate: true }
+)
+
+function handleOverlayClick() {
+  if (activeRunningTask.value.running || activeTab.value !== 'nodes') {
+    toast.info('当前正在配置或纳管中，若需关闭请点击右上角「✕」')
+    return
+  }
+  close()
+}
+
 watch(
   () => props.initialTab,
   (val) => {
-    if (val) activeTab.value = val
+    if (val) {
+      if (activeRunningTask.value.running && val === 'nodes') {
+        return
+      }
+      activeTab.value = val
+    }
   },
   { immediate: true }
 )

@@ -17,6 +17,18 @@
 
         <!-- 节点上下文切换器与集群管理入口 -->
         <NodeSwitcher @open-cluster-modal="openClusterModal" />
+
+        <!-- 正在执行的后台部署/纳管任务恢复入口 -->
+        <button
+          v-if="!showClusterModal && runningTaskInfo.running"
+          class="nav-pill nav-pill-task-running"
+          @click="resumeTaskModal"
+          type="button"
+          title="点击回到正在执行的部署进度终端"
+        >
+          <span class="task-pulse-dot"></span>
+          <span>正在纳管「{{ runningTaskInfo.name }}」· 点击查看实时进度</span>
+        </button>
       </div>
 
       <nav class="nav-container">
@@ -96,12 +108,13 @@
     <ClusterModal
       v-model="showClusterModal"
       :initial-tab="clusterModalTab"
+      @task-status-change="handleTaskStatusChange"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ToastContainer from './components/ToastContainer.vue'
 import ConfirmModal from './components/ConfirmModal.vue'
@@ -122,6 +135,23 @@ const viewKey = computed(() => `${route.fullPath}_node_${activeNodeId.value}`)
 
 const showClusterModal = ref(false)
 const clusterModalTab = ref<'nodes' | 'cloud' | 'deploy' | 'import'>('nodes')
+
+const runningTaskInfo = reactive({
+  running: false,
+  name: '',
+  tab: 'cloud' as 'cloud' | 'deploy',
+})
+
+function handleTaskStatusChange(info: { running: boolean; name: string; tab: 'cloud' | 'deploy' }) {
+  runningTaskInfo.running = info.running
+  runningTaskInfo.name = info.name
+  runningTaskInfo.tab = info.tab
+}
+
+function resumeTaskModal() {
+  clusterModalTab.value = runningTaskInfo.tab
+  showClusterModal.value = true
+}
 
 function openClusterModal(tab: 'nodes' | 'cloud' | 'deploy' | 'import' = 'nodes') {
   clusterModalTab.value = tab
@@ -248,6 +278,47 @@ async function handleLogout() {
   background-color: rgba(239, 68, 68, 0.2);
   color: #fca5a5;
   border-color: #ef4444;
+}
+
+.nav-pill-task-running {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  border-radius: 9999px;
+  color: #38bdf8;
+  background: rgba(14, 165, 233, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  box-shadow: 0 0 12px rgba(14, 165, 233, 0.2);
+  cursor: pointer;
+  animation: taskPulseBorder 2s infinite ease-in-out;
+}
+
+.nav-pill-task-running:hover {
+  background: rgba(14, 165, 233, 0.22);
+  border-color: #38bdf8;
+  color: #bae6fd;
+}
+
+.task-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #38bdf8;
+  box-shadow: 0 0 8px #38bdf8;
+  animation: taskDotBlink 1.4s infinite ease-in-out;
+}
+
+@keyframes taskDotBlink {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(0.75); }
+}
+
+@keyframes taskPulseBorder {
+  0%, 100% { border-color: rgba(56, 189, 248, 0.4); }
+  50% { border-color: rgba(56, 189, 248, 0.9); }
 }
 
 .nav-divider {

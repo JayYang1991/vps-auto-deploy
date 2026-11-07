@@ -723,7 +723,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import api, { getSecretPath } from '../api'
 import { useToast } from '../composables/useToast'
 import { useNodeContext } from '../composables/useNodeContext'
@@ -731,6 +731,7 @@ import { useNodeContext } from '../composables/useNodeContext'
 const emit = defineEmits<{
   (e: 'deployed', nodeId: number): void
   (e: 'close'): void
+  (e: 'task-change', info: { running: boolean; name: string; tab: 'cloud' }): void
 }>()
 
 const { toast } = useToast()
@@ -797,6 +798,20 @@ let deployedNodeId = 0
 const isSubmitting = ref(false)
 const createdInstanceId = ref('')
 const createdInstanceIP = ref('')
+
+// 任务进行中状态同步，便于父级组件感知并防误触退出
+watch(
+  [cloudStep, taskStatus, isSubmitting],
+  () => {
+    const isRunning = isSubmitting.value || (cloudStep.value === 'terminal' && taskStatus.value === 'running')
+    emit('task-change', {
+      running: isRunning,
+      name: (provisionMode.value === 'existing' ? existingForm.name : formReq.name) || 'Vultr 云主机',
+      tab: 'cloud',
+    })
+  },
+  { immediate: true }
+)
 
 // 纳管已有实例状态
 const provisionMode = ref<'create' | 'existing'>('create')
