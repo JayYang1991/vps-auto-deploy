@@ -1,5 +1,7 @@
 # Binaries
 /bin/
+/dist/
+/release_assets/
 /server
 /vps-panel
 cmd/server/dist

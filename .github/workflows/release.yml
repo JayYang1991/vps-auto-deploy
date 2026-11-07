@@ -1,0 +1,106 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release Tag (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+          check-latest: true
+
+      - name: Determine Version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.tag }}"
+          else
+            VERSION="${GITHUB_REF_NAME}"
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building release for version: ${VERSION}"
+
+      - name: Build Web UI
+        run: |
+          cd web
+          pnpm install --frozen-lockfile || pnpm install
+          pnpm build
+          cd ..
+          rm -rf cmd/server/dist
+          cp -r web/dist cmd/server/dist
+
+      - name: Compile and Package Binaries
+        env:
+          VERSION: ${{ steps.get_version.outputs.VERSION }}
+        run: |
+          mkdir -p release_assets
+
+          ARCHS=("amd64" "arm64")
+          for ARCH in "${ARCHS[@]}"; do
+            echo "==> Compiling for linux/${ARCH}..."
+            STAGE_DIR="vps-panel_${VERSION}_linux_${ARCH}"
+            mkdir -p "$STAGE_DIR"
+
+            CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" go build \
+              -trimpath \
+              -ldflags="-s -w -X main.Version=${VERSION}" \
+              -o "$STAGE_DIR/vps-panel" \
+              ./cmd/server
+
+            chmod +x "$STAGE_DIR/vps-panel"
+            cp scripts/install.sh "$STAGE_DIR/install.sh"
+            chmod +x "$STAGE_DIR/install.sh"
+
+            # 1. 带有版本号的压缩包 (含 vps-panel + install.sh)
+            tar -czvf "release_assets/vps-panel_${VERSION}_linux_${ARCH}.tar.gz" -C "$STAGE_DIR" vps-panel install.sh
+            # 2. 通用最新别名压缩包（方便固定链接下载）
+            cp "release_assets/vps-panel_${VERSION}_linux_${ARCH}.tar.gz" "release_assets/vps-panel_linux_${ARCH}.tar.gz"
+            # 3. 独立单二进制文件
+            cp "$STAGE_DIR/vps-panel" "release_assets/vps-panel-linux-${ARCH}"
+
+            rm -rf "$STAGE_DIR"
+          done
+
+          cd release_assets
+          sha256sum vps-panel_${VERSION}_*.tar.gz vps-panel-linux-* > checksums.txt
+          cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
+          name: VPS Auto Deploy ${{ steps.get_version.outputs.VERSION }}
+          files: release_assets/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false
