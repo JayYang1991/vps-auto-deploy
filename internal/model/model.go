@@ -66,6 +66,7 @@ type VLESSRealitySpec struct {
 type VLESSWSSpec struct {
 	Path        string `json:"path"`         // ws path (如 /ws)
 	Host        string `json:"host"`         // ws host header
+	GroupDomain string `json:"group_domain"` // 分组指定域名 (SNI / Host)
 	TunnelID    int64  `json:"tunnel_id"`    // 关联的 Cloudflared 隧道 ID
 }
 

@@ -66,6 +66,12 @@
             <span v-if="ib.protocol === 'vless-reality'">
               SNI 伪装: <b style="color: #38bdf8;">{{ parseSpec(ib.spec_json).server_name }}</b>
             </span>
+            <span v-else-if="ib.protocol === 'vless-ws'">
+              WS Path: <b style="color: #38bdf8;">{{ parseSpec(ib.spec_json).path || '/ws' }}</b>
+              <span v-if="parseSpec(ib.spec_json).group_domain" style="margin-left: 0.75rem;">
+                分组域名: <b style="color: #38bdf8;">{{ parseSpec(ib.spec_json).group_domain }}</b>
+              </span>
+            </span>
           </div>
         </div>
 
@@ -169,7 +175,15 @@
           <!-- VLESS-WS 专属参数 -->
           <div v-else style="background-color: #0f172a; padding: 1rem; border-radius: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
             <div>
-              <label style="display: block; font-size: 0.85rem; color: #94a3b8; margin-bottom: 0.25rem;">WebSocket Path</label>
+              <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.25rem;">分组指定域名 (SNI / Host)</label>
+              <input v-model="wsSpec.group_domain" class="input" placeholder="如 argo.example.com 或留空继承默认" />
+              <div style="font-size: 0.725rem; color: #64748b; margin-top: 0.25rem;">
+                生成订阅时，优选 IP 作为连接目标，该域名作为分组 TLS SNI 与 HTTP Host。留空时自动回退继承全局优选域名或穿透域名。
+              </div>
+            </div>
+
+            <div>
+              <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.25rem;">WebSocket Path</label>
               <input v-model="wsSpec.path" class="input" placeholder="/ws" />
             </div>
           </div>
@@ -266,6 +280,7 @@ const realitySpec = reactive({
 
 const wsSpec = reactive({
   path: '/ws',
+  group_domain: '',
 })
 
 const shareModal = reactive({
@@ -311,6 +326,8 @@ async function openCreateModal() {
   form.enabled = true
   realitySpec.server_name = 'dl.google.com'
   realitySpec.handshake_server = 'dl.google.com'
+  wsSpec.path = '/ws'
+  wsSpec.group_domain = ''
   await generateRealityKeys()
 }
 
@@ -335,6 +352,7 @@ function openEditModal(ib: any) {
     realitySpec.fingerprint = spec.fingerprint || 'chrome'
   } else if (ib.protocol === 'vless-ws') {
     wsSpec.path = spec.path || '/ws'
+    wsSpec.group_domain = spec.group_domain || spec.host || ''
   }
   modal.show = true
 }
@@ -388,7 +406,11 @@ async function submitInbound() {
     }
     specObj = realitySpec
   } else {
-    specObj = wsSpec
+    specObj = {
+      path: wsSpec.path || '/ws',
+      group_domain: wsSpec.group_domain || '',
+      host: wsSpec.group_domain || '',
+    }
   }
 
   try {

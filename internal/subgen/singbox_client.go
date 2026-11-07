@@ -83,39 +83,69 @@ func GenerateSingboxClientConfig(member *model.Member) (string, error) {
 			var spec model.VLESSWSSpec
 			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
 
-			var tunnelDomain string
-			if spec.TunnelID > 0 {
-				_ = model.DB.QueryRow("SELECT domain FROM tunnels WHERE id = ?", spec.TunnelID).Scan(&tunnelDomain)
-			}
-			if tunnelDomain == "" {
-				tunnelDomain = serverIP
-			}
-
+			groupDomain := ResolveWSGroupDomain(&spec, serverIP)
 			path := spec.Path
 			if path == "" {
 				path = "/ws"
 			}
 
-			outbound := map[string]interface{}{
-				"type":        "vless",
-				"tag":         tag,
-				"server":      tunnelDomain,
-				"server_port": 443,
-				"uuid":        member.UUID,
-				"tls": map[string]interface{}{
-					"enabled":     true,
-					"server_name": tunnelDomain,
-				},
-				"transport": map[string]interface{}{
-					"type": "ws",
-					"path": path,
-					"headers": map[string]string{
-						"Host": tunnelDomain,
+			prefIPs, _ := model.ListCFPreferredIPs("")
+			if len(prefIPs) > 0 {
+				for _, p := range prefIPs {
+					targetPort := p.Port
+					if targetPort <= 0 {
+						targetPort = 443
+					}
+
+					nodeName := p.Name
+					if nodeName == "" {
+						nodeName = fmt.Sprintf("%s-%s", p.IP, p.Colo)
+					}
+					nodeTag := fmt.Sprintf("%s-%s", ib.Tag, nodeName)
+
+					outbound := map[string]interface{}{
+						"type":        "vless",
+						"tag":         nodeTag,
+						"server":      p.IP,
+						"server_port": targetPort,
+						"uuid":        member.UUID,
+						"tls": map[string]interface{}{
+							"enabled":     true,
+							"server_name": groupDomain,
+						},
+						"transport": map[string]interface{}{
+							"type": "ws",
+							"path": path,
+							"headers": map[string]string{
+								"Host": groupDomain,
+							},
+						},
+					}
+					outbounds = append(outbounds, outbound)
+					outboundTags = append(outboundTags, nodeTag)
+				}
+			} else {
+				outbound := map[string]interface{}{
+					"type":        "vless",
+					"tag":         tag,
+					"server":      groupDomain,
+					"server_port": 443,
+					"uuid":        member.UUID,
+					"tls": map[string]interface{}{
+						"enabled":     true,
+						"server_name": groupDomain,
 					},
-				},
+					"transport": map[string]interface{}{
+						"type": "ws",
+						"path": path,
+						"headers": map[string]string{
+							"Host": groupDomain,
+						},
+					},
+				}
+				outbounds = append(outbounds, outbound)
+				outboundTags = append(outboundTags, tag)
 			}
-			outbounds = append(outbounds, outbound)
-			outboundTags = append(outboundTags, tag)
 		}
 	}
 

@@ -93,39 +93,67 @@ func GenerateClashMetaConfig(member *model.Member) (string, error) {
 			var spec model.VLESSWSSpec
 			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
 
-			// 查找关联的隧道域名
-			var tunnelDomain string
-			if spec.TunnelID > 0 {
-				_ = model.DB.QueryRow("SELECT domain FROM tunnels WHERE id = ?", spec.TunnelID).Scan(&tunnelDomain)
-			}
-			if tunnelDomain == "" {
-				tunnelDomain = serverIP
-			}
-
+			groupDomain := ResolveWSGroupDomain(&spec, serverIP)
 			path := spec.Path
 			if path == "" {
 				path = "/ws"
 			}
 
-			proxy := map[string]interface{}{
-				"name":       name,
-				"type":       "vless",
-				"server":     tunnelDomain,
-				"port":       443,
-				"uuid":       member.UUID,
-				"network":    "ws",
-				"tls":        true,
-				"udp":        true,
-				"servername": tunnelDomain,
-				"ws-opts": map[string]interface{}{
-					"path": path,
-					"headers": map[string]interface{}{
-						"Host": tunnelDomain,
+			prefIPs, _ := model.ListCFPreferredIPs("")
+			if len(prefIPs) > 0 {
+				for _, p := range prefIPs {
+					targetPort := p.Port
+					if targetPort <= 0 {
+						targetPort = 443
+					}
+
+					nodeName := p.Name
+					if nodeName == "" {
+						nodeName = fmt.Sprintf("%s-%s", p.IP, p.Colo)
+					}
+					proxyName := fmt.Sprintf("%s-%s", ib.Tag, nodeName)
+
+					proxy := map[string]interface{}{
+						"name":       proxyName,
+						"type":       "vless",
+						"server":     p.IP,
+						"port":       targetPort,
+						"uuid":       member.UUID,
+						"network":    "ws",
+						"tls":        true,
+						"udp":        true,
+						"servername": groupDomain,
+						"ws-opts": map[string]interface{}{
+							"path": path,
+							"headers": map[string]interface{}{
+								"Host": groupDomain,
+							},
+						},
+					}
+					proxies = append(proxies, proxy)
+					proxyNames = append(proxyNames, proxyName)
+				}
+			} else {
+				proxy := map[string]interface{}{
+					"name":       name,
+					"type":       "vless",
+					"server":     groupDomain,
+					"port":       443,
+					"uuid":       member.UUID,
+					"network":    "ws",
+					"tls":        true,
+					"udp":        true,
+					"servername": groupDomain,
+					"ws-opts": map[string]interface{}{
+						"path": path,
+						"headers": map[string]interface{}{
+							"Host": groupDomain,
+						},
 					},
-				},
+				}
+				proxies = append(proxies, proxy)
+				proxyNames = append(proxyNames, name)
 			}
-			proxies = append(proxies, proxy)
-			proxyNames = append(proxyNames, name)
 		}
 	}
 

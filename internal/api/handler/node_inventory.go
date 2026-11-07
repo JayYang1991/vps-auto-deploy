@@ -13,6 +13,7 @@ import (
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/pkg/crypto"
 	"vps-auto-deploy/internal/pkg/netutil"
+	"vps-auto-deploy/internal/subgen"
 )
 
 // NodeInventoryItem 单个入站代理节点信息与客户端配置
@@ -259,25 +260,19 @@ func buildInventoryItem(ib model.Inbound, nodeName, serverHost string, member *m
 		}
 		item.Path = path
 
-		tunnelDomain := ""
-		if spec.TunnelID > 0 {
-			tunnelDomain = tunnelsMap[spec.TunnelID]
-		}
-		if tunnelDomain == "" {
-			tunnelDomain = serverHost
-		}
-		item.TunnelDomain = tunnelDomain
+		groupDomain := subgen.ResolveWSGroupDomain(&spec, serverHost)
+		item.TunnelDomain = groupDomain
 
 		// 生成 vless:// 链接
 		q := url.Values{}
 		q.Set("encryption", "none")
 		q.Set("security", "tls")
-		q.Set("sni", tunnelDomain)
+		q.Set("sni", groupDomain)
 		q.Set("type", "ws")
-		q.Set("host", tunnelDomain)
+		q.Set("host", groupDomain)
 		q.Set("path", path)
 
-		item.Link = fmt.Sprintf("vless://%s@%s:443?%s#%s", uuid, tunnelDomain, q.Encode(), url.QueryEscape(displayName))
+		item.Link = fmt.Sprintf("vless://%s@%s:443?%s#%s", uuid, groupDomain, q.Encode(), url.QueryEscape(displayName))
 
 		// 生成 Clash Meta YAML 片段
 		item.ClashSnippet = fmt.Sprintf(`- name: "%s"
@@ -292,7 +287,7 @@ func buildInventoryItem(ib model.Inbound, nodeName, serverHost string, member *m
   ws-opts:
     path: "%s"
     headers:
-      Host: "%s"`, displayName, tunnelDomain, uuid, tunnelDomain, path, tunnelDomain)
+      Host: "%s"`, displayName, groupDomain, uuid, groupDomain, path, groupDomain)
 
 	case "hysteria2":
 		item.ProtocolLabel = "Hysteria 2"

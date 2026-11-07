@@ -11,6 +11,40 @@ import (
 	"vps-auto-deploy/internal/pkg/netutil"
 )
 
+// ResolveWSGroupDomain 按照优先级解析 WS 入站的分组域名
+func ResolveWSGroupDomain(spec *model.VLESSWSSpec, defaultServerIP string) string {
+	if spec != nil {
+		if strings.TrimSpace(spec.GroupDomain) != "" {
+			return strings.TrimSpace(spec.GroupDomain)
+		}
+		if strings.TrimSpace(spec.Host) != "" {
+			return strings.TrimSpace(spec.Host)
+		}
+		if spec.TunnelID > 0 {
+			var domain string
+			_ = model.DB.QueryRow("SELECT domain FROM tunnels WHERE id = ?", spec.TunnelID).Scan(&domain)
+			if strings.TrimSpace(domain) != "" {
+				return strings.TrimSpace(domain)
+			}
+		}
+	}
+
+	// 检查全局设置 cf_pref_host
+	prefHost, _ := model.GetSetting("cf_pref_host")
+	if strings.TrimSpace(prefHost) != "" {
+		return strings.TrimSpace(prefHost)
+	}
+
+	// 检查是否有任何启用的有效隧道域名
+	var anyDomain string
+	_ = model.DB.QueryRow("SELECT domain FROM tunnels WHERE domain != '' AND enabled = 1 LIMIT 1").Scan(&anyDomain)
+	if strings.TrimSpace(anyDomain) != "" {
+		return strings.TrimSpace(anyDomain)
+	}
+
+	return defaultServerIP
+}
+
 // GenerateURIs 为指定成员生成所有节点的 vless:// 链接列表
 func GenerateURIs(member *model.Member) ([]string, error) {
 	serverIP, _ := model.GetSetting("public_ip")
@@ -71,29 +105,51 @@ func GenerateURIs(member *model.Member) ([]string, error) {
 			var spec model.VLESSWSSpec
 			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
 
-			var tunnelDomain string
-			if spec.TunnelID > 0 {
-				_ = model.DB.QueryRow("SELECT domain FROM tunnels WHERE id = ?", spec.TunnelID).Scan(&tunnelDomain)
-			}
-			if tunnelDomain == "" {
-				tunnelDomain = serverIP
-			}
-
+			groupDomain := ResolveWSGroupDomain(&spec, serverIP)
 			path := spec.Path
 			if path == "" {
 				path = "/ws"
 			}
 
-			q := url.Values{}
-			q.Set("encryption", "none")
-			q.Set("security", "tls")
-			q.Set("sni", tunnelDomain)
-			q.Set("type", "ws")
-			q.Set("host", tunnelDomain)
-			q.Set("path", path)
+			// 查询已保存的 Cloudflare 优选 IP 列表
+			prefIPs, err := model.ListCFPreferredIPs("")
+			if err == nil && len(prefIPs) > 0 {
+				for _, p := range prefIPs {
+					targetPort := p.Port
+					if targetPort <= 0 {
+						targetPort = 443
+					}
 
-			u := fmt.Sprintf("vless://%s@%s:443?%s#%s", member.UUID, tunnelDomain, q.Encode(), remark)
-			uris = append(uris, u)
+					q := url.Values{}
+					q.Set("encryption", "none")
+					q.Set("security", "tls")
+					q.Set("sni", groupDomain)
+					q.Set("type", "ws")
+					q.Set("host", groupDomain)
+					q.Set("path", path)
+
+					nodeName := p.Name
+					if nodeName == "" {
+						nodeName = fmt.Sprintf("%s-%s", p.IP, p.Colo)
+					}
+					nodeRemark := fmt.Sprintf("%s-%s", ib.Tag, nodeName)
+
+					u := fmt.Sprintf("vless://%s@%s:%d?%s#%s", member.UUID, p.IP, targetPort, q.Encode(), url.QueryEscape(nodeRemark))
+					uris = append(uris, u)
+				}
+			} else {
+				// 兜底回退：若当前未配置或未抓取优选 IP，生成使用分组域名的节点
+				q := url.Values{}
+				q.Set("encryption", "none")
+				q.Set("security", "tls")
+				q.Set("sni", groupDomain)
+				q.Set("type", "ws")
+				q.Set("host", groupDomain)
+				q.Set("path", path)
+
+				u := fmt.Sprintf("vless://%s@%s:443?%s#%s", member.UUID, groupDomain, q.Encode(), remark)
+				uris = append(uris, u)
+			}
 		}
 	}
 
