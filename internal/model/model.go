@@ -35,6 +35,21 @@ type Inbound struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
+// Outbound sing-box 出站配置
+type Outbound struct {
+	ID         int64     `json:"id"`
+	Tag        string    `json:"tag"`
+	Type       string    `json:"type"`       // "direct" | "block" | "socks" | "http" | "shadowsocks" | "vless" | "custom"
+	Server     string    `json:"server"`     // 上游目标服务器/IP
+	ServerPort int       `json:"server_port"`
+	SpecJSON   string    `json:"spec_json"`  // 详细参数 JSON
+	Priority   int       `json:"priority"`   // 排序权重 (越小越优先)
+	Enabled    bool      `json:"enabled"`
+	IsSystem   bool      `json:"is_system"`  // 系统预置出站 (如 direct, block 禁止删除)
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
+}
+
 // VLESSRealitySpec 是 VLESS-Reality 协议特定的参数
 type VLESSRealitySpec struct {
 	Flow            string `json:"flow"`             // 默认 xtls-rprx-vision

@@ -83,6 +83,20 @@ func migrate() error {
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS outbounds (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		tag TEXT UNIQUE NOT NULL,
+		type TEXT NOT NULL,
+		server TEXT NOT NULL DEFAULT '',
+		server_port INTEGER NOT NULL DEFAULT 0,
+		spec_json TEXT NOT NULL DEFAULT '{}',
+		priority INTEGER NOT NULL DEFAULT 10,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		is_system INTEGER NOT NULL DEFAULT 0,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
 	`
 	_, err := DB.Exec(schema)
 	return err
@@ -128,6 +142,22 @@ func initDefaults() error {
 			now,
 		)
 		log.Println("[Init] Created default owner member")
+	}
+
+	// 5. 初始化默认系统出站 (direct / block)
+	var outboundCount int
+	err = DB.QueryRow("SELECT COUNT(*) FROM outbounds").Scan(&outboundCount)
+	if err == nil && outboundCount == 0 {
+		now := time.Now()
+		_, _ = DB.Exec(
+			"INSERT INTO outbounds (tag, type, server, server_port, spec_json, priority, enabled, is_system, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			"direct", "direct", "", 0, "{}", 1, 1, 1, now, now,
+		)
+		_, _ = DB.Exec(
+			"INSERT INTO outbounds (tag, type, server, server_port, spec_json, priority, enabled, is_system, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			"block", "block", "", 0, "{}", 99, 1, 1, now, now,
+		)
+		log.Println("[Init] Created default direct & block outbounds")
 	}
 
 	return nil

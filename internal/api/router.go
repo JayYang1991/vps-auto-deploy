@@ -62,6 +62,18 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.GET("/inbounds/preview", handler.PreviewSingboxConfig)
 			api.POST("/inbounds/apply", handler.ApplySingboxConfig)
 
+			// 出站规则管理
+			api.GET("/outbounds", handler.ListOutbounds)
+			api.POST("/outbounds", handler.CreateOutbound)
+			api.GET("/outbounds/:id", handler.GetOutbound)
+			api.PUT("/outbounds/:id", handler.UpdateOutbound)
+			api.POST("/outbounds/:id/toggle", handler.ToggleOutbound)
+			api.DELETE("/outbounds/:id", handler.DeleteOutbound)
+
+			// sing-box 完整配置透视与重载
+			api.GET("/singbox/config", handler.GetSingboxFullConfig)
+			api.POST("/singbox/reload", handler.ReloadSingboxService)
+
 			// 隧道管理
 			api.GET("/tunnels", handler.ListTunnels)
 			api.POST("/tunnels", handler.CreateTunnel)

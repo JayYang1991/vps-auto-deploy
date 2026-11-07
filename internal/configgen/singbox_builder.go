@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/model"
@@ -12,10 +13,10 @@ import (
 
 // SingboxConfig 代表完整的 sing-box 服务端配置
 type SingboxConfig struct {
-	Log       *LogConfig       `json:"log,omitempty"`
-	Inbounds  []InboundConfig  `json:"inbounds"`
-	Outbounds []OutboundConfig `json:"outbounds"`
-	Route     *RouteConfig     `json:"route,omitempty"`
+	Log       *LogConfig               `json:"log,omitempty"`
+	Inbounds  []InboundConfig          `json:"inbounds"`
+	Outbounds []map[string]interface{} `json:"outbounds"`
+	Route     *RouteConfig             `json:"route,omitempty"`
 }
 
 type LogConfig struct {
@@ -90,10 +91,72 @@ func GenerateServerConfig() (*SingboxConfig, error) {
 			Level:     "info",
 			Timestamp: true,
 		},
-		Outbounds: []OutboundConfig{
-			{Type: "direct", Tag: "direct"},
-			{Type: "block", Tag: "block"},
-		},
+		Outbounds: []map[string]interface{}{},
+	}
+
+	// 读取启用的出站规则 (按 priority ASC, id ASC)
+	outboundRows, err := model.DB.Query("SELECT tag, type, server, server_port, spec_json FROM outbounds WHERE enabled = 1 ORDER BY priority ASC, id ASC")
+	if err == nil {
+		defer outboundRows.Close()
+		for outboundRows.Next() {
+			var tag, obType, server, specJSON string
+			var serverPort int
+			if err := outboundRows.Scan(&tag, &obType, &server, &serverPort, &specJSON); err != nil {
+				continue
+			}
+
+			obMap := make(map[string]interface{})
+			if obType == "custom" && strings.TrimSpace(specJSON) != "" {
+				if err := json.Unmarshal([]byte(specJSON), &obMap); err == nil {
+					obMap["tag"] = tag
+					cfg.Outbounds = append(cfg.Outbounds, obMap)
+					continue
+				}
+			}
+
+			obMap["type"] = obType
+			obMap["tag"] = tag
+
+			if server != "" {
+				obMap["server"] = server
+			}
+			if serverPort > 0 {
+				obMap["server_port"] = serverPort
+			}
+
+			// 合并 spec_json 中的额外参数 (如 password, method, uuid, tls 等)
+			if strings.TrimSpace(specJSON) != "" && specJSON != "{}" {
+				var extra map[string]interface{}
+				if err := json.Unmarshal([]byte(specJSON), &extra); err == nil {
+					for k, v := range extra {
+						if _, exists := obMap[k]; !exists {
+							obMap[k] = v
+						}
+					}
+				}
+			}
+
+			cfg.Outbounds = append(cfg.Outbounds, obMap)
+		}
+	}
+
+	// 保证至少有 direct 和 block 出站
+	hasDirect := false
+	hasBlock := false
+	for _, ob := range cfg.Outbounds {
+		if t, ok := ob["type"].(string); ok {
+			if t == "direct" {
+				hasDirect = true
+			} else if t == "block" {
+				hasBlock = true
+			}
+		}
+	}
+	if !hasDirect {
+		cfg.Outbounds = append([]map[string]interface{}{{"type": "direct", "tag": "direct"}}, cfg.Outbounds...)
+	}
+	if !hasBlock {
+		cfg.Outbounds = append(cfg.Outbounds, map[string]interface{}{"type": "block", "tag": "block"})
 	}
 
 	for inboundRows.Next() {
