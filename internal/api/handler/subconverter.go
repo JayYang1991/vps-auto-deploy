@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"vps-auto-deploy/internal/component/subconverter"
+	"vps-auto-deploy/internal/model"
 )
 
 type SubconverterConfigResponse struct {
@@ -260,6 +261,89 @@ func ListSubconverterTemplates(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, presets)
+}
+
+type SubconverterPreferences struct {
+	Target            string `json:"target"`
+	Template          string `json:"template"`
+	CustomTemplateURL string `json:"custom_template_url"`
+	Emoji             bool   `json:"emoji"`
+	UDP               bool   `json:"udp"`
+	SCV               bool   `json:"scv"`
+}
+
+// GetSubconverterPreferences 获取工作台默认偏好
+func GetSubconverterPreferences(c *gin.Context) {
+	target, _ := model.GetSetting("subconverter_pref_target")
+	if target == "" {
+		target = "clash"
+	}
+
+	template, _ := model.GetSetting("subconverter_pref_template")
+	if template == "" {
+		template = "config/ACL4SSR_Online.ini"
+	}
+
+	customURL, _ := model.GetSetting("subconverter_pref_custom_url")
+
+	emojiStr, _ := model.GetSetting("subconverter_pref_emoji")
+	emoji := emojiStr != "false"
+
+	udpStr, _ := model.GetSetting("subconverter_pref_udp")
+	udp := udpStr != "false"
+
+	scvStr, _ := model.GetSetting("subconverter_pref_scv")
+	scv := scvStr != "false"
+
+	c.JSON(http.StatusOK, SubconverterPreferences{
+		Target:            target,
+		Template:          template,
+		CustomTemplateURL: customURL,
+		Emoji:             emoji,
+		UDP:               udp,
+		SCV:               scv,
+	})
+}
+
+// SaveSubconverterPreferences 保存工作台选择为全局默认偏好
+func SaveSubconverterPreferences(c *gin.Context) {
+	var req SubconverterPreferences
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "参数解析失败: " + err.Error()})
+		return
+	}
+
+	if req.Target == "" {
+		req.Target = "clash"
+	}
+	if req.Template == "" {
+		req.Template = "config/ACL4SSR_Online.ini"
+	}
+
+	_ = model.SetSetting("subconverter_pref_target", req.Target)
+	_ = model.SetSetting("subconverter_pref_template", req.Template)
+	_ = model.SetSetting("subconverter_pref_custom_url", req.CustomTemplateURL)
+	_ = model.SetSetting("subconverter_pref_emoji", strconv.FormatBool(req.Emoji))
+	_ = model.SetSetting("subconverter_pref_udp", strconv.FormatBool(req.UDP))
+	_ = model.SetSetting("subconverter_pref_scv", strconv.FormatBool(req.SCV))
+
+	// 同时将模板路径同步到 pref.ini 的 default_external_config
+	configPath := subconverter.GetConfigPath()
+	if existing, err := os.ReadFile(configPath); err == nil {
+		effectiveTpl := req.Template
+		if effectiveTpl == "custom" && req.CustomTemplateURL != "" {
+			effectiveTpl = req.CustomTemplateURL
+		}
+		updated := updateIniSettings(string(existing), map[string]string{
+			"default_external_config": effectiveTpl,
+		})
+		_ = os.WriteFile(configPath, []byte(updated), 0644)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "默认规则集与订阅偏好已成功持久化保存！",
+		"data":    req,
+	})
 }
 
 // 辅助函数：解析 INI 文件的 key=value

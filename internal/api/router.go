@@ -111,6 +111,8 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.GET("/subconverter/config", handler.GetSubconverterConfig)
 			api.POST("/subconverter/config", handler.SaveSubconverterConfig)
 			api.GET("/subconverter/templates", handler.ListSubconverterTemplates)
+			api.GET("/subconverter/preferences", handler.GetSubconverterPreferences)
+			api.POST("/subconverter/preferences", handler.SaveSubconverterPreferences)
 		}
 	}
 

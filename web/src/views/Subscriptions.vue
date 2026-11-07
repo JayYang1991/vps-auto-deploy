@@ -134,14 +134,26 @@
             >
               <div style="display: flex; align-items: center; gap: 0.5rem;">
                 <span style="color: #a855f7; font-weight: 600; font-size: 0.875rem;">⚡ Subconverter 高级规则订阅</span>
-                <span class="badge badge-info" style="font-size: 0.65rem;">ACL4SSR 在线分流</span>
-                <span style="color: #64748b; font-size: 0.75rem;">(自动测速 / 国外代理 / 国内直连 / 广告过滤)</span>
+                <span class="badge badge-info" style="font-size: 0.65rem;">
+                  {{ currentSavedTemplateLabel }}
+                </span>
+                <span style="color: #64748b; font-size: 0.75rem;">
+                  ({{ savedPrefs.target.toUpperCase() }} &middot; Emoji: {{ savedPrefs.emoji ? '开' : '关' }} &middot; UDP: {{ savedPrefs.udp ? '开' : '关' }})
+                </span>
               </div>
               <div style="display: flex; gap: 0.5rem;">
-                <button @click="copyAdvancedSubURL(m.sub_token, 'clash', 'config/ACL4SSR_Online.ini')" class="btn btn-primary" style="font-size: 0.75rem; padding: 0.25rem 0.6rem; background: #9333ea; border-color: #9333ea;">
-                  📋 复制 Clash 分流订阅
+                <button
+                  @click="copySavedAdvancedSubURL(m.sub_token)"
+                  class="btn btn-primary"
+                  style="font-size: 0.75rem; padding: 0.25rem 0.6rem; background: #9333ea; border-color: #9333ea;"
+                >
+                  📋 复制 {{ savedPrefs.target.toUpperCase() }} 分流订阅
                 </button>
-                <button @click="openAdvancedSubQR(m.name, m.sub_token, 'clash', 'config/ACL4SSR_Online.ini')" class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.6rem;">
+                <button
+                  @click="openSavedAdvancedSubQR(m.name, m.sub_token)"
+                  class="btn btn-secondary"
+                  style="font-size: 0.75rem; padding: 0.25rem 0.6rem;"
+                >
                   📱 扫码
                 </button>
               </div>
@@ -275,14 +287,29 @@
 
         <!-- 在线转换生成器与实时调试工作台 -->
         <div class="card">
-          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 1rem;">
-            <span style="font-size: 1.25rem;">⚡</span>
-            <div>
-              <h3 style="font-size: 1.1rem; font-weight: 600; color: #f8fafc;">在线订阅规则生成与测试工作台</h3>
-              <p style="color: #94a3b8; font-size: 0.8rem; margin-top: 0.15rem;">
-                选择目标客户端与远程分流规则集，即时生成并验证转换效果
-              </p>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span style="font-size: 1.25rem;">⚡</span>
+              <div>
+                <h3 style="font-size: 1.1rem; font-weight: 600; color: #f8fafc;">在线订阅规则生成与测试工作台</h3>
+                <p style="color: #94a3b8; font-size: 0.8rem; margin-top: 0.15rem;">
+                  选择目标客户端与远程分流规则集，即时生成并验证转换效果，支持保存为默认订阅偏好
+                </p>
+              </div>
             </div>
+
+            <!-- 独立保存按钮 -->
+            <button
+              @click="saveWorkbenchPreferences"
+              class="btn btn-primary"
+              style="font-size: 0.825rem; padding: 0.45rem 0.9rem;"
+              :disabled="savingWorkbench"
+              type="button"
+              title="将当前选择的客户端格式、规则模板与参数持久化保存为系统默认分流偏好"
+            >
+              <span>💾</span>
+              <span>{{ savingWorkbench ? '正在保存...' : '保存为默认规则偏好' }}</span>
+            </button>
           </div>
 
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; margin-bottom: 1.25rem;">
@@ -349,8 +376,17 @@
           <div style="background-color: #0b0f19; border: 1px solid #1e293b; padding: 0.85rem; border-radius: 0.5rem; margin-bottom: 1rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
               <span style="font-size: 0.775rem; color: #94a3b8; font-weight: 600;">生成的完整订阅链接 (经由主控安全代理分发)：</span>
-              <div style="display: flex; gap: 0.5rem;">
-                <button @click="copyTesterUrl" class="btn btn-primary" style="font-size: 0.75rem; padding: 0.2rem 0.6rem;">
+              <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                <button
+                  @click="saveWorkbenchPreferences"
+                  class="btn btn-primary"
+                  style="font-size: 0.75rem; padding: 0.2rem 0.6rem;"
+                  :disabled="savingWorkbench"
+                  title="将此套参数保存为默认"
+                >
+                  💾 保存为默认偏好
+                </button>
+                <button @click="copyTesterUrl" class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.2rem 0.6rem;">
                   📋 复制链接
                 </button>
                 <button @click="openTesterQR" class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.2rem 0.6rem;">
@@ -538,7 +574,26 @@ const subForm = reactive({
 
 const showRawEditor = ref(false)
 const savingConfig = ref(false)
+const savingWorkbench = ref(false)
 const templates = ref<any[]>([])
+
+// 保存的全局规则与订阅偏好
+const savedPrefs = reactive({
+  target: 'clash',
+  template: 'config/ACL4SSR_Online.ini',
+  custom_template_url: '',
+  emoji: true,
+  udp: true,
+  scv: true,
+})
+
+const currentSavedTemplateLabel = computed(() => {
+  if (savedPrefs.template === 'custom') {
+    return '自定义规则集'
+  }
+  const match = templates.value.find((t: any) => t.config_value === savedPrefs.template)
+  return match ? match.label : 'ACL4SSR 经典在线分流版'
+})
 
 // 实时测试调试器
 const tester = reactive({
@@ -717,6 +772,88 @@ function copySubURL(subToken: string, target: string) {
   copyToClipboard(url, `${target.toUpperCase()} 订阅链接`)
 }
 
+function copySavedAdvancedSubURL(subToken: string) {
+  const host = window.location.origin
+  const tpl = savedPrefs.template === 'custom' ? savedPrefs.custom_template_url : savedPrefs.template
+  const params = new URLSearchParams()
+  params.set('engine', 'subconverter')
+  params.set('target', savedPrefs.target || 'clash')
+  if (tpl) params.set('config', tpl)
+  if (savedPrefs.emoji) params.set('emoji', 'true')
+  if (savedPrefs.udp) params.set('udp', 'true')
+  if (savedPrefs.scv) params.set('scv', 'true')
+
+  const url = `${host}/sub/${subToken}?${params.toString()}`
+  copyToClipboard(url, `Subconverter ${savedPrefs.target.toUpperCase()} 分流订阅链接`)
+}
+
+function openSavedAdvancedSubQR(memberName: string, subToken: string) {
+  const host = window.location.origin
+  const tpl = savedPrefs.template === 'custom' ? savedPrefs.custom_template_url : savedPrefs.template
+  const params = new URLSearchParams()
+  params.set('engine', 'subconverter')
+  params.set('target', savedPrefs.target || 'clash')
+  if (tpl) params.set('config', tpl)
+  if (savedPrefs.emoji) params.set('emoji', 'true')
+  if (savedPrefs.udp) params.set('udp', 'true')
+  if (savedPrefs.scv) params.set('scv', 'true')
+
+  qrModal.title = `${memberName} - Subconverter ${savedPrefs.target.toUpperCase()} 分流订阅`
+  qrModal.url = `${host}/sub/${subToken}?${params.toString()}`
+  qrModal.show = true
+}
+
+async function fetchWorkbenchPreferences() {
+  try {
+    const res = await api.get('/subconverter/preferences')
+    if (res.data) {
+      savedPrefs.target = res.data.target || 'clash'
+      savedPrefs.template = res.data.template || 'config/ACL4SSR_Online.ini'
+      savedPrefs.custom_template_url = res.data.custom_template_url || ''
+      savedPrefs.emoji = res.data.emoji !== false
+      savedPrefs.udp = res.data.udp !== false
+      savedPrefs.scv = res.data.scv !== false
+
+      // 同步给测试器初始化
+      tester.target = savedPrefs.target
+      tester.template = savedPrefs.template
+      tester.customTemplateUrl = savedPrefs.custom_template_url
+      tester.emoji = savedPrefs.emoji
+      tester.udp = savedPrefs.udp
+      tester.scv = savedPrefs.scv
+    }
+  } catch {
+    // ignore
+  }
+}
+
+async function saveWorkbenchPreferences() {
+  savingWorkbench.value = true
+  try {
+    const payload = {
+      target: tester.target,
+      template: tester.template,
+      custom_template_url: tester.customTemplateUrl,
+      emoji: tester.emoji,
+      udp: tester.udp,
+      scv: tester.scv,
+    }
+    const res = await api.post('/subconverter/preferences', payload)
+    savedPrefs.target = payload.target
+    savedPrefs.template = payload.template
+    savedPrefs.custom_template_url = payload.custom_template_url
+    savedPrefs.emoji = payload.emoji
+    savedPrefs.udp = payload.udp
+    savedPrefs.scv = payload.scv
+
+    toast.success(res.data.message || '已成功将当前规则集与参数保存为默认偏好！')
+  } catch (err: any) {
+    toast.error('保存失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    savingWorkbench.value = false
+  }
+}
+
 function copyAdvancedSubURL(subToken: string, target: string, config: string) {
   const host = window.location.origin
   const url = `${host}/sub/${subToken}?engine=subconverter&target=${target}&config=${encodeURIComponent(config)}&emoji=true&udp=true`
@@ -802,7 +939,7 @@ watch(
 )
 
 onMounted(async () => {
-  await Promise.all([loadMembers(), fetchSubStatus(), fetchSubConfig(), fetchTemplates()])
+  await Promise.all([loadMembers(), fetchSubStatus(), fetchSubConfig(), fetchTemplates(), fetchWorkbenchPreferences()])
   window.addEventListener('node-context-changed', loadMembers)
 })
 
