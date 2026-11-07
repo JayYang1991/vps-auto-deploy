@@ -73,7 +73,22 @@ func GetConfigPath() string {
 
 // GetInstalledVersion 探测本地安装的版本号
 func (d *Driver) GetInstalledVersion() (string, error) {
-	// 1. 若服务运行中，优先直接通过 HTTP /version 快速获取
+	// 1. 检查本地二进制是否存在
+	bin := GetBinaryPath()
+	if bin == "" {
+		return "", nil
+	}
+
+	// 2. 优先检查安装落盘的权威 Release 版本标记文件
+	// (解决 MetaCubeX upstream 打 release tag v0.9.2 时源码内漏改硬编码 VERSION "v0.9.1-mihomo" 的问题)
+	versionFile := filepath.Join(GetComponentDir(), "version")
+	if data, err := os.ReadFile(versionFile); err == nil {
+		if v := strings.TrimSpace(string(data)); v != "" {
+			return v, nil
+		}
+	}
+
+	// 3. 若无版本标记文件（如外部第三方预装），尝试通过 HTTP /version 探测
 	client := &http.Client{Timeout: 800 * time.Millisecond}
 	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/version", DefaultPort))
 	if err == nil {
@@ -84,23 +99,8 @@ func (d *Driver) GetInstalledVersion() (string, error) {
 		}
 	}
 
-	// 2. 检查安装落盘的版本标记文件
-	versionFile := filepath.Join(GetComponentDir(), "version")
-	if data, err := os.ReadFile(versionFile); err == nil {
-		if v := strings.TrimSpace(string(data)); v != "" {
-			return v, nil
-		}
-	}
-
-	// 3. 检查本地二进制是否存在
-	bin := GetBinaryPath()
-	if bin == "" {
-		return "", nil
-	}
-
 	// 4. 从可执行文件文本块中提取 SubConverter vX.Y.Z
 	if binData, err := os.ReadFile(bin); err == nil {
-		// 搜索头部前 4MB 字符
 		maxLen := len(binData)
 		if maxLen > 4*1024*1024 {
 			maxLen = 4 * 1024 * 1024
