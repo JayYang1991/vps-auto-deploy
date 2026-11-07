@@ -67,26 +67,37 @@ type ServiceStatus struct {
 
 ## 三、 前端信息架构与 UI/UX 设计约束 (Frontend & UI Design Rules)
 
-### 1. 两大核心版块划分 (Dual-Domain Information Architecture)
+### 1. 两大核心版块与业务配置中心化 (Categorized Service Hub)
 
-界面顶层导航（`web/src/App.vue`）严格划分为两大业务域与一个管理域，**严禁将“安装/启停”与“协议/节点配置”混杂在同一杂乱视图中**：
+界面顶层导航（`web/src/App.vue`）严格划分为四大顶级入口，**严禁将各个具体组件的配置按钮直接平铺在顶部导航栏中**：
 
-| 版块分组 | 导航标识 | 核心职责 | 包含路由视图 |
+| 版块分组 | 导航标识 | 核心职责 | 对应路由 |
 | :--- | :--- | :--- | :--- |
-| **版块一：基础软件** | `基础软件` | 主机监控、底层驱动/扩展软件的安装、升级、卸载、启停与日志流查看 | `📊 系统概览` (`/`)<br>`📦 软件中心` (`/components`) |
-| **版块二：业务配置** | `业务配置` | 代理协议节点、Argo 隧道映射、成员权限与订阅转换分发 | `🌐 入站节点` (`/inbounds`)<br>`🚇 Argo 隧道` (`/tunnels`)<br>`👥 成员与订阅` (`/subscriptions`) |
-| **系统管理** | `设置` | 面板安全路径、公网 IP 覆盖、管理员密码修改 | `⚙️ 设置` (`/settings`) |
+| **版块一：基础软件** | `📊 系统概览`<br>`📦 软件中心` | 监控硬件与状态、底层驱动与扩展软件的安装、版本升级、卸载、启停与实时终端日志流 | `/`<br>`/components` |
+| **版块二：业务配置** | `🛠️ 配置中心` | **所有网络协议节点、反代隧道、用户权限与规则转换的统一分类工作台** | `/services` *(支持 `?tab=inbounds` / `?tab=tunnels` / `?tab=subscriptions`)* |
+| **系统管理** | `⚙️ 设置` | 面板安全路径、公网 IP 强制覆盖、管理员密码修改 | `/settings` |
 
-### 2. 软件中心 (`web/src/views/Components.vue`) 扩展约束
+### 2. 业务配置中心 (`web/src/views/Services.vue`) 架构规范
+- **禁止顶栏平铺铁律**：后续新增任何组件业务（如 `subconverter` 规则编辑、`hysteria` 高速入站、`mosdns` 分流规则），**严禁在 `App.vue` 顶栏增加新的路由按钮**，必须以子 Tab / 分段式工作区形态收敛归类在 `Services.vue` 中。
+- **4 大标准业务分类映射**：
+  1. **🌐 代理入站 (`proxy`)**：Sing-box / Xray / Hysteria 节点配置、Reality 密钥伪装与端口绑定。
+  2. **🚇 隧道穿透 (`tunnel`)**：Cloudflare Argo / FRP 端口映射与域名反代。
+  3. **👥 订阅与规则 (`converter`)**：多用户订阅下发与 Subconverter 远程分流规则转换。
+  4. **🧭 网络与分流 (`network`)**：MosDNS 上游防污染与分流路由表。
+- **状态持久化与平滑切换**：
+  - 子视图之间切换使用 `<keep-alive>`，确保在配置入站或隧道表单时临时切换 Tab 不会丢失表单输入状态。
+  - 兼容历史与快捷直达路由：`/inbounds`、`/tunnels`、`/subscriptions` 自动重定向至 `/services?tab=<name>`。
+
+### 3. 软件中心 (`web/src/views/Components.vue`) 扩展约束
 - **动态分类过滤**：顶部分类 Tab 应支持按 `category` 过滤（`全部服务`、`代理核心 (proxy)`、`隧道穿透 (tunnel)`、`订阅与规则 (converter)` 等），禁止使用非此即彼的二元三目运算符（如 `c.category === 'proxy' ? ... : ...`），必须使用字典映射表 `CATEGORY_MAP[c.category]`。
 - **跨版块联动跳转**：
-  - 已安装的组件卡片上若存在 `c.config_route`，应提供快捷按钮 `[ 🛠️ 去配置 ]` 跳转到对应业务配置页。
+  - 已安装的组件卡片上若存在关联配置，提供快捷按钮 `[ 🛠️ 去配置 ]` 跳转到 `/services?tab=<key>`。
   - 业务配置页检测到依赖组件未安装时，顶部渲染琥珀色渐进式引导卡片，点击 `[ 🚀 前往「软件中心」一键安装 ]` 携带参数跳转 `/components?install=<name>`，软件中心自动高亮该组件并弹出安装确认。
 - **辅助增强型组件联动（如 `subconverter`）**：
-  - 当 `subconverter` 未安装时，`成员与订阅` (`/subscriptions`) 使用内置轻量 Go 生成器提供基础 Clash/Sing-box/Base64 订阅。
-  - 当检测到 `subconverter` 已安装且运行中时，`成员与订阅` 页面自动解锁/激活「高级远程规则模板转换 (Subconverter 引擎)」选项（支持 ACL4SSR 等远程规则配置与多协议混合转换）。
+  - 当 `subconverter` 未安装时，`订阅与规则` Tab 使用内置轻量 Go 生成器提供基础 Clash/Sing-box/Base64 订阅。
+  - 当检测到 `subconverter` 已安装且运行中时，`订阅与规则` Tab 自动激活「高级远程规则模板转换 (Subconverter 引擎)」配置面板。
 
-### 3. 全局非阻塞反馈调用规范
+### 4. 全局非阻塞反馈调用规范
 修改或新增任何 `.vue` 页面时，必须按以下方式处理用户反馈：
 - **消息提示**：
   ```ts
@@ -127,7 +138,8 @@ type ServiceStatus struct {
 2. **注册驱动**：在 `cmd/server/main.go` 的 `init()` 中调用 `component.Register(<name>.NewDriver())`。
 3. **前端分类与联动适配**：
    - 确认 `web/src/views/Components.vue` 的 `categories` 与分类徽标字典包含该组件的 `category`。
-   - 若该组件赋能现有业务版块（如 `subconverter` 赋能 `/subscriptions`，`xray` 赋能 `/inbounds`），在对应业务页面通过 `/api/components` 检测其 `installed && active` 状态并渐进式解锁对应功能。
+   - 若该组件具备业务配置能力，统一归类挂载进 `web/src/views/Services.vue`（业务配置中心）的对应 Tab 分类下，**严禁在 `App.vue` 顶栏新增平铺导航**。
+   - 若该组件赋能现有业务版块（如 `subconverter` 赋能 `订阅与规则`，`xray` 赋能 `代理入站`），通过 `/api/components` 检测其 `installed && active` 状态并渐进式解锁对应功能。
 4. **零原生弹窗检查**：运行 `grep -rnE "\b(alert|confirm|prompt)\(" web/src` 确保输出为空。
 5. **构建与验证**：执行 `go test ./...` 与 `bash build.sh`，确保前后端联编生成单一二进制 `bin/vps-panel` 无任何报错。
 

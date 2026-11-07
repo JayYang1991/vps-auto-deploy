@@ -12,7 +12,7 @@
         <span style="font-size: 1.5rem;">🚀</span>
         <div>
           <span class="brand-title">VPS Auto Deploy</span>
-          <span class="brand-version">v1.1.0</span>
+          <span class="brand-version">v1.2.0</span>
         </div>
       </div>
 
@@ -22,31 +22,35 @@
           <span class="nav-group-label">基础软件</span>
           <div class="nav-group-items">
             <router-link
-              v-for="item in infrastructureNav"
-              :key="item.path"
-              :to="item.path"
-              :class="['nav-pill', currentRoute === item.path ? 'nav-pill-active' : '']"
+              to="/"
+              :class="['nav-pill', currentRoute === '/' ? 'nav-pill-active' : '']"
             >
-              <span>{{ item.icon }}</span>
-              <span>{{ item.title }}</span>
+              <span>📊</span>
+              <span>系统概览</span>
+            </router-link>
+
+            <router-link
+              to="/components"
+              :class="['nav-pill', currentRoute === '/components' ? 'nav-pill-active' : '']"
+            >
+              <span>📦</span>
+              <span>软件中心</span>
             </router-link>
           </div>
         </div>
 
         <div class="nav-divider"></div>
 
-        <!-- 版块二：业务与服务配置 -->
+        <!-- 版块二：业务配置中心 -->
         <div class="nav-group">
           <span class="nav-group-label">业务配置</span>
           <div class="nav-group-items">
             <router-link
-              v-for="item in businessNav"
-              :key="item.path"
-              :to="item.path"
-              :class="['nav-pill', currentRoute === item.path ? 'nav-pill-active' : '']"
+              to="/services"
+              :class="['nav-pill', isServicesActive ? 'nav-pill-active' : '']"
             >
-              <span>{{ item.icon }}</span>
-              <span>{{ item.title }}</span>
+              <span>🛠️</span>
+              <span>配置中心</span>
             </router-link>
           </div>
         </div>
@@ -103,18 +107,10 @@ const { showConfirm } = useConfirm()
 const isLoginRoute = computed(() => route.path === '/login')
 const currentRoute = computed(() => route.path)
 
-// 版块一：基础软件与安装（软件生命周期、底层驱动与系统）
-const infrastructureNav = [
-  { path: '/', title: '系统概览', icon: '📊' },
-  { path: '/components', title: '软件中心', icon: '📦' },
-]
-
-// 版块二：业务与服务配置（入站节点、网络穿透、用户订阅）
-const businessNav = [
-  { path: '/inbounds', title: '入站节点 (Reality)', icon: '🌐' },
-  { path: '/tunnels', title: 'Argo 隧道', icon: '🚇' },
-  { path: '/subscriptions', title: '成员与订阅', icon: '👥' },
-]
+const isServicesActive = computed(() => {
+  const p = route.path
+  return p === '/services' || p === '/inbounds' || p === '/tunnels' || p === '/subscriptions'
+})
 
 async function handleLogout() {
   const confirmed = await showConfirm({

@@ -130,11 +130,17 @@
 
     <!-- 业务快捷导航与入口 -->
     <div>
-      <h2 style="font-size: 1.15rem; font-weight: 600; margin-bottom: 1rem; color: #f8fafc;">
-        🛠️ 业务与服务配置入口
-      </h2>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h2 style="font-size: 1.15rem; font-weight: 600; color: #f8fafc;">
+          🛠️ 业务与服务配置入口
+        </h2>
+        <router-link to="/services" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">
+          前往配置中心 ➔
+        </router-link>
+      </div>
+
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.25rem;">
-        <router-link to="/inbounds" class="card" style="text-decoration: none; color: inherit; transition: transform 0.15s ease, border-color 0.15s ease; border-color: #334155;">
+        <router-link to="/services?tab=inbounds" class="card" style="text-decoration: none; color: inherit; transition: transform 0.15s ease, border-color 0.15s ease; border-color: #334155;">
           <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
             <span style="font-size: 1.5rem;">🌐</span>
             <h3 style="font-size: 1.05rem; font-weight: 600; color: #f8fafc;">入站节点配置 (Reality)</h3>
@@ -144,7 +150,7 @@
           </p>
         </router-link>
 
-        <router-link to="/tunnels" class="card" style="text-decoration: none; color: inherit; transition: transform 0.15s ease, border-color 0.15s ease; border-color: #334155;">
+        <router-link to="/services?tab=tunnels" class="card" style="text-decoration: none; color: inherit; transition: transform 0.15s ease, border-color 0.15s ease; border-color: #334155;">
           <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
             <span style="font-size: 1.5rem;">🚇</span>
             <h3 style="font-size: 1.05rem; font-weight: 600; color: #f8fafc;">Cloudflare Argo 隧道</h3>
@@ -154,7 +160,7 @@
           </p>
         </router-link>
 
-        <router-link to="/subscriptions" class="card" style="text-decoration: none; color: inherit; transition: transform 0.15s ease, border-color 0.15s ease; border-color: #334155;">
+        <router-link to="/services?tab=subscriptions" class="card" style="text-decoration: none; color: inherit; transition: transform 0.15s ease, border-color 0.15s ease; border-color: #334155;">
           <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
             <span style="font-size: 1.5rem;">👥</span>
             <h3 style="font-size: 1.05rem; font-weight: 600; color: #f8fafc;">成员与客户端订阅</h3>
