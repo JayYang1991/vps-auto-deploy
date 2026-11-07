@@ -37,8 +37,28 @@ func (s *SystemdManager) IsActive() bool {
 }
 
 // Status 获取服务当前状态
+// 精确识别正在崩溃重启中的 auto-restart 异常状态
 func (s *SystemdManager) Status() string {
-	out, _ := s.runSystemctl(3*time.Second, "is-active", s.UnitName)
+	out, err := s.runSystemctl(3*time.Second, "show", "-p", "ActiveState,SubState", s.UnitName)
+	if err == nil && out != "" {
+		var activeState, subState string
+		for _, line := range strings.Split(out, "\n") {
+			line = strings.TrimSpace(line)
+			if strings.HasPrefix(line, "ActiveState=") {
+				activeState = strings.TrimPrefix(line, "ActiveState=")
+			} else if strings.HasPrefix(line, "SubState=") {
+				subState = strings.TrimPrefix(line, "SubState=")
+			}
+		}
+		if subState == "auto-restart" {
+			return "failed"
+		}
+		if activeState != "" {
+			return activeState
+		}
+	}
+
+	out, _ = s.runSystemctl(3*time.Second, "is-active", s.UnitName)
 	return strings.TrimSpace(out)
 }
 
