@@ -310,11 +310,23 @@
             <div>
               <label class="form-label">规则集与分流模板 (Ruleset / Config)</label>
               <select v-model="tester.template" class="input">
-                <option v-for="t in templates" :key="t.name" :value="t.ConfigValue">
-                  {{ t.Label }} {{ t.Recommended ? '★ 推荐' : '' }}
+                <option v-for="t in templates" :key="t.name" :value="t.config_value">
+                  {{ t.label }} {{ t.recommended ? '★ 推荐' : '' }}
                 </option>
+                <option value="custom">✏️ 自定义外部规则集 URL...</option>
               </select>
             </div>
+          </div>
+
+          <!-- 自定义外部规则集 URL 输入框 -->
+          <div v-if="tester.template === 'custom'" style="margin-bottom: 1.25rem;">
+            <label class="form-label">自定义外部规则集链接 (URL)</label>
+            <input
+              v-model="tester.customTemplateUrl"
+              type="text"
+              class="input"
+              placeholder="请输入规则集完整 URL，例如：https://raw.githubusercontent.com/.../ACL4SSR_Online.ini"
+            />
           </div>
 
           <!-- 转换开关参数 -->
@@ -533,6 +545,7 @@ const tester = reactive({
   memberId: 0,
   target: 'clash',
   template: 'config/ACL4SSR_Online.ini',
+  customTemplateUrl: '',
   emoji: true,
   udp: true,
   scv: true,
@@ -563,8 +576,10 @@ const currentTesterSubURL = computed(() => {
   const params = new URLSearchParams()
   params.set('engine', 'subconverter')
   params.set('target', tester.target)
-  if (tester.template) {
-    params.set('config', tester.template)
+
+  const configVal = tester.template === 'custom' ? tester.customTemplateUrl.trim() : tester.template
+  if (configVal) {
+    params.set('config', configVal)
   }
   if (tester.emoji) params.set('emoji', 'true')
   if (tester.udp) params.set('udp', 'true')
@@ -611,8 +626,9 @@ async function fetchTemplates() {
   try {
     const res = await api.get('/subconverter/templates')
     templates.value = res.data || []
-    if (templates.value.length > 0 && !tester.template) {
-      tester.template = templates.value[0].ConfigValue
+    if (templates.value.length > 0 && (!tester.template || tester.template === 'config/ACL4SSR_Online.ini')) {
+      const defaultTpl = templates.value.find((t: any) => t.recommended) || templates.value[0]
+      tester.template = defaultTpl.config_value || defaultTpl.ConfigValue || 'config/ACL4SSR_Online.ini'
     }
   } catch {
     // ignore
