@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/google/uuid"
@@ -97,6 +98,24 @@ func migrate() error {
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL
 	);
+
+	CREATE TABLE IF NOT EXISTS nodes (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		host TEXT NOT NULL,
+		ssh_port INTEGER NOT NULL DEFAULT 22,
+		panel_port INTEGER NOT NULL DEFAULT 20888,
+		secret_path TEXT NOT NULL DEFAULT '',
+		username TEXT NOT NULL DEFAULT 'admin',
+		password_encrypted TEXT NOT NULL DEFAULT '',
+		api_token TEXT NOT NULL DEFAULT '',
+		is_master INTEGER NOT NULL DEFAULT 0,
+		status TEXT NOT NULL DEFAULT 'online',
+		os_info TEXT NOT NULL DEFAULT '',
+		latency_ms INTEGER NOT NULL DEFAULT 0,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
 	`
 	_, err := DB.Exec(schema)
 	return err
@@ -160,7 +179,124 @@ func initDefaults() error {
 		log.Println("[Init] Created default direct & block outbounds")
 	}
 
+	// 6. 初始化默认主控本机节点 (ID=1)
+	var nodeCount int
+	err = DB.QueryRow("SELECT COUNT(*) FROM nodes").Scan(&nodeCount)
+	if err == nil && nodeCount == 0 {
+		secretPath, _ := GetSetting("secret_path")
+		now := time.Now()
+		_, _ = DB.Exec(
+			"INSERT INTO nodes (id, name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, status, os_info, latency_ms, created_at, updated_at) VALUES (1, ?, '127.0.0.1', 22, 20888, ?, 'admin', '', '', 1, 'online', ?, 0, ?, ?)",
+			"🏠 本机 (Master)",
+			secretPath,
+			runtime.GOOS+"/"+runtime.GOARCH,
+			now,
+			now,
+		)
+		log.Println("[Init] Created default master node")
+	}
+
 	return nil
+}
+
+// GetNode 获取单个节点信息
+func GetNode(id int64) (*Node, error) {
+	row := DB.QueryRow(
+		"SELECT id, name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, status, os_info, latency_ms, created_at, updated_at FROM nodes WHERE id = ?",
+		id,
+	)
+	var n Node
+	var isMasterInt int
+	err := row.Scan(
+		&n.ID, &n.Name, &n.Host, &n.SSHPort, &n.PanelPort, &n.SecretPath,
+		&n.Username, &n.PasswordEncrypted, &n.APIToken, &isMasterInt,
+		&n.Status, &n.OSInfo, &n.LatencyMs, &n.CreatedAt, &n.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	n.IsMaster = isMasterInt == 1
+	return &n, nil
+}
+
+// ListNodes 列出所有节点（主控本机始终排在首位）
+func ListNodes() ([]Node, error) {
+	rows, err := DB.Query(
+		"SELECT id, name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, status, os_info, latency_ms, created_at, updated_at FROM nodes ORDER BY is_master DESC, id ASC",
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var nodes []Node
+	for rows.Next() {
+		var n Node
+		var isMasterInt int
+		if err := rows.Scan(
+			&n.ID, &n.Name, &n.Host, &n.SSHPort, &n.PanelPort, &n.SecretPath,
+			&n.Username, &n.PasswordEncrypted, &n.APIToken, &isMasterInt,
+			&n.Status, &n.OSInfo, &n.LatencyMs, &n.CreatedAt, &n.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		n.IsMaster = isMasterInt == 1
+		nodes = append(nodes, n)
+	}
+	return nodes, nil
+}
+
+// CreateNode 创建新节点记录
+func CreateNode(n *Node) (int64, error) {
+	now := time.Now()
+	n.CreatedAt = now
+	n.UpdatedAt = now
+	isMasterInt := 0
+	if n.IsMaster {
+		isMasterInt = 1
+	}
+	res, err := DB.Exec(
+		"INSERT INTO nodes (name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, status, os_info, latency_ms, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		n.Name, n.Host, n.SSHPort, n.PanelPort, n.SecretPath, n.Username, n.PasswordEncrypted, n.APIToken, isMasterInt, n.Status, n.OSInfo, n.LatencyMs, n.CreatedAt, n.UpdatedAt,
+	)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	n.ID = id
+	return id, nil
+}
+
+// UpdateNode 更新节点配置
+func UpdateNode(n *Node) error {
+	now := time.Now()
+	n.UpdatedAt = now
+	_, err := DB.Exec(
+		"UPDATE nodes SET name = ?, host = ?, ssh_port = ?, panel_port = ?, secret_path = ?, username = ?, password_encrypted = ?, api_token = ?, status = ?, os_info = ?, latency_ms = ?, updated_at = ? WHERE id = ?",
+		n.Name, n.Host, n.SSHPort, n.PanelPort, n.SecretPath, n.Username, n.PasswordEncrypted, n.APIToken, n.Status, n.OSInfo, n.LatencyMs, n.UpdatedAt, n.ID,
+	)
+	return err
+}
+
+// UpdateNodeStatus 快速更新节点状态与延迟
+func UpdateNodeStatus(id int64, status string, latencyMs int64) error {
+	_, err := DB.Exec("UPDATE nodes SET status = ?, latency_ms = ?, updated_at = ? WHERE id = ?", status, latencyMs, time.Now(), id)
+	return err
+}
+
+// UpdateNodeToken 快速更新节点的 API Token
+func UpdateNodeToken(id int64, token string) error {
+	_, err := DB.Exec("UPDATE nodes SET api_token = ?, updated_at = ? WHERE id = ?", token, time.Now(), id)
+	return err
+}
+
+// DeleteNode 删除节点（主控本机禁止删除）
+func DeleteNode(id int64) error {
+	_, err := DB.Exec("DELETE FROM nodes WHERE id = ? AND is_master = 0", id)
+	return err
 }
 
 // GetSetting 获取单个配置

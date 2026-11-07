@@ -518,7 +518,11 @@ function openLogs(unit: string) {
 
   const secret = getSecretPath()
   const token = localStorage.getItem('token') || ''
-  const url = `/${secret}/api/system/logs?unit=${unit}&token=${token}`
+  const activeNodeId = localStorage.getItem('active_node_id') || '1'
+  let url = `/${secret}/api/system/logs?unit=${unit}&token=${token}`
+  if (activeNodeId !== '1') {
+    url += `&node_id=${activeNodeId}`
+  }
 
   if (logModal.eventSource) {
     logModal.eventSource.close()

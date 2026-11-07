@@ -20,6 +20,7 @@ import (
 var (
 	portFlag        = flag.Int("port", 20888, "HTTP server listening port")
 	dbPathFlag      = flag.String("db", "/etc/vps-auto-deploy/data.db", "SQLite database path")
+	resetUserFlag   = flag.String("reset-username", "", "Reset admin username")
 	resetPassFlag   = flag.String("reset-password", "", "Reset admin password")
 	resetSecretFlag = flag.String("reset-secret", "", "Reset secret path")
 )
@@ -48,17 +49,25 @@ func main() {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
 
-	// 2. 处理重置密码与安全路径的 CLI 参数
+	// 2. 处理重置管理员账号、密码与安全路径的 CLI 参数
+	hasReset := false
+	if *resetUserFlag != "" {
+		_ = model.SetSetting("admin_username", *resetUserFlag)
+		log.Printf("[CLI] Admin username set to: %s", *resetUserFlag)
+		hasReset = true
+	}
 	if *resetPassFlag != "" {
 		hash, _ := bcrypt.GenerateFromPassword([]byte(*resetPassFlag), bcrypt.DefaultCost)
 		_ = model.SetSetting("admin_password_hash", string(hash))
 		log.Printf("[CLI] Admin password has been reset successfully.")
-		return
+		hasReset = true
 	}
-
 	if *resetSecretFlag != "" {
 		_ = model.SetSetting("secret_path", *resetSecretFlag)
 		log.Printf("[CLI] Secret path reset to: /%s/", *resetSecretFlag)
+		hasReset = true
+	}
+	if hasReset {
 		return
 	}
 

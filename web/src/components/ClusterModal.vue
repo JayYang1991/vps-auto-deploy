@@ -1,0 +1,1444 @@
+<template>
+  <div v-if="modelValue" class="modal-overlay" @click.self="close">
+    <div class="cluster-modal">
+      <!-- 模态框头部 -->
+      <div class="modal-header">
+        <div class="header-title-box">
+          <span class="header-icon">🖥️</span>
+          <div>
+            <h3 class="header-title">多节点集群管理</h3>
+            <p class="header-desc">统一纳管多台远程服务器，实现跨节点业务配置与穿透流转</p>
+          </div>
+        </div>
+
+        <button class="close-btn" @click="close" type="button">✕</button>
+      </div>
+
+      <!-- 顶部分类 Tab -->
+      <div class="cluster-tabs">
+        <button
+          class="tab-btn"
+          :class="{ 'tab-btn-active': activeTab === 'nodes' }"
+          @click="activeTab = 'nodes'"
+        >
+          <span>🌐 节点列表</span>
+          <span class="tab-badge">{{ nodes.length }}</span>
+        </button>
+
+        <button
+          class="tab-btn"
+          :class="{ 'tab-btn-active': activeTab === 'deploy' }"
+          @click="activeTab = 'deploy'"
+        >
+          <span>➕ SSH 远程部署</span>
+        </button>
+
+        <button
+          class="tab-btn"
+          :class="{ 'tab-btn-active': activeTab === 'import' }"
+          @click="activeTab = 'import'"
+        >
+          <span>🔗 纳管已有节点</span>
+        </button>
+      </div>
+
+      <!-- Tab 1: 节点列表 -->
+      <div v-if="activeTab === 'nodes'" class="tab-content">
+        <div class="nodes-grid">
+          <div
+            v-for="item in nodes"
+            :key="item.id"
+            class="node-card"
+            :class="{ 'node-card-active': item.id === activeNodeId }"
+          >
+            <div class="node-card-header">
+              <div class="node-title-group">
+                <span class="node-badge-icon">{{ item.is_master ? '🏠' : '🌐' }}</span>
+                <div>
+                  <div class="node-name-row">
+                    <span class="card-name">{{ item.name }}</span>
+                    <span v-if="item.is_master" class="tag-master">主控节点</span>
+                    <span v-if="item.id === activeNodeId" class="tag-current">当前视角</span>
+                  </div>
+                  <div class="card-host">{{ item.host }}:{{ item.panel_port }}</div>
+                </div>
+              </div>
+
+              <!-- 状态与测速徽标 -->
+              <div class="node-status-group">
+                <span
+                  class="status-pill"
+                  :class="{
+                    'status-online': item.status === 'online',
+                    'status-offline': item.status !== 'online'
+                  }"
+                >
+                  <span class="status-dot"></span>
+                  {{ item.status === 'online' ? `${item.latency_ms} ms` : '离线' }}
+                </span>
+              </div>
+            </div>
+
+            <!-- 节点参数属性明细 -->
+            <div class="node-props">
+              <div class="prop-item">
+                <span class="prop-label">系统环境:</span>
+                <span class="prop-val">{{ item.os_info || 'Linux' }}</span>
+              </div>
+              <div class="prop-item">
+                <span class="prop-label">面板入口:</span>
+                <span class="prop-val mono">/{{ item.secret_path }}/</span>
+              </div>
+              <div class="prop-item">
+                <span class="prop-label">管理账号:</span>
+                <span class="prop-val mono">{{ item.username }}</span>
+              </div>
+            </div>
+
+            <!-- 操作按钮组 -->
+            <div class="node-card-actions">
+              <button
+                v-if="item.id !== activeNodeId"
+                class="btn-action btn-switch"
+                @click="handleSwitch(item.id)"
+                type="button"
+              >
+                <span>⚡ 切换视角</span>
+              </button>
+              <span v-else class="active-notice">✓ 当前正在管理此节点</span>
+
+              <button
+                class="btn-action btn-ping"
+                :disabled="pingingMap[item.id]"
+                @click="handlePing(item.id)"
+                type="button"
+                title="重新测量该节点网络延迟"
+              >
+                <span>{{ pingingMap[item.id] ? '⏳ 测速中' : '📶 测速' }}</span>
+              </button>
+
+              <button
+                class="btn-action btn-reveal"
+                @click="openRevealModal(item)"
+                type="button"
+                title="需二次验证主控密码以解密查看凭据"
+              >
+                <span>🔑 查看凭据</span>
+              </button>
+
+              <button
+                v-if="!item.is_master"
+                class="btn-action btn-delete"
+                @click="handleDelete(item)"
+                type="button"
+                title="从集群中移出此节点"
+              >
+                <span>🗑️</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: SSH 远程一键部署 -->
+      <div v-else-if="activeTab === 'deploy'" class="tab-content">
+        <!-- 部署配置表单 -->
+        <div v-if="deployStep === 'form'" class="deploy-form">
+          <div class="form-alert-info">
+            <span>ℹ️</span>
+            <div>
+              <strong>零外网依赖高速安装：</strong>
+              若目标机器与主控架构相同（如 Linux amd64），主控端将直接通过 SSH 管道推流传输面板程序，数秒内即可完成极速部署与守护进程挂载。
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label>节点友好名称 <span class="req">*</span></label>
+              <input v-model="deployReq.name" type="text" placeholder="例如：香港 HK-01 或 日本东京" />
+            </div>
+
+            <div class="form-group">
+              <label>目标服务器 IP / 域名 <span class="req">*</span></label>
+              <input v-model="deployReq.host" type="text" placeholder="例如：192.168.1.50 或 hk.example.com" />
+            </div>
+
+            <div class="form-group">
+              <label>SSH 端口 <span class="req">*</span></label>
+              <input v-model.number="deployReq.ssh_port" type="number" placeholder="22" />
+            </div>
+
+            <div class="form-group">
+              <label>SSH 用户名 <span class="req">*</span></label>
+              <input v-model="deployReq.ssh_user" type="text" placeholder="root" />
+            </div>
+
+            <div class="form-group full-width">
+              <label>SSH 认证方式</label>
+              <div class="radio-group">
+                <label class="radio-label">
+                  <input type="radio" value="password" v-model="deployReq.auth_type" />
+                  <span>密码认证</span>
+                </label>
+                <label class="radio-label">
+                  <input type="radio" value="key" v-model="deployReq.auth_type" />
+                  <span>SSH 私钥认证</span>
+                </label>
+              </div>
+            </div>
+
+            <div v-if="deployReq.auth_type === 'password'" class="form-group full-width">
+              <label>SSH 登录密码 <span class="req">*</span></label>
+              <input v-model="deployReq.ssh_password" type="password" placeholder="输入远程主机 root 密码" />
+            </div>
+
+            <div v-else class="form-group full-width">
+              <label>SSH 私钥内容 (OpenSSH PEM) <span class="req">*</span></label>
+              <textarea
+                v-model="deployReq.ssh_private_key"
+                rows="4"
+                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;..."
+                class="mono"
+              ></textarea>
+            </div>
+
+            <div class="form-divider full-width">
+              <span>被纳管面板初始化参数</span>
+            </div>
+
+            <div class="form-group">
+              <label>面板监听端口</label>
+              <input v-model.number="deployReq.panel_port" type="number" placeholder="20888" />
+            </div>
+
+            <div class="form-group">
+              <label>管理账号</label>
+              <input v-model="deployReq.admin_username" type="text" placeholder="admin" />
+            </div>
+
+            <div class="form-group">
+              <label>管理密码 (留空随机生成)</label>
+              <input v-model="deployReq.admin_password" type="text" placeholder="留空则自动生成高强度随机密码" />
+            </div>
+
+            <div class="form-group">
+              <label>安全访问路径 (留空随机生成)</label>
+              <input v-model="deployReq.secret_path" type="text" placeholder="留空则生成 8 位随机前缀" />
+            </div>
+          </div>
+
+          <div class="form-footer">
+            <button class="btn-primary" @click="startDeploy" :disabled="isDeploying">
+              <span>🚀 立即开始 SSH 自动化部署</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 实时部署日志流终端 -->
+        <div v-else class="deploy-terminal-box">
+          <div class="terminal-header">
+            <div class="terminal-status-info">
+              <span class="pulse-indicator" :class="{ 'pulse-active': deployTaskStatus === 'running' }"></span>
+              <span class="terminal-title">
+                {{ deployTaskStatus === 'running' ? '正在执行远程部署与集群握手...' : (deployTaskStatus === 'success' ? '🎉 部署完成' : '❌ 部署失败') }}
+              </span>
+            </div>
+
+            <span class="terminal-node-name">{{ deployReq.name || deployReq.host }}</span>
+          </div>
+
+          <div class="terminal-body" ref="terminalBodyRef">
+            <div v-for="(log, idx) in deployLogs" :key="idx" class="terminal-line" :class="getLineClass(log)">
+              {{ log }}
+            </div>
+          </div>
+
+          <div class="terminal-footer">
+            <button
+              v-if="deployTaskStatus === 'success'"
+              class="btn-primary"
+              @click="finishDeployAndSwitch"
+            >
+              <span>✅ 完成并切换至该节点视角</span>
+            </button>
+            <button
+              v-else-if="deployTaskStatus === 'failed'"
+              class="btn-secondary"
+              @click="deployStep = 'form'"
+            >
+              <span>🔄 返回修改参数并重试</span>
+            </button>
+            <span v-else class="deploy-progress-hint">
+              请保持页面开启，系统正在挂载守护进程并执行 Token 交换...
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 3: 纳管已有节点 -->
+      <div v-else-if="activeTab === 'import'" class="tab-content">
+        <div class="deploy-form">
+          <div class="form-alert-info">
+            <span>🔗</span>
+            <div>
+              <strong>纳管已运行面板：</strong>
+              若您已在其他服务器上安装并启动了 VPS Auto Deploy 面板，在此填入其公网地址、端口与管理员凭据即可快速加入本集群。
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group full-width">
+              <label>节点友好名称 <span class="req">*</span></label>
+              <input v-model="importReq.name" type="text" placeholder="例如：美国西雅图 或 备用节点 02" />
+            </div>
+
+            <div class="form-group">
+              <label>服务器公网 IP / 域名 <span class="req">*</span></label>
+              <input v-model="importReq.host" type="text" placeholder="例如：198.51.100.22" />
+            </div>
+
+            <div class="form-group">
+              <label>面板监听端口 <span class="req">*</span></label>
+              <input v-model.number="importReq.panel_port" type="number" placeholder="20888" />
+            </div>
+
+            <div class="form-group full-width">
+              <label>安全访问路径 (Secret Path) <span class="req">*</span></label>
+              <input v-model="importReq.secret_path" type="text" placeholder="例如：fa480cbd (不含前后斜杠)" />
+            </div>
+
+            <div class="form-group">
+              <label>管理员账号 <span class="req">*</span></label>
+              <input v-model="importReq.username" type="text" placeholder="admin" />
+            </div>
+
+            <div class="form-group">
+              <label>管理员密码 <span class="req">*</span></label>
+              <input v-model="importReq.password" type="password" placeholder="输入该面板的管理员密码" />
+            </div>
+          </div>
+
+          <div class="form-footer">
+            <button class="btn-primary" @click="handleImport" :disabled="isImporting">
+              <span>{{ isImporting ? '⏳ 正在握手验证...' : '🔗 立即接入集群' }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 二次鉴权查看密码模态框 (Step-Up Authentication Modal) -->
+    <div v-if="revealModalVisible" class="reveal-overlay" @click.self="closeRevealModal">
+      <div class="reveal-card">
+        <div class="reveal-header">
+          <div class="reveal-title-box">
+            <span class="reveal-icon">🔐</span>
+            <div>
+              <h4 class="reveal-title">二次安全鉴权</h4>
+              <p class="reveal-desc">查看被纳管节点密码需验证主控面板管理员身份</p>
+            </div>
+          </div>
+          <button class="close-btn" @click="closeRevealModal" type="button">✕</button>
+        </div>
+
+        <!-- 步骤 1：输入主控密码 -->
+        <div v-if="!revealedData" class="reveal-body">
+          <div class="reveal-prompt">
+            您正在请求解密并查看节点 <strong>{{ targetRevealNode?.name }}</strong> ({{ targetRevealNode?.host }}) 的登录凭据。
+          </div>
+
+          <div class="form-group" style="margin-top: 1rem;">
+            <label>主控管理员密码 <span class="req">*</span></label>
+            <input
+              v-model="masterVerifyPassword"
+              type="password"
+              placeholder="请输入当前主控端的登录密码"
+              @keyup.enter="submitReveal"
+            />
+          </div>
+
+          <div class="reveal-footer">
+            <button class="btn-secondary" @click="closeRevealModal">取消</button>
+            <button class="btn-primary" @click="submitReveal" :disabled="verifyingReveal || !masterVerifyPassword">
+              <span>{{ verifyingReveal ? '⏳ 鉴权中...' : '🔓 验证并查看' }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 步骤 2：凭据解密成功展示与 60s 倒计时锁定 -->
+        <div v-else class="reveal-body">
+          <div class="credentials-box">
+            <div class="countdown-bar">
+              <span>⏳ 凭据保护中：将在 <strong>{{ countdownSeconds }}</strong> 秒后自动隐藏锁定</span>
+            </div>
+
+            <div class="cred-row">
+              <span class="cred-label">节点名称:</span>
+              <span class="cred-val">{{ revealedData.name }}</span>
+            </div>
+
+            <div class="cred-row">
+              <span class="cred-label">管理账号:</span>
+              <div class="cred-val-copy">
+                <span class="mono">{{ revealedData.username }}</span>
+                <button class="btn-mini-copy" @click="copyText(revealedData.username, '账号')">复制</button>
+              </div>
+            </div>
+
+            <div class="cred-row">
+              <span class="cred-label">管理密码:</span>
+              <div class="cred-val-copy">
+                <span class="mono">{{ showPasswordPlainText ? revealedData.password : '••••••••••••' }}</span>
+                <button class="btn-mini-toggle" @click="showPasswordPlainText = !showPasswordPlainText">
+                  {{ showPasswordPlainText ? '🙈 隐藏' : '👁️ 显示' }}
+                </button>
+                <button class="btn-mini-copy" @click="copyText(revealedData.password, '密码')">复制</button>
+              </div>
+            </div>
+
+            <div class="cred-row">
+              <span class="cred-label">安全入口:</span>
+              <div class="cred-val-copy">
+                <span class="mono">/{{ revealedData.secret_path }}/</span>
+                <button class="btn-mini-copy" @click="copyText(`/${revealedData.secret_path}/`, '安全路径')">复制</button>
+              </div>
+            </div>
+
+            <div class="cred-row">
+              <span class="cred-label">面板直连 URL:</span>
+              <div class="cred-val-copy">
+                <a :href="revealedData.login_url" target="_blank" class="cred-link mono">{{ revealedData.login_url }}</a>
+                <button class="btn-mini-copy" @click="copyText(revealedData.login_url, '直达网址')">复制</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="reveal-footer">
+            <button class="btn-secondary" @click="closeRevealModal">关闭并锁定</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref, reactive, watch, nextTick, onUnmounted } from 'vue'
+import api, { getSecretPath } from '../api'
+import { useNodeContext, NodeItem } from '../composables/useNodeContext'
+import { useToast, copyToClipboard } from '../composables/useToast'
+import { useConfirm } from '../composables/useConfirm'
+
+const props = defineProps<{
+  modelValue: boolean
+  initialTab?: 'nodes' | 'deploy' | 'import'
+}>()
+
+const emit = defineEmits<{
+  (e: 'update:modelValue', val: boolean): void
+}>()
+
+const { toast } = useToast()
+const { showConfirm } = useConfirm()
+const {
+  activeNodeId,
+  nodes,
+  fetchNodes,
+  switchNode,
+} = useNodeContext()
+
+const activeTab = ref<'nodes' | 'deploy' | 'import'>('nodes')
+
+watch(
+  () => props.initialTab,
+  (val) => {
+    if (val) activeTab.value = val
+  },
+  { immediate: true }
+)
+
+watch(
+  () => props.modelValue,
+  (val) => {
+    if (val) {
+      fetchNodes()
+    }
+  }
+)
+
+function close() {
+  emit('update:modelValue', false)
+}
+
+function handleSwitch(id: number) {
+  switchNode(id)
+  toast.success('已切换至目标节点管理视角')
+  close()
+}
+
+// 节点测速
+const pingingMap = reactive<Record<number, boolean>>({})
+
+async function handlePing(id: number) {
+  pingingMap[id] = true
+  try {
+    const res = await api.post(`/nodes/${id}/ping`)
+    if (res.data.status === 'online') {
+      toast.success(`测速成功：网络延迟 ${res.data.latency_ms} ms`)
+    } else {
+      toast.warning('节点离线或未能连通')
+    }
+    await fetchNodes()
+  } catch (err: any) {
+    toast.error('测速失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    pingingMap[id] = false
+  }
+}
+
+// 删除节点
+async function handleDelete(item: NodeItem) {
+  const ok = await showConfirm({
+    title: '移出集群确认',
+    message: `确定要将节点「${item.name}」(${item.host}) 移出本主控集群吗？（此操作仅解除纳管，不会删除远端服务器上的数据）`,
+    confirmText: '移出集群',
+    danger: true,
+  })
+  if (!ok) return
+
+  try {
+    await api.delete(`/nodes/${item.id}`)
+    toast.success('节点已成功移出集群')
+    if (activeNodeId.value === item.id) {
+      switchNode(1)
+    }
+    await fetchNodes()
+  } catch (err: any) {
+    toast.error('操作失败: ' + (err.response?.data?.error || err.message))
+  }
+}
+
+// ==================== SSH 远程一键部署 ====================
+const deployStep = ref<'form' | 'terminal'>('form')
+const isDeploying = ref(false)
+const deployReq = reactive({
+  name: '',
+  host: '',
+  ssh_port: 22,
+  ssh_user: 'root',
+  auth_type: 'password' as 'password' | 'key',
+  ssh_password: '',
+  ssh_private_key: '',
+  panel_port: 20888,
+  admin_username: 'admin',
+  admin_password: '',
+  secret_path: '',
+})
+
+const deployTaskStatus = ref<'running' | 'success' | 'failed'>('running')
+const deployLogs = ref<string[]>([])
+const terminalBodyRef = ref<HTMLElement | null>(null)
+let eventSource: EventSource | null = null
+let deployedNodeId = 0
+
+function getLineClass(line: string) {
+  if (line.includes('[SUCCESS]')) return 'line-success'
+  if (line.includes('[ERROR]')) return 'line-error'
+  if (line.includes('SSH') || line.includes('Systemd')) return 'line-highlight'
+  return ''
+}
+
+function scrollToBottom() {
+  nextTick(() => {
+    if (terminalBodyRef.value) {
+      terminalBodyRef.value.scrollTop = terminalBodyRef.value.scrollHeight
+    }
+  })
+}
+
+async function startDeploy() {
+  if (!deployReq.host) {
+    toast.warning('请输入目标服务器 IP 或域名')
+    return
+  }
+  if (deployReq.auth_type === 'password' && !deployReq.ssh_password) {
+    toast.warning('请输入 SSH 登录密码')
+    return
+  }
+  if (deployReq.auth_type === 'key' && !deployReq.ssh_private_key) {
+    toast.warning('请输入 SSH 私钥内容')
+    return
+  }
+
+  isDeploying.value = true
+  deployLogs.value = []
+  deployTaskStatus.value = 'running'
+  deployStep.value = 'terminal'
+
+  try {
+    const res = await api.post('/nodes/deploy', deployReq)
+    const taskId = res.data.task_id
+
+    // 建立 SSE 日志连接
+    const secret = getSecretPath()
+    const token = localStorage.getItem('token') || ''
+    const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&token=${token}`
+
+    if (eventSource) {
+      eventSource.close()
+    }
+    eventSource = new EventSource(streamURL)
+
+    eventSource.onmessage = (event) => {
+      const line = event.data
+      deployLogs.value.push(line)
+      scrollToBottom()
+
+      if (line.includes('[SUCCESS]')) {
+        deployTaskStatus.value = 'success'
+        eventSource?.close()
+        fetchNodes().then(() => {
+          const match = nodes.value.find((n) => n.host === deployReq.host)
+          if (match) deployedNodeId = match.id
+        })
+      } else if (line.includes('[ERROR]')) {
+        deployTaskStatus.value = 'failed'
+        eventSource?.close()
+      }
+    }
+
+    eventSource.onerror = () => {
+      eventSource?.close()
+      if (deployTaskStatus.value === 'running') {
+        deployTaskStatus.value = 'failed'
+        deployLogs.value.push('[ERROR] 日志流连接异常中断')
+      }
+    }
+  } catch (err: any) {
+    deployTaskStatus.value = 'failed'
+    deployLogs.value.push('[ERROR] 启动部署任务失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    isDeploying.value = false
+  }
+}
+
+function finishDeployAndSwitch() {
+  if (deployedNodeId > 0) {
+    switchNode(deployedNodeId)
+    toast.success('部署完成，已切换至新节点视角！')
+  } else {
+    toast.success('部署完成！')
+  }
+  close()
+}
+
+// ==================== 纳管已有节点 ====================
+const isImporting = ref(false)
+const importReq = reactive({
+  name: '',
+  host: '',
+  panel_port: 20888,
+  secret_path: '',
+  username: 'admin',
+  password: '',
+})
+
+async function handleImport() {
+  if (!importReq.host || !importReq.secret_path || !importReq.password) {
+    toast.warning('请完整填写服务器地址、安全路径及密码')
+    return
+  }
+
+  isImporting.value = true
+  try {
+    const res = await api.post('/nodes/import', importReq)
+    toast.success('成功纳管远程节点！')
+    await fetchNodes()
+    if (res.data.node_id) {
+      switchNode(res.data.node_id)
+    }
+    close()
+  } catch (err: any) {
+    toast.error('纳管失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    isImporting.value = false
+  }
+}
+
+// ==================== 二次鉴权查看凭据 (Reveal) ====================
+const revealModalVisible = ref(false)
+const targetRevealNode = ref<NodeItem | null>(null)
+const masterVerifyPassword = ref('')
+const verifyingReveal = ref(false)
+const revealedData = ref<any>(null)
+const showPasswordPlainText = ref(false)
+const countdownSeconds = ref(60)
+let countdownTimer: any = null
+
+function openRevealModal(item: NodeItem) {
+  targetRevealNode.value = item
+  masterVerifyPassword.value = ''
+  revealedData.value = null
+  showPasswordPlainText.value = false
+  countdownSeconds.value = 60
+  revealModalVisible.value = true
+}
+
+function closeRevealModal() {
+  revealModalVisible.value = false
+  revealedData.value = null
+  masterVerifyPassword.value = ''
+  if (countdownTimer) {
+    clearInterval(countdownTimer)
+    countdownTimer = null
+  }
+}
+
+async function submitReveal() {
+  if (!masterVerifyPassword.value || !targetRevealNode.value) return
+  verifyingReveal.value = true
+  try {
+    const res = await api.post(`/nodes/${targetRevealNode.value.id}/reveal-credentials`, {
+      master_password: masterVerifyPassword.value,
+    })
+    revealedData.value = res.data
+    toast.success('身份验证通过，凭据已解密')
+
+    // 开启 60 秒倒计时自动锁定
+    countdownSeconds.value = 60
+    if (countdownTimer) clearInterval(countdownTimer)
+    countdownTimer = setInterval(() => {
+      countdownSeconds.value--
+      if (countdownSeconds.value <= 0) {
+        clearInterval(countdownTimer)
+        countdownTimer = null
+        closeRevealModal()
+        toast.info('安全时效已到，节点凭据已自动重新锁定')
+      }
+    }, 1000)
+  } catch (err: any) {
+    toast.error(err.response?.data?.error || '主控管理员密码错误，验证失败')
+  } finally {
+    verifyingReveal.value = false
+  }
+}
+
+function copyText(text: string, label: string) {
+  copyToClipboard(text, label)
+}
+
+onUnmounted(() => {
+  if (eventSource) eventSource.close()
+  if (countdownTimer) clearInterval(countdownTimer)
+})
+</script>
+
+<style scoped>
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(6px);
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.cluster-modal {
+  background: #0f172a;
+  border: 1px solid #334155;
+  border-radius: 1rem;
+  width: 100%;
+  max-width: 820px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid #1e293b;
+  background: #1e293b;
+}
+
+.header-title-box {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.header-icon {
+  font-size: 1.75rem;
+}
+
+.header-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.header-desc {
+  margin: 0.15rem 0 0 0;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.close-btn {
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  font-size: 1.25rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.35rem;
+  transition: all 0.15s ease;
+}
+
+.close-btn:hover {
+  background: #334155;
+  color: #ffffff;
+}
+
+/* Tabs */
+.cluster-tabs {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: #0b1120;
+  border-bottom: 1px solid #1e293b;
+}
+
+.tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  padding: 0.45rem 0.85rem;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tab-btn:hover {
+  color: #f1f5f9;
+  background: #1e293b;
+}
+
+.tab-btn-active {
+  background: #1e293b;
+  color: #818cf8;
+  font-weight: 600;
+}
+
+.tab-badge {
+  font-size: 0.7rem;
+  background: rgba(99, 102, 241, 0.2);
+  color: #a5b4fc;
+  padding: 0.05rem 0.35rem;
+  border-radius: 9999px;
+}
+
+.tab-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+
+/* 节点卡片列表 */
+.nodes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 1rem;
+}
+
+.node-card {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 0.75rem;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  transition: all 0.2s ease;
+}
+
+.node-card:hover {
+  border-color: #475569;
+}
+
+.node-card-active {
+  border-color: #6366f1;
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.node-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.node-title-group {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.node-badge-icon {
+  font-size: 1.35rem;
+}
+
+.node-name-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.card-name {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.tag-master {
+  font-size: 0.625rem;
+  background: rgba(59, 130, 246, 0.2);
+  color: #60a5fa;
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.25rem;
+}
+
+.tag-current {
+  font-size: 0.625rem;
+  background: rgba(16, 185, 129, 0.2);
+  color: #34d399;
+  padding: 0.05rem 0.3rem;
+  border-radius: 0.25rem;
+}
+
+.card-host {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  font-family: ui-monospace, monospace;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.7rem;
+  padding: 0.15rem 0.5rem;
+  border-radius: 9999px;
+  font-family: ui-monospace, monospace;
+}
+
+.status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.status-online {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+.status-online .status-dot {
+  background: #10b981;
+}
+
+.status-offline {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+}
+.status-offline .status-dot {
+  background: #ef4444;
+}
+
+.node-props {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background: rgba(15, 23, 42, 0.6);
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.45rem;
+  font-size: 0.75rem;
+}
+
+.prop-item {
+  display: flex;
+  justify-content: space-between;
+}
+
+.prop-label {
+  color: #64748b;
+}
+
+.prop-val {
+  color: #cbd5e1;
+}
+
+.mono {
+  font-family: ui-monospace, monospace;
+}
+
+.node-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: auto;
+}
+
+.btn-action {
+  padding: 0.35rem 0.65rem;
+  border-radius: 0.35rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: 1px solid transparent;
+}
+
+.btn-switch {
+  background: #4f46e5;
+  color: #ffffff;
+}
+.btn-switch:hover {
+  background: #4338ca;
+}
+
+.active-notice {
+  font-size: 0.75rem;
+  color: #10b981;
+  font-weight: 500;
+  flex: 1;
+}
+
+.btn-ping {
+  background: #334155;
+  color: #cbd5e1;
+}
+.btn-ping:hover {
+  background: #475569;
+}
+
+.btn-reveal {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+.btn-reveal:hover {
+  background: rgba(245, 158, 11, 0.25);
+}
+
+.btn-delete {
+  background: rgba(239, 68, 68, 0.15);
+  color: #f87171;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+.btn-delete:hover {
+  background: rgba(239, 68, 68, 0.25);
+}
+
+/* 部署表单样式 */
+.deploy-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.form-alert-info {
+  display: flex;
+  gap: 0.75rem;
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.8125rem;
+  color: #93c5fd;
+  line-height: 1.45;
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.85rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.full-width {
+  grid-column: 1 / -1;
+}
+
+.form-group label {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #cbd5e1;
+}
+
+.req {
+  color: #f87171;
+}
+
+.form-group input,
+.form-group textarea {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 0.45rem;
+  padding: 0.55rem 0.75rem;
+  color: #f8fafc;
+  font-size: 0.8125rem;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.form-group input:focus,
+.form-group textarea:focus {
+  border-color: #6366f1;
+}
+
+.radio-group {
+  display: flex;
+  gap: 1.5rem;
+  padding: 0.35rem 0;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8125rem;
+  color: #cbd5e1;
+  cursor: pointer;
+}
+
+.form-divider {
+  display: flex;
+  align-items: center;
+  margin: 0.5rem 0;
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.form-divider::before,
+.form-divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid #1e293b;
+}
+.form-divider span {
+  padding: 0 0.75rem;
+}
+
+.form-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.5rem;
+}
+
+.btn-primary {
+  background: #4f46e5;
+  color: #ffffff;
+  border: none;
+  padding: 0.6rem 1.25rem;
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.btn-primary:hover:not(:disabled) {
+  background: #4338ca;
+}
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: #334155;
+  color: #cbd5e1;
+  border: none;
+  padding: 0.6rem 1.25rem;
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.btn-secondary:hover {
+  background: #475569;
+}
+
+/* 终端输出面板 */
+.deploy-terminal-box {
+  display: flex;
+  flex-direction: column;
+  background: #020617;
+  border: 1px solid #1e293b;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  height: 480px;
+}
+
+.terminal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.65rem 1rem;
+  background: #0f172a;
+  border-bottom: 1px solid #1e293b;
+}
+
+.terminal-status-info {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pulse-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #94a3b8;
+}
+
+.pulse-active {
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  animation: pulseAnim 1.5s infinite;
+}
+
+@keyframes pulseAnim {
+  0% { opacity: 0.4; }
+  50% { opacity: 1; }
+  100% { opacity: 0.4; }
+}
+
+.terminal-title {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: #f1f5f9;
+}
+
+.terminal-node-name {
+  font-size: 0.75rem;
+  color: #64748b;
+  font-family: ui-monospace, monospace;
+}
+
+.terminal-body {
+  flex: 1;
+  padding: 0.85rem;
+  overflow-y: auto;
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+  line-height: 1.6;
+  color: #94a3b8;
+}
+
+.terminal-line {
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.line-success {
+  color: #34d399;
+  font-weight: 600;
+}
+
+.line-error {
+  color: #f87171;
+  font-weight: 600;
+}
+
+.line-highlight {
+  color: #93c5fd;
+}
+
+.terminal-footer {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  background: #0f172a;
+  border-top: 1px solid #1e293b;
+}
+
+.deploy-progress-hint {
+  font-size: 0.75rem;
+  color: #64748b;
+}
+
+/* 二次鉴权模态框 (Reveal) */
+.reveal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.reveal-card {
+  background: #0f172a;
+  border: 1px solid #475569;
+  border-radius: 0.85rem;
+  width: 100%;
+  max-width: 520px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+  animation: modalScale 0.15s ease-out;
+}
+
+@keyframes modalScale {
+  from { transform: scale(0.96); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.reveal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  background: #1e293b;
+  border-bottom: 1px solid #334155;
+}
+
+.reveal-title-box {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.reveal-icon {
+  font-size: 1.5rem;
+}
+
+.reveal-title {
+  margin: 0;
+  font-size: 1rem;
+  color: #f8fafc;
+}
+
+.reveal-desc {
+  margin: 0.15rem 0 0 0;
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+.reveal-body {
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.reveal-prompt {
+  font-size: 0.8125rem;
+  color: #cbd5e1;
+  line-height: 1.5;
+}
+
+.reveal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.credentials-box {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.countdown-bar {
+  background: rgba(245, 158, 11, 0.15);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  padding: 0.45rem 0.75rem;
+  border-radius: 0.35rem;
+  font-size: 0.75rem;
+  color: #fbbf24;
+  text-align: center;
+}
+
+.cred-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8125rem;
+}
+
+.cred-label {
+  color: #94a3b8;
+  font-size: 0.75rem;
+}
+
+.cred-val {
+  color: #f1f5f9;
+  font-weight: 500;
+}
+
+.cred-val-copy {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  color: #f1f5f9;
+}
+
+.cred-link {
+  color: #818cf8;
+  text-decoration: underline;
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn-mini-toggle {
+  background: #334155;
+  border: none;
+  color: #cbd5e1;
+  font-size: 0.675rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+
+.btn-mini-copy {
+  background: rgba(99, 102, 241, 0.2);
+  border: none;
+  color: #a5b4fc;
+  font-size: 0.675rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 0.25rem;
+  cursor: pointer;
+}
+.btn-mini-copy:hover {
+  background: rgba(99, 102, 241, 0.35);
+  color: #ffffff;
+}
+</style>

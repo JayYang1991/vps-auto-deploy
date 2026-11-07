@@ -85,6 +85,25 @@ type Tunnel struct {
 	UpdatedAt      time.Time      `json:"updated_at"`
 }
 
+// Node 纳管服务器节点
+type Node struct {
+	ID                int64     `json:"id"`
+	Name              string    `json:"name"`
+	Host              string    `json:"host"`
+	SSHPort           int       `json:"ssh_port"`
+	PanelPort         int       `json:"panel_port"`
+	SecretPath        string    `json:"secret_path"`
+	Username          string    `json:"username"`
+	PasswordEncrypted string    `json:"-"`
+	APIToken          string    `json:"-"`
+	IsMaster          bool      `json:"is_master"`
+	Status            string    `json:"status"` // "online" | "offline" | "deploying" | "error"
+	OSInfo            string    `json:"os_info"`
+	LatencyMs         int64     `json:"latency_ms"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
 // DB 全局数据库对象
 var DB *sql.DB
 

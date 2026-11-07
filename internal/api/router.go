@@ -35,7 +35,18 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 		// 需登录的 API 接口
 		api := secGroup.Group("/api")
 		api.Use(middleware.JWTAuthMiddleware())
+		api.Use(middleware.NodeProxyMiddleware())
 		{
+			// 集群多节点管理（仅在主控执行，不被代理）
+			api.GET("/nodes", handler.ListNodes)
+			api.POST("/nodes/deploy", handler.StartDeployNode)
+			api.GET("/nodes/deploy-status", handler.GetDeployStatus)
+			api.GET("/nodes/deploy-logs", handler.StreamDeployLogs)
+			api.POST("/nodes/import", handler.ImportNode)
+			api.POST("/nodes/:id/ping", handler.PingNode)
+			api.DELETE("/nodes/:id", handler.DeleteNode)
+			api.POST("/nodes/:id/reveal-credentials", handler.RevealNodeCredentials)
+
 			// 设置与密码
 			api.POST("/auth/password", handler.UpdatePassword)
 			api.GET("/settings", handler.GetSettings)

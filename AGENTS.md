@@ -147,3 +147,22 @@ type ServiceStatus struct {
 4. **零原生弹窗检查**：运行 `grep -rnE "\b(alert|confirm|prompt)\(" web/src` 确保输出为空。
 5. **构建与验证**：执行 `go test ./...` 与 `bash build.sh`，确保前后端联编生成单一二进制 `bin/vps-panel` 无任何报错。
 
+---
+
+## 五、 多节点集群纳管与二次鉴权规范 (Cluster Management & Step-Up Auth)
+
+### 1. 架构与跨节点透明代理 (Transparent Reverse Proxy)
+- **主控与被纳管端单二进制同构**：主控端与被纳管端均运行相同的 `vps-panel` 单一二进制。
+- **SSH 极速部署**：主控端利用纯 Go `golang.org/x/crypto/ssh` 连接目标 VPS。同架构机器采用 SSH 管道直接推流复制当前二进制（Zero External Download），并自动注册 Systemd 守护进程。
+- **透明反向代理**：前端通过 `X-Target-Node-ID` 请求头（或 SSE `?node_id=`）标识目标节点。主控端 `NodeProxyMiddleware` 自动截获并代理 HTTP/SSE 请求，注入目标节点 Token，实现业务配置（系统概览、软件中心、入站/出站、隧道、日志流等）100% 复用。
+- **集群管理端点保护**：所有 `/api/nodes/*` 接口严格在主控端执行，禁止代理，且主控本机节点（ID=1）受持久保护禁止删除。
+
+### 2. 凭据加密与二次鉴权 (AES-256-GCM & Step-Up Secondary Auth)
+- **密码加密存储**：被纳管节点的管理员密码禁止在数据库中存留明文，必须通过 `crypto.EncryptAESGCM` 使用从主控 `jwt_secret` 派生的 32 字节密钥进行密文存储。
+- **查看凭据二次鉴权**：
+  - 用户请求查看节点密码时，前端弹出二次鉴权模态框，请求输入主控当前管理员密码。
+  - 后端 `POST /api/nodes/:id/reveal-credentials` 使用 `bcrypt` 比对主控密码；若不符直接返回 `403 Forbidden`。
+  - 验证成功后，解密被纳管节点密码并返回，前端开启 **60 秒倒计时自动锁定**，超时后自动重新隐藏凭据。
+4. **零原生弹窗检查**：运行 `grep -rnE "\b(alert|confirm|prompt)\(" web/src` 确保输出为空。
+5. **构建与验证**：执行 `go test ./...` 与 `bash build.sh`，确保前后端联编生成单一二进制 `bin/vps-panel` 无任何报错。
+

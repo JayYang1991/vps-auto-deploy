@@ -14,6 +14,9 @@
           <span class="brand-title">VPS Auto Deploy</span>
           <span class="brand-version">v1.2.0</span>
         </div>
+
+        <!-- 节点上下文切换器与集群管理入口 -->
+        <NodeSwitcher @open-cluster-modal="openClusterModal" />
       </div>
 
       <nav class="nav-container">
@@ -79,7 +82,7 @@
 
     <!-- 主体区域 -->
     <main style="flex: 1; max-width: 1200px; width: 100%; margin: 0 auto; padding: 2rem 1.5rem;">
-      <router-view />
+      <router-view :key="viewKey" />
     </main>
 
     <!-- 页脚 -->
@@ -87,25 +90,43 @@
       VPS Auto Deploy &copy; 2026 &middot; Sing-box &amp; Cloudflared 一体化管理面板
     </footer>
 
-    <!-- 全局非阻塞反馈组件 -->
+    <!-- 全局非阻塞反馈组件与集群管理模态框 -->
     <ToastContainer />
     <ConfirmModal />
+    <ClusterModal
+      v-model="showClusterModal"
+      :initial-tab="clusterModalTab"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ToastContainer from './components/ToastContainer.vue'
 import ConfirmModal from './components/ConfirmModal.vue'
+import NodeSwitcher from './components/NodeSwitcher.vue'
+import ClusterModal from './components/ClusterModal.vue'
 import { useConfirm } from './composables/useConfirm'
+import { useNodeContext } from './composables/useNodeContext'
 
 const route = useRoute()
 const router = useRouter()
 const { showConfirm } = useConfirm()
+const { activeNodeId } = useNodeContext()
 
 const isLoginRoute = computed(() => route.path === '/login')
 const currentRoute = computed(() => route.path)
+
+const viewKey = computed(() => `${route.fullPath}_node_${activeNodeId.value}`)
+
+const showClusterModal = ref(false)
+const clusterModalTab = ref<'nodes' | 'deploy' | 'import'>('nodes')
+
+function openClusterModal(tab: 'nodes' | 'deploy' | 'import' = 'nodes') {
+  clusterModalTab.value = tab
+  showClusterModal.value = true
+}
 
 const isServicesActive = computed(() => {
   const p = route.path

@@ -22,6 +22,13 @@ api.interceptors.request.use((config) => {
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+
+  // 跨节点上下文透传：若当前选中的不是主控本机，注入 X-Target-Node-ID
+  const activeNodeId = localStorage.getItem('active_node_id')
+  if (activeNodeId && activeNodeId !== '1' && activeNodeId !== '0') {
+    config.headers['X-Target-Node-ID'] = activeNodeId
+  }
+
   return config
 })
 
