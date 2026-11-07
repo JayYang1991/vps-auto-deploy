@@ -116,6 +116,15 @@
               >
                 📜 日志
               </button>
+              <router-link
+                v-if="getConfigRoute(c.name)"
+                :to="getConfigRoute(c.name)"
+                class="btn btn-secondary"
+                style="padding: 0.45rem 0.6rem; font-size: 0.825rem; text-decoration: none;"
+                title="前往业务配置"
+              >
+                🛠️ 配置
+              </router-link>
             </div>
 
             <div style="display: flex; gap: 0.5rem;">
@@ -507,6 +516,13 @@ function getCategoryLabel(cat: string) {
     network: '网络工具',
   }
   return map[cat] || cat
+}
+
+function getConfigRoute(name: string) {
+  if (name === 'sing-box') return '/services?tab=singbox&sub=inbounds'
+  if (name === 'cloudflared') return '/services?tab=cloudflared'
+  if (name === 'subconverter') return '/services?tab=subscriptions'
+  return ''
 }
 
 function getStatusBadge(status: string) {

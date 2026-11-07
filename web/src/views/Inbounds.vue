@@ -64,12 +64,22 @@
           </div>
         </div>
 
-        <div style="display: flex; gap: 0.5rem;">
-          <button @click="showShareModal(ib)" class="btn btn-secondary">
+        <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+          <button
+            @click="toggleInbound(ib)"
+            :class="['btn', ib.enabled ? 'btn-secondary' : 'btn-primary']"
+            style="padding: 0.4rem 0.75rem; font-size: 0.8rem;"
+          >
+            {{ ib.enabled ? '⏸️ 停用' : '▶️ 启用' }}
+          </button>
+          <button @click="showShareModal(ib)" class="btn btn-secondary" style="padding: 0.4rem 0.75rem; font-size: 0.8rem;">
             📱 二维码 / 节点链接
           </button>
-          <button @click="deleteInbound(ib.id)" class="btn btn-danger" style="padding: 0.5rem 0.75rem;">
-            删除
+          <button @click="openEditModal(ib)" class="btn btn-secondary" style="padding: 0.4rem 0.75rem; font-size: 0.8rem;">
+            ✏️ 编辑
+          </button>
+          <button @click="deleteInbound(ib.id)" class="btn btn-danger" style="padding: 0.4rem 0.75rem; font-size: 0.8rem;">
+            🗑️ 删除
           </button>
         </div>
       </div>
@@ -99,6 +109,19 @@
             <div>
               <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.35rem;">监听端口</label>
               <input v-model.number="form.port" type="number" class="input" required placeholder="443" />
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem;">
+            <div>
+              <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.35rem;">绑定监听地址</label>
+              <input v-model="form.listen" class="input" placeholder="如 :: 或 0.0.0.0 或 127.0.0.1" />
+            </div>
+            <div style="display: flex; align-items: center; padding-top: 1.25rem;">
+              <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.875rem; color: #f1f5f9; cursor: pointer;">
+                <input type="checkbox" v-model="form.enabled" style="accent-color: #38bdf8; width: 1.1rem; height: 1.1rem;" />
+                启用此入站规则
+              </label>
             </div>
           </div>
 
@@ -273,12 +296,50 @@ function parseSpec(jsonStr: string) {
 
 async function openCreateModal() {
   modal.isEdit = false
+  modal.id = 0
   modal.show = true
   form.protocol = 'vless-reality'
+  form.listen = '::'
   form.port = 443
   form.tag = 'vless-reality-443'
   form.enabled = true
   await generateRealityKeys()
+}
+
+function openEditModal(ib: any) {
+  modal.isEdit = true
+  modal.id = ib.id
+  form.tag = ib.tag
+  form.protocol = ib.protocol
+  form.listen = ib.listen || (ib.protocol === 'vless-ws' ? '127.0.0.1' : '::')
+  form.port = ib.port
+  form.enabled = !!ib.enabled
+
+  const spec = parseSpec(ib.spec_json)
+  if (ib.protocol === 'vless-reality') {
+    realitySpec.flow = spec.flow || 'xtls-rprx-vision'
+    realitySpec.server_name = spec.server_name || 'www.microsoft.com'
+    realitySpec.handshake_server = spec.handshake_server || spec.server_name || 'www.microsoft.com'
+    realitySpec.handshake_port = spec.handshake_port || 443
+    realitySpec.private_key = spec.private_key || ''
+    realitySpec.public_key = spec.public_key || ''
+    realitySpec.short_id = spec.short_id || ''
+    realitySpec.fingerprint = spec.fingerprint || 'chrome'
+  } else if (ib.protocol === 'vless-ws') {
+    wsSpec.path = spec.path || '/ws'
+  }
+  modal.show = true
+}
+
+async function toggleInbound(ib: any) {
+  try {
+    const res = await api.post(`/inbounds/${ib.id}/toggle`)
+    ib.enabled = res.data.enabled
+    toast.success(`入站规则 ${ib.tag} 已${res.data.enabled ? '启用' : '停用'}`)
+  } catch (err: any) {
+    toast.error('切换状态失败: ' + (err.response?.data?.error || err.message))
+    await loadInbounds()
+  }
 }
 
 async function generateRealityKeys() {
@@ -294,11 +355,17 @@ async function generateRealityKeys() {
 
 function onProtocolChange() {
   if (form.protocol === 'vless-reality') {
+    form.listen = '::'
     form.port = 443
-    form.tag = 'vless-reality-443'
+    if (!modal.isEdit) {
+      form.tag = 'vless-reality-443'
+    }
   } else {
+    form.listen = '127.0.0.1'
     form.port = 10086
-    form.tag = 'vless-ws-10086'
+    if (!modal.isEdit) {
+      form.tag = 'vless-ws-10086'
+    }
   }
 }
 
@@ -311,16 +378,23 @@ async function submitInbound() {
   }
 
   try {
-    await api.post('/inbounds', {
+    const payload = {
       tag: form.tag,
       protocol: form.protocol,
-      listen: form.protocol === 'vless-ws' ? '127.0.0.1' : '::',
+      listen: form.listen || (form.protocol === 'vless-ws' ? '127.0.0.1' : '::'),
       port: form.port,
       spec: specObj,
       enabled: form.enabled,
-    })
+    }
+
+    if (modal.isEdit) {
+      await api.put(`/inbounds/${modal.id}`, payload)
+      toast.success('入站规则已更新并重载！')
+    } else {
+      await api.post('/inbounds', payload)
+      toast.success('入站节点已创建并重载！')
+    }
     modal.show = false
-    toast.success('入站节点已保存！')
     await loadInbounds()
   } catch (err: any) {
     toast.error('保存失败: ' + (err.response?.data?.error || err.message))

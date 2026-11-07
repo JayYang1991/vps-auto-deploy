@@ -140,17 +140,17 @@
       </div>
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.25rem;">
-        <router-link to="/services?tab=inbounds" class="card" style="text-decoration: none; color: inherit; transition: transform 0.15s ease, border-color 0.15s ease; border-color: #334155;">
+        <router-link to="/services?tab=singbox&sub=inbounds" class="card" style="text-decoration: none; color: inherit; transition: transform 0.15s ease, border-color 0.15s ease; border-color: #334155;">
           <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
             <span style="font-size: 1.5rem;">🌐</span>
-            <h3 style="font-size: 1.05rem; font-weight: 600; color: #f8fafc;">入站节点配置 (Reality)</h3>
+            <h3 style="font-size: 1.05rem; font-weight: 600; color: #f8fafc;">Sing-box 核心配置 (入站/出站)</h3>
           </div>
           <p style="color: #94a3b8; font-size: 0.825rem; line-height: 1.45;">
-            配置 VLESS-Reality 高抗封锁节点，支持 SNI 偷渡伪装与多用户权限分离。
+            配置 VLESS-Reality 入站节点、出站网络出口及分流规则，支持实时语法检验。
           </p>
         </router-link>
 
-        <router-link to="/services?tab=tunnels" class="card" style="text-decoration: none; color: inherit; transition: transform 0.15s ease, border-color 0.15s ease; border-color: #334155;">
+        <router-link to="/services?tab=cloudflared" class="card" style="text-decoration: none; color: inherit; transition: transform 0.15s ease, border-color 0.15s ease; border-color: #334155;">
           <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
             <span style="font-size: 1.5rem;">🚇</span>
             <h3 style="font-size: 1.05rem; font-weight: 600; color: #f8fafc;">Cloudflare Argo 隧道</h3>

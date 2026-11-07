@@ -78,15 +78,19 @@ type ServiceStatus struct {
 | **系统管理** | `⚙️ 设置` | 面板安全路径、公网 IP 强制覆盖、管理员密码修改 | `/settings` |
 
 ### 2. 业务配置中心 (`web/src/views/Services.vue`) 架构规范
-- **禁止顶栏平铺铁律**：后续新增任何组件业务（如 `subconverter` 规则编辑、`hysteria` 高速入站、`mosdns` 分流规则），**严禁在 `App.vue` 顶栏增加新的路由按钮**，必须以子 Tab / 分段式工作区形态收敛归类在 `Services.vue` 中。
-- **4 大标准业务分类映射**：
-  1. **🌐 代理入站 (`proxy`)**：Sing-box / Xray / Hysteria 节点配置、Reality 密钥伪装与端口绑定。
-  2. **🚇 隧道穿透 (`tunnel`)**：Cloudflare Argo / FRP 端口映射与域名反代。
-  3. **👥 订阅与规则 (`converter`)**：多用户订阅下发与 Subconverter 远程分流规则转换。
-  4. **🧭 网络与分流 (`network`)**：MosDNS 上游防污染与分流路由表。
+- **禁止顶栏平铺铁律**：后续新增任何组件业务（如 `subconverter` 规则编辑、`hysteria` 高速入站、`mosdns` 分流规则），**严禁在 `App.vue` 顶栏增加新的路由按钮**，必须在 `Services.vue`（业务配置中心）内按组件挂载。
+- **两级分层设计（按组件配置 + 子业务工作区）**：
+  1. **一级分类（受管组件）**：
+     - **📦 Sing-box 核心 (`singbox`)**：底层核心网络引擎。
+     - **🚇 Cloudflared 隧道 (`cloudflared`)**：公网 Argo 穿透与端口反代。
+     - **👥 订阅与规则分发 (`subscriptions`)**：多协议多客户端订阅与规则模板生成。
+  2. **二级子分类（组件专属工作区，以 Sing-box 为例）**：
+     - **🌐 入站节点 (Inbounds)**：完整支持增、删、改、查（CRUD）、监听地址与端口管理、一键启用/停用、Reality 密钥伪装生成与二维码/链接导出。
+     - **📤 出站规则 (Outbounds)**：完整支持增删改查、直连/拦截/代理出站（SOCKS/HTTP/Shadowsocks/VLESS/自定义 JSON）与优先级权重排序。
+     - **📜 完整配置透视与热重载**：提供 live 完整服务端 JSON 查看、落盘路径校验、`singbox check` 语法预检及 `[ ⚡ 强制热重载 ]` 触发。
 - **状态持久化与平滑切换**：
-  - 子视图之间切换使用 `<keep-alive>`，确保在配置入站或隧道表单时临时切换 Tab 不会丢失表单输入状态。
-  - 兼容历史与快捷直达路由：`/inbounds`、`/tunnels`、`/subscriptions` 自动重定向至 `/services?tab=<name>`。
+  - 子视图之间切换使用 `<keep-alive>`，确保在配置入站或出站表单时临时切换 Tab 不会丢失表单输入状态。
+  - 路由兼容历史与快捷直达：`/services?tab=singbox&sub=inbounds`、`/services?tab=singbox&sub=outbounds`、`/services?tab=cloudflared`，历史路由 `?tab=inbounds`、`?tab=outbounds`、`?tab=tunnels` 自动平滑重定向。
 
 ### 3. 软件中心 (`web/src/views/Components.vue`) 扩展约束
 - **动态分类过滤**：顶部分类 Tab 应支持按 `category` 过滤（`全部服务`、`代理核心 (proxy)`、`隧道穿透 (tunnel)`、`订阅与规则 (converter)` 等），禁止使用非此即彼的二元三目运算符（如 `c.category === 'proxy' ? ... : ...`），必须使用字典映射表 `CATEGORY_MAP[c.category]`。

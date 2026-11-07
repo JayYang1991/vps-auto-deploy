@@ -56,7 +56,9 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			// 入站节点与 Reality
 			api.GET("/inbounds", handler.ListInbounds)
 			api.POST("/inbounds", handler.CreateInbound)
+			api.GET("/inbounds/:id", handler.GetInbound)
 			api.PUT("/inbounds/:id", handler.UpdateInbound)
+			api.POST("/inbounds/:id/toggle", handler.ToggleInbound)
 			api.DELETE("/inbounds/:id", handler.DeleteInbound)
 			api.POST("/inbounds/reality-keys", handler.GenerateRealityKeys)
 			api.GET("/inbounds/preview", handler.PreviewSingboxConfig)

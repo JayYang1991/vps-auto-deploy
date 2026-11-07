@@ -1,53 +1,97 @@
 <template>
   <div>
-    <!-- 业务配置中心标题说明与全局诊断操作栏 -->
+    <!-- 业务配置中心标题说明 -->
     <div style="margin-bottom: 1.5rem; display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
       <div>
         <div style="display: flex; align-items: center; gap: 0.5rem;">
           <span style="font-size: 1.5rem;">🛠️</span>
           <h1 style="font-size: 1.45rem; font-weight: 700; color: #f8fafc;">业务与服务配置中心</h1>
-          <span class="badge badge-secondary" style="font-size: 0.75rem;">网络与规则</span>
+          <span class="badge badge-secondary" style="font-size: 0.75rem;">按组件配置</span>
         </div>
         <p style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.35rem; line-height: 1.5;">
-          集中配置与管理入站协议节点、出站网络出口、公网反代隧道穿透及多协议客户端订阅分发。
+          按照底层受管组件分类配置：包括 Sing-box 核心的出入站与路由、Cloudflared 反代隧道穿透、以及客户端多协议订阅分发。
         </p>
-      </div>
-
-      <!-- 全局配置诊断与查看 -->
-      <div style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;">
-        <button @click="openConfigViewer" class="btn btn-secondary" style="font-size: 0.825rem;">
-          <span>📜</span>
-          <span>查看当前完整配置</span>
-        </button>
-        <button @click="reloadConfig" class="btn btn-secondary" style="font-size: 0.825rem;" :disabled="reloading">
-          <span>⚡</span>
-          <span>{{ reloading ? '重载中...' : '强制热重载' }}</span>
-        </button>
       </div>
     </div>
 
-    <!-- 分类工作区分段导航器 (Segmented Tabs) -->
+    <!-- 一级分类：受管组件导航栏 (Component Selector) -->
     <div class="tabs-container">
       <div class="segmented-bar">
         <button
-          v-for="tab in tabs"
-          :key="tab.key"
-          @click="selectTab(tab.key)"
-          :class="['tab-btn', activeTab === tab.key ? 'tab-btn-active' : '']"
+          v-for="comp in componentTabs"
+          :key="comp.key"
+          @click="selectComponent(comp.key)"
+          :class="['tab-btn', activeComponent === comp.key ? 'tab-btn-active' : '']"
           type="button"
         >
-          <span class="tab-icon">{{ tab.icon }}</span>
-          <span class="tab-title">{{ tab.title }}</span>
-          <span class="tab-desc">{{ tab.subLabel }}</span>
+          <span class="tab-icon">{{ comp.icon }}</span>
+          <span class="tab-title">{{ comp.title }}</span>
+          <span class="tab-desc">{{ comp.subLabel }}</span>
         </button>
       </div>
     </div>
 
-    <!-- 动态业务配置工作区 -->
-    <div class="tab-content-area">
-      <keep-alive>
-        <component :is="currentTabComponent" />
-      </keep-alive>
+    <!-- Sing-box 组件专属配置区 (含二级出入站导航与全局操作) -->
+    <div v-if="activeComponent === 'singbox'" class="component-workspace">
+      <!-- Sing-box 二级导航与操作工具栏 -->
+      <div class="sub-nav-bar">
+        <div class="sub-segmented-bar">
+          <button
+            @click="selectSingboxSubTab('inbounds')"
+            :class="['sub-tab-btn', singboxSubTab === 'inbounds' ? 'sub-tab-active' : '']"
+            type="button"
+          >
+            <span>🌐</span>
+            <span>入站节点 (Inbounds)</span>
+          </button>
+          <button
+            @click="selectSingboxSubTab('outbounds')"
+            :class="['sub-tab-btn', singboxSubTab === 'outbounds' ? 'sub-tab-active' : '']"
+            type="button"
+          >
+            <span>📤</span>
+            <span>出站规则 (Outbounds)</span>
+          </button>
+        </div>
+
+        <!-- Sing-box 专属操作：配置透视与热重载 -->
+        <div style="display: flex; gap: 0.6rem; align-items: center;">
+          <button @click="openConfigViewer" class="btn btn-secondary" style="font-size: 0.825rem; padding: 0.4rem 0.8rem;">
+            <span>📜</span>
+            <span>查看当前完整配置</span>
+          </button>
+          <button @click="reloadConfig" class="btn btn-secondary" style="font-size: 0.825rem; padding: 0.4rem 0.8rem;" :disabled="reloading">
+            <span>⚡</span>
+            <span>{{ reloading ? '重载中...' : '强制热重载' }}</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 二级子视图工作区 -->
+      <div class="tab-content-area">
+        <keep-alive>
+          <Inbounds v-if="singboxSubTab === 'inbounds'" />
+          <Outbounds v-else-if="singboxSubTab === 'outbounds'" />
+        </keep-alive>
+      </div>
+    </div>
+
+    <!-- Cloudflared 组件专属配置区 -->
+    <div v-else-if="activeComponent === 'cloudflared'" class="component-workspace">
+      <div class="tab-content-area">
+        <keep-alive>
+          <Tunnels />
+        </keep-alive>
+      </div>
+    </div>
+
+    <!-- 成员与订阅规则组件专属配置区 -->
+    <div v-else-if="activeComponent === 'subscriptions'" class="component-workspace">
+      <div class="tab-content-area">
+        <keep-alive>
+          <Subscriptions />
+        </keep-alive>
+      </div>
     </div>
 
     <!-- Sing-box 服务端完整配置透视弹窗 -->
@@ -91,7 +135,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { ref, reactive, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Inbounds from './Inbounds.vue'
 import Outbounds from './Outbounds.vue'
@@ -104,38 +148,29 @@ const route = useRoute()
 const router = useRouter()
 const { toast } = useToast()
 
-const tabs = [
+const componentTabs = [
   {
-    key: 'inbounds',
-    title: '入站节点',
-    subLabel: 'Reality / VLESS',
-    icon: '🌐',
-    component: Inbounds,
+    key: 'singbox',
+    title: 'Sing-box 核心',
+    subLabel: '入站 / 出站 / 路由',
+    icon: '📦',
   },
   {
-    key: 'outbounds',
-    title: '出站规则',
-    subLabel: 'Direct / SOCKS / WARP',
-    icon: '📤',
-    component: Outbounds,
-  },
-  {
-    key: 'tunnels',
-    title: '隧道穿透',
-    subLabel: 'Cloudflare Argo',
+    key: 'cloudflared',
+    title: 'Cloudflared 隧道',
+    subLabel: 'Argo 穿透映射',
     icon: '🚇',
-    component: Tunnels,
   },
   {
     key: 'subscriptions',
-    title: '成员与订阅',
-    subLabel: 'Clash / Sing-box',
+    title: '订阅与规则分发',
+    subLabel: '多协议与规则模板',
     icon: '👥',
-    component: Subscriptions,
   },
 ]
 
-const activeTab = ref('inbounds')
+const activeComponent = ref('singbox')
+const singboxSubTab = ref<'inbounds' | 'outbounds'>('inbounds')
 const reloading = ref(false)
 
 const configViewer = reactive({
@@ -146,14 +181,22 @@ const configViewer = reactive({
   check_output: '',
 })
 
-const currentTabComponent = computed(() => {
-  const found = tabs.find((t) => t.key === activeTab.value)
-  return found ? found.component : Inbounds
-})
+function selectComponent(key: string) {
+  activeComponent.value = key
+  syncRoute()
+}
 
-function selectTab(key: string) {
-  activeTab.value = key
-  router.replace({ path: '/services', query: { tab: key } })
+function selectSingboxSubTab(sub: 'inbounds' | 'outbounds') {
+  singboxSubTab.value = sub
+  syncRoute()
+}
+
+function syncRoute() {
+  const query: Record<string, string> = { tab: activeComponent.value }
+  if (activeComponent.value === 'singbox') {
+    query.sub = singboxSubTab.value
+  }
+  router.replace({ path: '/services', query })
 }
 
 async function openConfigViewer() {
@@ -185,30 +228,53 @@ async function reloadConfig() {
   }
 }
 
+function parseRouteParams() {
+  const tab = (route.query.tab as string) || ''
+  const sub = (route.query.sub as string) || ''
+
+  // 兼容历史快捷跳转：/services?tab=inbounds, /services?tab=outbounds, /services?tab=tunnels
+  if (tab === 'inbounds') {
+    activeComponent.value = 'singbox'
+    singboxSubTab.value = 'inbounds'
+    return
+  }
+  if (tab === 'outbounds') {
+    activeComponent.value = 'singbox'
+    singboxSubTab.value = 'outbounds'
+    return
+  }
+  if (tab === 'tunnels') {
+    activeComponent.value = 'cloudflared'
+    return
+  }
+
+  if (componentTabs.some((c) => c.key === tab)) {
+    activeComponent.value = tab
+  } else {
+    activeComponent.value = 'singbox'
+  }
+
+  if (sub === 'outbounds' || sub === 'inbounds') {
+    singboxSubTab.value = sub
+  }
+}
+
 watch(
-  () => route.query.tab,
-  (newTab) => {
-    if (newTab && typeof newTab === 'string') {
-      const exists = tabs.some((t) => t.key === newTab)
-      if (exists) {
-        activeTab.value = newTab
-      }
-    }
+  () => [route.query.tab, route.query.sub],
+  () => {
+    parseRouteParams()
   },
   { immediate: true }
 )
 
 onMounted(() => {
-  const initial = route.query.tab as string
-  if (initial && tabs.some((t) => t.key === initial)) {
-    activeTab.value = initial
-  }
+  parseRouteParams()
 })
 </script>
 
 <style scoped>
 .tabs-container {
-  margin-bottom: 1.75rem;
+  margin-bottom: 1.25rem;
   border-bottom: 1px solid #334155;
   padding-bottom: 0.75rem;
 }
@@ -270,6 +336,59 @@ onMounted(() => {
 .tab-btn-active .tab-desc {
   color: #7dd3fc;
   background-color: rgba(56, 189, 248, 0.12);
+}
+
+/* 二级子导航栏 */
+.sub-nav-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.25rem;
+  padding: 0.65rem 0.85rem;
+  background-color: rgba(15, 23, 42, 0.65);
+  border: 1px solid #1e293b;
+  border-radius: 0.65rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.sub-segmented-bar {
+  display: inline-flex;
+  background-color: #0b0f19;
+  padding: 0.25rem;
+  border-radius: 0.5rem;
+  border: 1px solid #334155;
+  gap: 0.25rem;
+}
+
+.sub-tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.85rem;
+  border-radius: 0.4rem;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #94a3b8;
+  font-size: 0.825rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sub-tab-btn:hover {
+  color: #f1f5f9;
+  background-color: #1e293b;
+}
+
+.sub-tab-active {
+  background-color: #1e293b;
+  color: #38bdf8;
+  border-color: #38bdf8;
+  font-weight: 600;
+}
+
+.component-workspace {
+  animation: fade-in 0.2s ease-in-out;
 }
 
 .tab-content-area {

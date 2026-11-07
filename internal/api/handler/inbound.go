@@ -39,6 +39,51 @@ func ListInbounds(c *gin.Context) {
 	c.JSON(http.StatusOK, list)
 }
 
+func GetInbound(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	var ib model.Inbound
+	err = model.DB.QueryRow("SELECT id, tag, protocol, listen, port, spec_json, enabled, created_at, updated_at FROM inbounds WHERE id = ?", id).
+		Scan(&ib.ID, &ib.Tag, &ib.Protocol, &ib.Listen, &ib.Port, &ib.SpecJSON, &ib.Enabled, &ib.CreatedAt, &ib.UpdatedAt)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "inbound not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, ib)
+}
+
+func ToggleInbound(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+
+	var enabled bool
+	err = model.DB.QueryRow("SELECT enabled FROM inbounds WHERE id = ?", id).Scan(&enabled)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "inbound not found"})
+		return
+	}
+
+	newStatus := !enabled
+	_, err = model.DB.Exec("UPDATE inbounds SET enabled = ?, updated_at = ? WHERE id = ?", newStatus, time.Now(), id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	_ = configgen.ApplyAndReload(singbox.ConfigPath)
+	c.JSON(http.StatusOK, gin.H{"id": id, "enabled": newStatus, "message": "入站节点状态已切换"})
+}
+
 func GenerateRealityKeys(c *gin.Context) {
 	priv, pub, sid, err := singbox.GenerateRealityKeypair()
 	if err != nil {
