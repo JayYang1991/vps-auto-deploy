@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 	"vps-auto-deploy/internal/cloud/vultr"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/node"
@@ -351,5 +352,60 @@ func getRegionMeta(id, country, city string) (string, string) {
 		}
 		return flag, fmt.Sprintf("%s (%s)", city, country)
 	}
+}
+
+// DeleteVultrInstance 彻底销毁 Vultr 云端虚拟机实例（需二次安全鉴权）
+func DeleteVultrInstance(c *gin.Context) {
+	instanceID := c.Param("id")
+	if strings.TrimSpace(instanceID) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "instance_id 不能为空"})
+		return
+	}
+
+	// 二次验证主控管理员密码
+	var req struct {
+		MasterPassword string `json:"master_password"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.MasterPassword) == "" {
+		req.MasterPassword = c.Query("master_password")
+	}
+
+	if strings.TrimSpace(req.MasterPassword) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "彻底销毁云端实例需提供主控管理员密码进行二次安全校验"})
+		return
+	}
+
+	masterPassHash, err := model.GetSetting("admin_password_hash")
+	if err != nil || bcrypt.CompareHashAndPassword([]byte(masterPassHash), []byte(req.MasterPassword)) != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "主控管理员密码错误，二次安全验证失败！拒绝销毁云主机"})
+		return
+	}
+
+	apiKey, err := model.GetVultrAPIKey()
+	if err != nil || strings.TrimSpace(apiKey) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "未配置 Vultr API Token"})
+		return
+	}
+
+	client := vultr.NewClient(apiKey)
+	if err := client.DeleteInstance(instanceID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "调用 Vultr 销毁实例失败: " + err.Error()})
+		return
+	}
+
+	// 如果该实例已纳管在本地集群中，同步将其从集群移出
+	nodes, err := model.ListNodes()
+	if err == nil {
+		for _, n := range nodes {
+			if n.CloudInstanceID == instanceID && n.ID != 1 {
+				_ = model.DeleteNode(n.ID)
+			}
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":     "Vultr 实例已成功销毁并终止计费",
+		"instance_id": instanceID,
+	})
 }
 

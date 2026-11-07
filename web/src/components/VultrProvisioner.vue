@@ -439,15 +439,26 @@
           </div>
 
           <div class="instance-card-bottom">
-            <button
-              v-if="!inst.is_managed"
-              class="btn-select-inst"
-              :class="{ 'btn-selected-active': selectedInstance?.id === inst.id }"
-              type="button"
-            >
-              {{ selectedInstance?.id === inst.id ? '✓ 当前已选中' : '选择纳管 ➔' }}
-            </button>
-            <span v-else class="managed-note">关联节点：{{ inst.node_name }}</span>
+            <div class="inst-actions-row">
+              <button
+                v-if="!inst.is_managed"
+                class="btn-select-inst"
+                :class="{ 'btn-selected-active': selectedInstance?.id === inst.id }"
+                type="button"
+              >
+                {{ selectedInstance?.id === inst.id ? '✓ 当前已选中' : '选择纳管 ➔' }}
+              </button>
+              <span v-else class="managed-note">关联节点：{{ inst.node_name }}</span>
+
+              <button
+                class="btn-card-destroy"
+                @click.stop="openDestroyModal(inst)"
+                type="button"
+                title="彻底销毁该 Vultr 云主机并终止扣费"
+              >
+                🗑️
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -622,10 +633,89 @@
             >
               <span>📦 前往已有实例列表</span>
             </button>
+            <button
+              v-if="createdInstanceId"
+              class="btn-danger-action"
+              @click="openDestroyModalForCurrent"
+              :disabled="isSubmitting"
+              type="button"
+            >
+              <span>💥 销毁该实例 (停止扣费)</span>
+            </button>
           </div>
           <span v-else class="deploy-progress-hint">
             正在等待网络路由贯通与 SSH 握手（包含 cloud-init 密钥写入），全流程通常需 45~90 秒，请保持页面开启...
           </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 彻底销毁 Vultr 实例二次安全验证模态框 -->
+    <div v-if="destroyModalVisible" class="destroy-overlay" @click.self="closeDestroyModal">
+      <div class="destroy-card">
+        <div class="destroy-header">
+          <div class="destroy-title-box">
+            <span class="destroy-icon">💥</span>
+            <div>
+              <h4 class="destroy-title">彻底销毁 Vultr 云主机确认</h4>
+              <p class="destroy-desc">调用 Vultr 开放接口删除服务器并停止扣费</p>
+            </div>
+          </div>
+          <button class="close-btn" @click="closeDestroyModal" type="button">✕</button>
+        </div>
+
+        <div class="destroy-body">
+          <div class="destroy-instance-info">
+            <div class="info-row">
+              <span class="info-label">实例名称:</span>
+              <span class="info-val font-bold">{{ targetDestroyInstance?.label || targetDestroyInstance?.id }}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">公网 IP:</span>
+              <span class="info-val mono font-highlight">{{ targetDestroyInstance?.main_ip || '未分配' }}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">所属区域:</span>
+              <span class="info-val">{{ targetDestroyInstance?.city_zh || targetDestroyInstance?.region }}</span>
+            </div>
+            <div class="info-row">
+              <span class="info-label">实例规格:</span>
+              <span class="info-val">{{ targetDestroyInstance?.plan }} ({{ targetDestroyInstance?.vcpu_count }}核 / {{ targetDestroyInstance?.ram }}MB)</span>
+            </div>
+          </div>
+
+          <div class="destroy-warning-box">
+            <span class="warn-icon">⚠️</span>
+            <div>
+              <strong>高危操作警告：</strong>
+              该操作将直接调用 Vultr 开放平台接口，<strong>彻底删除该云端 VPS 主机及磁盘数据，并立即终止计费！此操作不可逆。</strong>
+              <span v-if="targetDestroyInstance?.is_managed" style="display: block; margin-top: 0.25rem; color: #fca5a5;">
+                * 该实例当前已纳管在集群中，销毁后将同步从本地集群中移出。
+              </span>
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-top: 1rem;">
+            <label>主控管理员密码 <span class="req">*</span></label>
+            <input
+              v-model="destroyMasterPassword"
+              type="password"
+              placeholder="请输入当前主控端管理员密码以授权销毁"
+              @keyup.enter="submitDestroyInstance"
+            />
+          </div>
+
+          <div class="destroy-footer">
+            <button class="btn-secondary" @click="closeDestroyModal" type="button">取消</button>
+            <button
+              class="btn-danger-strong"
+              @click="submitDestroyInstance"
+              :disabled="destroyingInstance || !destroyMasterPassword"
+              type="button"
+            >
+              <span>{{ destroyingInstance ? '⏳ 正在调用 Vultr 销毁...' : '💥 确认立即销毁云主机' }}</span>
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -1102,6 +1192,85 @@ async function retryExistingInstanceProvision() {
     taskLogs.value.push('[ERROR] 重试纳管失败: ' + (err.response?.data?.error || err.message))
   } finally {
     isSubmitting.value = false
+  }
+}
+
+// 彻底销毁 Vultr 云主机
+const destroyModalVisible = ref(false)
+const targetDestroyInstance = ref<any | null>(null)
+const destroyMasterPassword = ref('')
+const destroyingInstance = ref(false)
+
+function openDestroyModal(inst: any) {
+  targetDestroyInstance.value = inst
+  destroyMasterPassword.value = ''
+  destroyModalVisible.value = true
+}
+
+function openDestroyModalForCurrent() {
+  if (!createdInstanceId.value) return
+  let match = vultrInstances.value.find((i) => i.id === createdInstanceId.value)
+  if (!match) {
+    match = {
+      id: createdInstanceId.value,
+      label: formReq.name,
+      main_ip: createdInstanceIP.value,
+      region: selectedRegion.value,
+      city_zh: currentRegionName.value,
+      plan: selectedPlan.value,
+      vcpu_count: 1,
+      ram: 1024,
+      is_managed: false,
+    }
+  }
+  openDestroyModal(match)
+}
+
+function closeDestroyModal() {
+  destroyModalVisible.value = false
+  targetDestroyInstance.value = null
+  destroyMasterPassword.value = ''
+}
+
+async function submitDestroyInstance() {
+  if (!targetDestroyInstance.value || !destroyMasterPassword.value) {
+    toast.warning('请输入主控管理员密码')
+    return
+  }
+
+  destroyingInstance.value = true
+  try {
+    const instId = targetDestroyInstance.value.id
+    const res = await api.delete(`/nodes/cloud/vultr/instances/${instId}`, {
+      data: {
+        master_password: destroyMasterPassword.value,
+      },
+      params: {
+        master_password: destroyMasterPassword.value,
+      },
+    })
+
+    toast.success(res.data.message || 'Vultr 云主机已成功销毁并终止计费')
+
+    // 如果销毁的是当前刚创建并失败的实例，清理状态并回到表单
+    if (createdInstanceId.value === instId) {
+      createdInstanceId.value = ''
+      createdInstanceIP.value = ''
+      cloudStep.value = 'form'
+    }
+
+    if (selectedInstance.value?.id === instId) {
+      selectedInstance.value = null
+    }
+
+    closeDestroyModal()
+    // 刷新实例列表与集群节点
+    await loadVultrInstances(true)
+    await fetchNodes()
+  } catch (err: any) {
+    toast.error('销毁云主机失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    destroyingInstance.value = false
   }
 }
 
@@ -2302,6 +2471,180 @@ onUnmounted(() => {
   justify-content: flex-end;
   border-top: 1px solid #334155;
   padding-top: 0.85rem;
+}
+
+.inst-actions-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.btn-card-destroy {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #f87171;
+  padding: 0.35rem 0.55rem;
+  border-radius: 0.35rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-card-destroy:hover {
+  background: rgba(239, 68, 68, 0.25);
+  border-color: #ef4444;
+}
+
+.btn-danger-action {
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.4);
+  color: #fca5a5;
+  padding: 0.6rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-danger-action:hover:not(:disabled) {
+  background: rgba(239, 68, 68, 0.28);
+  color: #ffffff;
+  border-color: #ef4444;
+}
+
+/* 销毁模态框样式 */
+.destroy-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.82);
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.destroy-card {
+  background: #0f172a;
+  border: 1px solid #475569;
+  border-radius: 0.85rem;
+  width: 100%;
+  max-width: 500px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.85);
+  overflow: hidden;
+  animation: modalScale 0.15s ease-out;
+}
+
+.destroy-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.15rem 1.35rem;
+  border-bottom: 1px solid #1e293b;
+  background: #1e293b;
+}
+
+.destroy-title-box {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.destroy-icon {
+  font-size: 1.6rem;
+}
+
+.destroy-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.destroy-desc {
+  margin: 0.15rem 0 0 0;
+  font-size: 0.725rem;
+  color: #94a3b8;
+}
+
+.destroy-body {
+  padding: 1.25rem 1.35rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.destroy-instance-info {
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 0.5rem;
+  padding: 0.75rem 0.95rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.775rem;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.info-label {
+  color: #94a3b8;
+}
+
+.info-val {
+  color: #f1f5f9;
+}
+
+.font-bold {
+  font-weight: 600;
+}
+
+.destroy-warning-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px dashed rgba(239, 68, 68, 0.4);
+  padding: 0.85rem 1rem;
+  border-radius: 0.5rem;
+  font-size: 0.775rem;
+  color: #fca5a5;
+  line-height: 1.45;
+}
+
+.warn-icon {
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.destroy-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  margin-top: 0.5rem;
+}
+
+.btn-danger-strong {
+  background: #dc2626;
+  color: #ffffff;
+  border: none;
+  padding: 0.6rem 1.25rem;
+  border-radius: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.btn-danger-strong:hover:not(:disabled) {
+  background: #b91c1c;
+}
+.btn-danger-strong:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .mono {

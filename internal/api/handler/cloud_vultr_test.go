@@ -21,6 +21,7 @@ func TestCloudVultrHandlers(t *testing.T) {
 	r.GET("/api/nodes/cloud/vultr/catalog", GetVultrCatalog)
 	r.GET("/api/nodes/cloud/vultr/instances", ListVultrInstances)
 	r.POST("/api/nodes/cloud/vultr/provision", ProvisionVultrNode)
+	r.DELETE("/api/nodes/cloud/vultr/instances/:id", DeleteVultrInstance)
 
 	// 1. GetVultrConfig (Initially unconfigured)
 	{
@@ -112,6 +113,28 @@ func TestCloudVultrHandlers(t *testing.T) {
 		_ = json.Unmarshal(w.Body.Bytes(), &res)
 		if res.TaskID == "" {
 			t.Fatalf("Expected non-empty task_id")
+		}
+	}
+
+	// 6. DeleteVultrInstance without password -> 400 Bad Request
+	{
+		req, _ := http.NewRequest(http.MethodDelete, "/api/nodes/cloud/vultr/instances/inst-123", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("Expected 400 Bad Request without master password, got %d", w.Code)
+		}
+	}
+
+	// 7. DeleteVultrInstance with wrong password -> 403 Forbidden
+	{
+		body, _ := json.Marshal(map[string]string{"master_password": "wrong-password"})
+		req, _ := http.NewRequest(http.MethodDelete, "/api/nodes/cloud/vultr/instances/inst-123", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("Expected 403 Forbidden with wrong master password, got %d", w.Code)
 		}
 	}
 }

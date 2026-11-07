@@ -53,6 +53,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.GET("/nodes/cloud/vultr/catalog", handler.GetVultrCatalog)
 			api.GET("/nodes/cloud/vultr/instances", handler.ListVultrInstances)
 			api.POST("/nodes/cloud/vultr/provision", handler.ProvisionVultrNode)
+			api.DELETE("/nodes/cloud/vultr/instances/:id", handler.DeleteVultrInstance)
 
 			// 设置与密码
 			api.POST("/auth/password", handler.UpdatePassword)
