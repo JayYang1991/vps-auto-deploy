@@ -221,29 +221,64 @@
 
     <!-- 实时运行日志弹窗 (SSE journalctl) -->
     <div v-if="logModal.show" class="modal-overlay" @click.self="closeLogs">
-      <div class="modal-content" style="max-width: 800px; height: 80vh; display: flex; flex-direction: column;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-          <h3 style="font-size: 1.125rem; font-weight: 600;">
-            服务日志: <span style="color: #38bdf8;">{{ logModal.unit }}</span>
-          </h3>
-          <div style="display: flex; gap: 0.5rem;">
-            <button @click="logModal.lines = []" class="btn btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">
-              清空
+      <div
+        :class="['modal-content', 'modal-content-log', logModal.isMaximized ? 'is-maximized' : '']"
+      >
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div style="display: flex; align-items: center; gap: 0.6rem;">
+            <span style="font-size: 1.25rem;">📜</span>
+            <h3 style="font-size: 1.15rem; font-weight: 600; color: #f8fafc;">
+              服务运行日志: <span style="color: #38bdf8; font-family: monospace;">{{ logModal.unit }}</span>
+            </h3>
+            <span class="badge badge-secondary" style="font-size: 0.7rem; font-family: monospace;">
+              {{ logModal.lines.length }} 行
+            </span>
+          </div>
+
+          <div style="display: flex; gap: 0.5rem; align-items: center;">
+            <button
+              @click="copyAllLogs"
+              class="btn btn-secondary"
+              style="padding: 0.3rem 0.65rem; font-size: 0.75rem;"
+              title="复制全部日志"
+            >
+              📋 复制全部
             </button>
-            <button @click="closeLogs" class="btn btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;">
-              关闭
+            <button
+              @click="logModal.lines = []"
+              class="btn btn-secondary"
+              style="padding: 0.3rem 0.65rem; font-size: 0.75rem;"
+              title="清空当前日志面板"
+            >
+              🗑️ 清空
+            </button>
+            <button
+              @click="toggleLogMaximize"
+              class="btn btn-secondary"
+              style="padding: 0.3rem 0.65rem; font-size: 0.75rem;"
+              :title="logModal.isMaximized ? '还原窗口大小' : '最大化窗口'"
+            >
+              <span>{{ logModal.isMaximized ? '🗗 还原' : '🗖 最大化' }}</span>
+            </button>
+            <button
+              @click="closeLogs"
+              class="btn btn-secondary"
+              style="padding: 0.3rem 0.65rem; font-size: 0.75rem;"
+              title="关闭日志弹窗"
+            >
+              ✕ 关闭
             </button>
           </div>
         </div>
 
         <div
           ref="logContainer"
-          style="flex: 1; background-color: #0b0f19; border: 1px solid #1e293b; padding: 1rem; border-radius: 0.5rem; overflow-y: auto; font-family: monospace; font-size: 0.8rem; line-height: 1.4;"
+          style="flex: 1; background-color: #0b0f19; border: 1px solid #1e293b; padding: 1rem; border-radius: 0.5rem; overflow-y: auto; font-family: 'JetBrains Mono', Consolas, Monaco, monospace; font-size: 0.8rem; line-height: 1.45;"
         >
           <div v-for="(line, idx) in logModal.lines" :key="idx" style="white-space: pre-wrap; word-break: break-all; margin-bottom: 2px;">
             {{ line }}
           </div>
-          <div v-if="logModal.lines.length === 0" style="color: #64748b; text-align: center; margin-top: 2rem;">
+          <div v-if="logModal.lines.length === 0" style="color: #64748b; text-align: center; margin-top: 3rem;">
             正在连接日志流...
           </div>
         </div>
@@ -256,7 +291,7 @@
 import { ref, reactive, computed, onMounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import api, { getSecretPath } from '../api'
-import { useToast } from '../composables/useToast'
+import { useToast, copyToClipboard } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
 
 interface ServiceStatus {
@@ -311,6 +346,7 @@ const logModal = reactive({
   unit: '',
   lines: [] as string[],
   eventSource: null as EventSource | null,
+  isMaximized: false,
 })
 const logContainer = ref<HTMLElement | null>(null)
 
@@ -511,6 +547,25 @@ function closeLogs() {
     logModal.eventSource = null
   }
   logModal.show = false
+  logModal.isMaximized = false
+}
+
+function toggleLogMaximize() {
+  logModal.isMaximized = !logModal.isMaximized
+  nextTick(() => {
+    if (logContainer.value) {
+      logContainer.value.scrollTop = logContainer.value.scrollHeight
+    }
+  })
+}
+
+async function copyAllLogs() {
+  if (logModal.lines.length === 0) {
+    toast.warning('暂无日志可复制')
+    return
+  }
+  const text = logModal.lines.join('\n')
+  await copyToClipboard(text, '服务运行日志')
 }
 
 function getCategoryLabel(cat: string) {
@@ -594,6 +649,24 @@ onMounted(async () => {
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
+}
+
+.modal-content-log {
+  max-width: 860px;
+  width: 90vw;
+  height: 80vh;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.modal-content-log.is-maximized {
+  max-width: 98vw;
+  width: 98vw;
+  height: 96vh;
+  max-height: 96vh;
+  border-radius: 0.5rem;
 }
 </style>
 
