@@ -17,8 +17,8 @@
       </div>
     </div>
 
-    <!-- 未安装 sing-box 渐进式空状态引导卡片 -->
-    <div v-if="!singboxInstalled" class="card" style="margin-bottom: 1.5rem; background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.35);">
+    <!-- 未安装 sing-box 渐进式空状态引导卡片 (仅在加载完成后判定) -->
+    <div v-if="!loading && !singboxInstalled" class="card" style="margin-bottom: 1.5rem; background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.35);">
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
         <div style="display: flex; align-items: center; gap: 0.75rem;">
           <span style="font-size: 1.6rem;">📦</span>
@@ -35,8 +35,14 @@
       </div>
     </div>
 
-    <!-- 出站规则列表 -->
-    <div v-if="outbounds.length === 0" class="card" style="text-align: center; padding: 3rem;">
+    <!-- 加载中指示器 -->
+    <div v-if="loading" class="card loading-box">
+      <div class="loading-spinner"></div>
+      <p class="loading-text">正在加载出站规则配置...</p>
+    </div>
+
+    <!-- 出站规则列表空状态 -->
+    <div v-else-if="outbounds.length === 0" class="card" style="text-align: center; padding: 3rem;">
       <div style="font-size: 2.25rem; margin-bottom: 0.5rem;">📤</div>
       <p style="color: #94a3b8; margin-bottom: 1.25rem;">暂无已配置的出站规则，点击下方按钮添加出站规则。</p>
       <button @click="openCreateModal" class="btn btn-primary">+ 添加出站规则</button>
@@ -291,7 +297,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import api from '../api'
 import { useToast } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
@@ -312,6 +318,7 @@ const { toast } = useToast()
 const { showConfirm } = useConfirm()
 
 const outbounds = ref<OutboundItem[]>([])
+const loading = ref(true)
 const singboxInstalled = ref(true)
 
 const modal = reactive({
@@ -347,6 +354,7 @@ const vlessSpec = reactive({
 const customSpecJSON = ref('')
 
 async function loadOutbounds() {
+  loading.value = true
   try {
     const res = await api.get('/outbounds')
     outbounds.value = res.data || []
@@ -358,6 +366,8 @@ async function loadOutbounds() {
     }
   } catch (err: any) {
     toast.error('加载出站规则失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    loading.value = false
   }
 }
 
@@ -514,6 +524,11 @@ async function deleteOutbound(ob: OutboundItem) {
 
 onMounted(() => {
   loadOutbounds()
+  window.addEventListener('node-context-changed', loadOutbounds)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('node-context-changed', loadOutbounds)
 })
 </script>
 

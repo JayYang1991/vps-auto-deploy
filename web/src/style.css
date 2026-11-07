@@ -158,3 +158,34 @@ code, pre {
   overflow-y: auto;
 }
 
+/* Loading UI Utils */
+.loading-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3.5rem 1.5rem;
+  text-align: center;
+}
+
+.loading-spinner {
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 3px solid rgba(56, 189, 248, 0.15);
+  border-top-color: #38bdf8;
+  border-radius: 50%;
+  animation: spinner-rotate 0.8s linear infinite;
+}
+
+.loading-text {
+  margin-top: 1rem;
+  color: #94a3b8;
+  font-size: 0.9rem;
+}
+
+@keyframes spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+

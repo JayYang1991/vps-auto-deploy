@@ -93,7 +93,17 @@
         </router-link>
       </div>
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
+      <!-- 软件组件状态：加载中与空状态处理 -->
+      <div v-if="loadingOverview && (!overview.components || overview.components.length === 0)" class="loading-box" style="padding: 2.5rem 1rem;">
+        <div class="loading-spinner"></div>
+        <p class="loading-text">正在拉取节点基础设施与软件状态...</p>
+      </div>
+
+      <div v-else-if="!overview.components || overview.components.length === 0" style="text-align: center; padding: 2.5rem; color: #64748b;">
+        暂未探测到受管软件组件
+      </div>
+
+      <div v-else style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
         <div
           v-for="c in overview.components"
           :key="c.name"
@@ -183,6 +193,8 @@ import { useNodeContext } from '../composables/useNodeContext'
 const { toast } = useToast()
 const { activeNode } = useNodeContext()
 
+const loadingOverview = ref(true)
+
 const overview = ref<any>({
   public_ip: '',
   os: '',
@@ -205,6 +217,7 @@ const displayPublicIP = computed(() => {
 })
 
 async function loadOverview() {
+  loadingOverview.value = true
   try {
     const res = await api.get('/system/overview')
     if (res.data) {
@@ -224,6 +237,8 @@ async function loadOverview() {
     }
   } catch (err: any) {
     console.error('加载组件概览失败', err)
+  } finally {
+    loadingOverview.value = false
   }
 }
 

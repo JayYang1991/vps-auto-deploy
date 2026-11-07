@@ -14,8 +14,8 @@
       <button @click="openCreateModal" class="btn btn-primary">+ 新建 Argo 隧道</button>
     </div>
 
-    <!-- 未安装 cloudflared 渐进式空状态引导卡片 -->
-    <div v-if="!cloudflaredInstalled" class="card" style="margin-bottom: 1.5rem; background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.35);">
+    <!-- 未安装 cloudflared 渐进式空状态引导卡片 (仅在加载完成后判定) -->
+    <div v-if="!loading && !cloudflaredInstalled" class="card" style="margin-bottom: 1.5rem; background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.35);">
       <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
         <div style="display: flex; align-items: center; gap: 0.75rem;">
           <span style="font-size: 1.6rem;">📦</span>
@@ -32,8 +32,14 @@
       </div>
     </div>
 
-    <!-- 列表展示 -->
-    <div v-if="tunnels.length === 0" class="card" style="text-align: center; padding: 3rem;">
+    <!-- 加载中指示器 -->
+    <div v-if="loading" class="card loading-box">
+      <div class="loading-spinner"></div>
+      <p class="loading-text">正在加载 Cloudflared 隧道配置...</p>
+    </div>
+
+    <!-- 列表展示空状态 -->
+    <div v-else-if="tunnels.length === 0" class="card" style="text-align: center; padding: 3rem;">
       <div style="font-size: 2.25rem; margin-bottom: 0.5rem;">🚇</div>
       <p style="color: #94a3b8; margin-bottom: 1.25rem;">暂无已配置的 Cloudflared 隧道，点击下方按钮一键创建。</p>
       <button @click="openCreateModal" class="btn btn-primary">+ 一键创建快速测试隧道 (Quick Tunnel)</button>
@@ -136,7 +142,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import api from '../api'
 import { useToast, copyToClipboard } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
@@ -145,6 +151,7 @@ const { toast } = useToast()
 const { showConfirm } = useConfirm()
 
 const tunnels = ref<any[]>([])
+const loading = ref(true)
 const cloudflaredInstalled = ref(true)
 
 const modal = reactive({
@@ -160,6 +167,7 @@ const form = reactive({
 })
 
 async function loadTunnels() {
+  loading.value = true
   try {
     const res = await api.get('/tunnels')
     tunnels.value = res.data || []
@@ -171,6 +179,8 @@ async function loadTunnels() {
     }
   } catch (err: any) {
     toast.error('加载隧道列表失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    loading.value = false
   }
 }
 
@@ -235,5 +245,10 @@ function copyDomain(domain: string) {
 
 onMounted(() => {
   loadTunnels()
+  window.addEventListener('node-context-changed', loadTunnels)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('node-context-changed', loadTunnels)
 })
 </script>

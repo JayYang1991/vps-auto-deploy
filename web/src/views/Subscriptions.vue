@@ -14,8 +14,21 @@
       <button @click="modal.show = true" class="btn btn-primary">+ 添加成员</button>
     </div>
 
+    <!-- 加载中指示器 -->
+    <div v-if="loading" class="card loading-box">
+      <div class="loading-spinner"></div>
+      <p class="loading-text">正在加载团队成员与订阅配置...</p>
+    </div>
+
+    <!-- 空状态 -->
+    <div v-else-if="members.length === 0" class="card" style="text-align: center; padding: 3rem;">
+      <div style="font-size: 2.25rem; margin-bottom: 0.5rem;">👥</div>
+      <p style="color: #94a3b8; margin-bottom: 1.25rem;">暂无团队成员，点击右上角或下方按钮添加首个成员以生成客户端专属订阅。</p>
+      <button @click="modal.show = true" class="btn btn-primary">+ 添加首个成员</button>
+    </div>
+
     <!-- 成员卡片列表 -->
-    <div style="display: flex; flex-direction: column; gap: 1rem;">
+    <div v-else style="display: flex; flex-direction: column; gap: 1rem;">
       <div v-for="m in members" :key="m.id" class="card">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem;">
           <div>
@@ -140,7 +153,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import QrcodeVue from 'qrcode.vue'
 import api from '../api'
 import { useToast, copyToClipboard } from '../composables/useToast'
@@ -150,6 +163,7 @@ const { toast } = useToast()
 const { showConfirm } = useConfirm()
 
 const members = ref<any[]>([])
+const loading = ref(true)
 
 const modal = reactive({
   show: false,
@@ -166,11 +180,14 @@ const qrModal = reactive({
 })
 
 async function loadMembers() {
+  loading.value = true
   try {
     const res = await api.get('/members')
     members.value = res.data || []
   } catch (err: any) {
     toast.error('加载成员列表失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    loading.value = false
   }
 }
 
@@ -247,5 +264,10 @@ async function deleteMember(id: number) {
 
 onMounted(() => {
   loadMembers()
+  window.addEventListener('node-context-changed', loadMembers)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('node-context-changed', loadMembers)
 })
 </script>

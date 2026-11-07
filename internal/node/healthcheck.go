@@ -48,3 +48,4 @@ func checkAllNodes() {
 	}
 	wg.Wait()
 }
+

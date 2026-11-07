@@ -35,8 +35,20 @@
       </div>
     </div>
 
+    <!-- 加载中指示器 -->
+    <div v-if="loading" class="card loading-box">
+      <div class="loading-spinner"></div>
+      <p class="loading-text">正在查询受管服务与组件状态...</p>
+    </div>
+
+    <!-- 空状态 -->
+    <div v-else-if="filteredComponents.length === 0" class="card" style="text-align: center; padding: 3rem;">
+      <div style="font-size: 2.25rem; margin-bottom: 0.5rem;">📦</div>
+      <p style="color: #94a3b8;">当前分类下暂无受管服务组件。</p>
+    </div>
+
     <!-- 组件卡片网格 -->
-    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1.5rem; margin-bottom: 2.5rem;">
+    <div v-else style="display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 1.5rem; margin-bottom: 2.5rem;">
       <div
         v-for="c in filteredComponents"
         :key="c.name"
@@ -291,7 +303,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, nextTick } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
 import api, { getSecretPath } from '../api'
 import { useToast, copyToClipboard } from '../composables/useToast'
@@ -315,6 +327,7 @@ const { toast } = useToast()
 const { showConfirm } = useConfirm()
 
 const components = ref<ServiceStatus[]>([])
+const loading = ref(true)
 const categories = [
   { key: 'all', label: '全部服务' },
   { key: 'proxy', label: '代理核心' },
@@ -354,6 +367,7 @@ const logModal = reactive({
 const logContainer = ref<HTMLElement | null>(null)
 
 async function loadComponents(checkUpdates = false) {
+  loading.value = true
   try {
     const res = await api.get(`/components${checkUpdates ? '?check_updates=true' : ''}`)
     if (res.data) {
@@ -361,6 +375,8 @@ async function loadComponents(checkUpdates = false) {
     }
   } catch (err: any) {
     toast.error('加载组件列表失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    loading.value = false
   }
 }
 
@@ -639,6 +655,7 @@ function getStatusText(status: string) {
 
 onMounted(async () => {
   await loadComponents()
+  window.addEventListener('node-context-changed', () => loadComponents())
 
   // 检查是否从外部路由带有 ?install=xxx
   const target = route.query.install as string
@@ -649,6 +666,10 @@ onMounted(async () => {
       startInstall(targetComp)
     }
   }
+})
+
+onUnmounted(() => {
+  window.removeEventListener('node-context-changed', () => loadComponents())
 })
 </script>
 
