@@ -176,3 +176,4 @@ func SaveSettings(settings map[string]interface{}) error {
 	}
 	return nil
 }
+

@@ -55,3 +55,4 @@ vless://uuid-1@104.238.148.149:443?encryption=none#HK-Test
 		t.Errorf("unexpected first ip: %+v", ips[0])
 	}
 }
+

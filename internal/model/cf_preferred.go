@@ -137,3 +137,4 @@ func DeleteCFPreferredIP(id int64) error {
 	_, err := DB.Exec("DELETE FROM cf_preferred_ips WHERE id = ?", id)
 	return err
 }
+

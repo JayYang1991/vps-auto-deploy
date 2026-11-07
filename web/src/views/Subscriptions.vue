@@ -580,7 +580,7 @@
         <div style="display: flex; flex-direction: column; gap: 1rem;">
           <div>
             <label class="form-label">
-              优选订阅源 URL 模板 (支持 <code>{host}</code> 与 <code>{uuid}</code> 动态变量)
+              优选订阅源 URL (EDGETUNNEL_SUB_URL)
             </label>
             <div style="display: flex; gap: 0.5rem;">
               <input
@@ -599,32 +599,8 @@
               </button>
             </div>
             <p class="form-hint">
-              抓取时系统将自动替换 <code>{host}</code> 为伪装/穿透域名，替换 <code>{uuid}</code> 为客户端凭据
+              优选订阅分发接口地址，支持直接填入完整订阅链接或带 <code>{host}</code>、<code>{uuid}</code> 占位符的模板
             </p>
-          </div>
-
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem;">
-            <div>
-              <label class="form-label">伪装域名 / Host</label>
-              <input
-                v-model="cfPrefStatus.host"
-                type="text"
-                class="input"
-                placeholder="留空自动探测隧道域名或 dl.google.com"
-              />
-              <p class="form-hint">Cloudflare 边缘握手的 Host / SNI 域名</p>
-            </div>
-
-            <div>
-              <label class="form-label">用户 UUID</label>
-              <input
-                v-model="cfPrefStatus.uuid"
-                type="text"
-                class="input"
-                placeholder="留空自动读取第一个有效团队成员的 UUID"
-              />
-              <p class="form-hint">关联的 VLESS 鉴权凭据</p>
-            </div>
           </div>
 
           <!-- 定时自动同步配置 -->
@@ -1335,9 +1311,6 @@ async function saveCFPrefSettings() {
   try {
     await api.post('/cf-preferred/settings', {
       sub_url: cfPrefStatus.sub_url,
-      host: cfPrefStatus.host,
-      uuid: cfPrefStatus.uuid,
-      path: cfPrefStatus.path,
       cron_enabled: cfPrefStatus.cron_enabled,
       cron_mode: cfPrefStatus.cron_mode,
       cron_interval: cfPrefStatus.cron_interval,
