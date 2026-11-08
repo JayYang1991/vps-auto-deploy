@@ -145,6 +145,23 @@ func GenerateClashMetaConfig(member *model.Member) (string, error) {
 				proxies = append(proxies, proxy)
 				proxyNames = append(proxyNames, name)
 			}
+
+		case "socks":
+			var spec model.SocksSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			name := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			proxy := map[string]interface{}{
+				"name":   name,
+				"type":   "socks5",
+				"server": serverHost,
+				"port":   ib.Port,
+			}
+			if spec.Username != "" && spec.Password != "" {
+				proxy["username"] = spec.Username
+				proxy["password"] = spec.Password
+			}
+			proxies = append(proxies, proxy)
+			proxyNames = append(proxyNames, name)
 		}
 	}
 

@@ -7,7 +7,7 @@
           <h1 style="font-size: 1.35rem; font-weight: 700; color: #f8fafc;">Sing-box 入站节点配置</h1>
         </div>
         <p style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.25rem;">
-          支持直连首选的 VLESS-XTLS-Vision-Reality 及配合 Cloudflared 隧道防封的 VLESS-WS
+          支持直连首选的 VLESS-XTLS-Vision-Reality、配合 Cloudflared 隧道的 VLESS-WS 以及本地/回环 SOCKS5 代理入站
         </p>
       </div>
 
@@ -70,7 +70,7 @@
         <div>
           <div style="display: flex; align-items: center; gap: 0.75rem;">
             <span style="font-size: 1.1rem; font-weight: 600; color: #f8fafc;">{{ ib.tag }}</span>
-            <span :class="['badge', ib.protocol === 'vless-reality' ? 'badge-success' : 'badge-warning']">
+            <span :class="['badge', ib.protocol === 'vless-reality' ? 'badge-success' : (ib.protocol === 'socks' ? 'badge-info' : 'badge-warning')]">
               {{ ib.protocol }}
             </span>
             <span :class="['badge', ib.enabled ? 'badge-success' : 'badge-secondary']">
@@ -89,6 +89,9 @@
               <span v-if="parseSpec(ib.spec_json).group_domain" style="margin-left: 0.75rem;">
                 分组域名: <b style="color: #38bdf8;">{{ parseSpec(ib.spec_json).group_domain }}</b>
               </span>
+            </span>
+            <span v-else-if="ib.protocol === 'socks'">
+              鉴权方式: <b style="color: #38bdf8;">{{ parseSpec(ib.spec_json).username ? '账号密码 (' + parseSpec(ib.spec_json).username + ')' : '免密匿名' }}</b>
             </span>
           </div>
         </div>
@@ -127,6 +130,7 @@
             <select v-model="form.protocol" class="input" @change="onProtocolChange">
               <option value="vless-reality">VLESS-Vision-Reality (直连首选、极速免证书)</option>
               <option value="vless-ws">VLESS-WS (与 Cloudflared 配合使用)</option>
+              <option value="socks">SOCKS5 (本地回环/局域网代理入站)</option>
             </select>
           </div>
 
@@ -191,7 +195,7 @@
           </div>
 
           <!-- VLESS-WS 专属参数 -->
-          <div v-else style="background-color: #0f172a; padding: 1rem; border-radius: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
+          <div v-else-if="form.protocol === 'vless-ws'" style="background-color: #0f172a; padding: 1rem; border-radius: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
             <div>
               <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.25rem;">分组指定域名 (SNI / Host)</label>
               <input v-model="wsSpec.group_domain" class="input" placeholder="如 argo.example.com 或留空继承默认" />
@@ -206,8 +210,25 @@
             </div>
           </div>
 
-          <!-- 用户鉴权与 Name 来源说明 -->
-          <div style="background-color: rgba(30, 41, 59, 0.5); border: 1px dashed #334155; padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 0.8rem; color: #94a3b8;">
+          <!-- SOCKS 专属参数 -->
+          <div v-else-if="form.protocol === 'socks'" style="background-color: #0f172a; padding: 1rem; border-radius: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
+            <div style="font-size: 0.8rem; color: #94a3b8; line-height: 1.4;">
+              💡 <strong>SOCKS5 入站</strong>：主要用于本地回环服务（如 <code>127.0.0.1:1080</code>）、Argo 隧道端口反代或本地应用代理。可按需设置账号密码鉴权，留空则为匿名免密。
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">用户名 (选填，留空免密)</label>
+                <input v-model="socksSpec.username" class="input" placeholder="留空为匿名免密" />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">密码 (选填，留空免密)</label>
+                <input v-model="socksSpec.password" type="text" class="input" placeholder="留空为匿名免密" />
+              </div>
+            </div>
+          </div>
+
+          <!-- 用户鉴权与 Name 来源说明 (仅 VLESS 节点关联全局成员) -->
+          <div v-if="form.protocol !== 'socks'" style="background-color: rgba(30, 41, 59, 0.5); border: 1px dashed #334155; padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 0.8rem; color: #94a3b8;">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
               <span>👥 <strong>用户列表 (users)</strong>：已自动绑定当前所有启用的团队成员。</span>
               <router-link to="/services?tab=subscriptions&sub=members" class="btn btn-secondary" style="font-size: 0.725rem; padding: 0.2rem 0.5rem; text-decoration: none;">
@@ -217,6 +238,9 @@
             <div style="font-size: 0.725rem; color: #64748b; margin-top: 0.35rem; line-height: 1.4;">
               底层 sing-box 节点中的 <code style="color: #cbd5e1;">users[].name</code> 与 <code style="color: #cbd5e1;">uuid</code> 由系统全局多租户统一管理并自动同步生效，无需在每个入站中重复录入。
             </div>
+          </div>
+          <div v-else style="background-color: rgba(30, 41, 59, 0.5); border: 1px dashed #334155; padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 0.8rem; color: #94a3b8;">
+            ℹ️ <strong>用户鉴权说明</strong>：SOCKS5 入站使用上方独立的用户名与密码（或匿名免密），不依赖团队成员 UUID 列表。
           </div>
 
           <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1rem;">
@@ -301,6 +325,11 @@ const wsSpec = reactive({
   group_domain: '',
 })
 
+const socksSpec = reactive({
+  username: '',
+  password: '',
+})
+
 const shareModal = reactive({
   show: false,
   title: '',
@@ -361,6 +390,8 @@ async function openCreateModal() {
   realitySpec.handshake_server = 'dl.google.com'
   wsSpec.path = '/ws'
   wsSpec.group_domain = ''
+  socksSpec.username = ''
+  socksSpec.password = ''
   await generateRealityKeys()
 }
 
@@ -369,7 +400,7 @@ function openEditModal(ib: any) {
   modal.id = ib.id
   form.tag = ib.tag
   form.protocol = ib.protocol
-  form.listen = ib.listen || (ib.protocol === 'vless-ws' ? '127.0.0.1' : '::')
+  form.listen = ib.listen || (ib.protocol === 'vless-reality' ? '::' : '127.0.0.1')
   form.port = ib.port
   form.enabled = !!ib.enabled
 
@@ -386,6 +417,9 @@ function openEditModal(ib: any) {
   } else if (ib.protocol === 'vless-ws') {
     wsSpec.path = spec.path || '/ws'
     wsSpec.group_domain = spec.group_domain || spec.host || ''
+  } else if (ib.protocol === 'socks') {
+    socksSpec.username = spec.username || ''
+    socksSpec.password = spec.password || ''
   }
   modal.show = true
 }
@@ -419,11 +453,17 @@ function onProtocolChange() {
     if (!modal.isEdit) {
       form.tag = 'vless-reality-443'
     }
-  } else {
+  } else if (form.protocol === 'vless-ws') {
     form.listen = '127.0.0.1'
     form.port = 10086
     if (!modal.isEdit) {
       form.tag = 'vless-ws-10086'
+    }
+  } else if (form.protocol === 'socks') {
+    form.listen = '127.0.0.1'
+    form.port = 1080
+    if (!modal.isEdit) {
+      form.tag = 'socks-in-1080'
     }
   }
 }
@@ -438,11 +478,16 @@ async function submitInbound() {
       realitySpec.handshake_server = realitySpec.server_name
     }
     specObj = realitySpec
-  } else {
+  } else if (form.protocol === 'vless-ws') {
     specObj = {
       path: wsSpec.path || '/ws',
       group_domain: wsSpec.group_domain || '',
       host: wsSpec.group_domain || '',
+    }
+  } else if (form.protocol === 'socks') {
+    specObj = {
+      username: socksSpec.username || '',
+      password: socksSpec.password || '',
     }
   }
 
@@ -450,7 +495,7 @@ async function submitInbound() {
     const payload = {
       tag: form.tag,
       protocol: form.protocol,
-      listen: form.listen || (form.protocol === 'vless-ws' ? '127.0.0.1' : '::'),
+      listen: form.listen || (form.protocol === 'vless-reality' ? '::' : '127.0.0.1'),
       port: form.port,
       spec: specObj,
       enabled: form.enabled,
@@ -490,6 +535,22 @@ async function deleteInbound(id: number) {
 
 async function showShareModal(ib: any) {
   try {
+    const sysRes = await api.get('/system/overview')
+    const ip = sysRes.data.public_ip || '127.0.0.1'
+
+    if (ib.protocol === 'socks') {
+      const spec = parseSpec(ib.spec_json)
+      const auth = (spec.username && spec.password)
+        ? `${encodeURIComponent(spec.username)}:${encodeURIComponent(spec.password)}@`
+        : ''
+      const host = (ib.listen === '::' || ib.listen === '0.0.0.0') ? ip : (ib.listen || '127.0.0.1')
+      const uri = `socks5://${auth}${host}:${ib.port}#${encodeURIComponent(ib.tag)}`
+      shareModal.title = `${ib.tag} (SOCKS5)`
+      shareModal.uri = uri
+      shareModal.show = true
+      return
+    }
+
     const membersRes = await api.get('/members')
     const members = membersRes.data || []
     if (members.length === 0) {
@@ -499,14 +560,29 @@ async function showShareModal(ib: any) {
     const m = members[0]
     const spec = parseSpec(ib.spec_json)
 
-    const sysRes = await api.get('/system/overview')
-    const ip = sysRes.data.public_ip
+    if (ib.protocol === 'vless-ws') {
+      const host = spec.group_domain || spec.host || ip
+      const path = spec.path || '/ws'
+      const q = new URLSearchParams({
+        encryption: 'none',
+        security: 'tls',
+        sni: host,
+        type: 'ws',
+        host: host,
+        path: path,
+      })
+      const uri = `vless://${m.uuid}@${host}:443?${q.toString()}#${encodeURIComponent(ib.tag)}`
+      shareModal.title = `${ib.tag} (VLESS-WS 默认用户: ${m.name})`
+      shareModal.uri = uri
+      shareModal.show = true
+      return
+    }
 
     const q = new URLSearchParams({
       encryption: 'none',
       flow: spec.flow || 'xtls-rprx-vision',
       security: 'reality',
-      sni: spec.server_name,
+      sni: spec.server_name || 'dl.google.com',
       fp: spec.fingerprint || 'chrome',
       pbk: spec.public_key,
       sid: spec.short_id,

@@ -17,10 +17,10 @@ import (
 
 type InboundCreateRequest struct {
 	Tag      string          `json:"tag" binding:"required"`
-	Protocol string          `json:"protocol" binding:"required"` // "vless-reality" | "vless-ws"
+	Protocol string          `json:"protocol" binding:"required"` // "vless-reality" | "vless-ws" | "socks"
 	Listen   string          `json:"listen"`
 	Port     int             `json:"port" binding:"required"`
-	Spec     json.RawMessage `json:"spec" binding:"required"`
+	Spec     json.RawMessage `json:"spec"`
 	Enabled  bool            `json:"enabled"`
 }
 
@@ -116,17 +116,22 @@ func CreateInbound(c *gin.Context) {
 
 	listen := req.Listen
 	if listen == "" {
-		if req.Protocol == "vless-ws" {
+		if req.Protocol == "vless-ws" || req.Protocol == "socks" {
 			listen = "127.0.0.1"
 		} else {
 			listen = "::"
 		}
 	}
 
+	specStr := strings.TrimSpace(string(req.Spec))
+	if specStr == "" || specStr == "null" {
+		specStr = "{}"
+	}
+
 	now := time.Now()
 	res, err := model.DB.Exec(
 		"INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-		req.Tag, req.Protocol, listen, req.Port, string(req.Spec), req.Enabled, now, now,
+		req.Tag, req.Protocol, listen, req.Port, specStr, req.Enabled, now, now,
 	)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to insert inbound: " + err.Error()})
@@ -174,17 +179,22 @@ func UpdateInbound(c *gin.Context) {
 
 	listen := req.Listen
 	if listen == "" {
-		if req.Protocol == "vless-ws" {
+		if req.Protocol == "vless-ws" || req.Protocol == "socks" {
 			listen = "127.0.0.1"
 		} else {
 			listen = "::"
 		}
 	}
 
+	specStr := strings.TrimSpace(string(req.Spec))
+	if specStr == "" || specStr == "null" {
+		specStr = "{}"
+	}
+
 	now := time.Now()
 	_, err = model.DB.Exec(
 		"UPDATE inbounds SET tag = ?, protocol = ?, listen = ?, port = ?, spec_json = ?, enabled = ?, updated_at = ? WHERE id = ?",
-		req.Tag, req.Protocol, listen, req.Port, string(req.Spec), req.Enabled, now, id,
+		req.Tag, req.Protocol, listen, req.Port, specStr, req.Enabled, now, id,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

@@ -263,6 +263,18 @@ func GenerateURIs(member *model.Member) ([]string, error) {
 			u := fmt.Sprintf("hysteria2://%s@%s:%d?sni=%s&insecure=0#%s", member.UUID, serverHost, ib.Port, serverHost, url.QueryEscape(nodeRemark))
 			uris = append(uris, u)
 
+		case "socks":
+			var spec model.SocksSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			remark := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			var u string
+			if spec.Username != "" && spec.Password != "" {
+				u = fmt.Sprintf("socks5://%s:%s@%s:%d#%s", url.QueryEscape(spec.Username), url.QueryEscape(spec.Password), serverHost, ib.Port, url.QueryEscape(remark))
+			} else {
+				u = fmt.Sprintf("socks5://%s:%d#%s", serverHost, ib.Port, url.QueryEscape(remark))
+			}
+			uris = append(uris, u)
+
 		default:
 			nodeRemark := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
 			u := fmt.Sprintf("vless://%s@%s:%d#%s", member.UUID, serverHost, ib.Port, url.QueryEscape(nodeRemark))

@@ -170,6 +170,18 @@ func ImportExistingSingboxConfig(cfgPath string) (*ImportStats, error) {
 				path = "/ws"
 			}
 			specMap["path"] = path
+		} else if ibType == "socks" {
+			protocol = "socks"
+			if usersRaw, ok := ib["users"].([]interface{}); ok && len(usersRaw) > 0 {
+				if uMap, ok := usersRaw[0].(map[string]interface{}); ok {
+					if u, ok := uMap["username"].(string); ok && u != "" {
+						specMap["username"] = u
+					}
+					if p, ok := uMap["password"].(string); ok && p != "" {
+						specMap["password"] = p
+					}
+				}
+			}
 		} else {
 			// 其他协议类型，完整保存至 specMap
 			for k, v := range ib {

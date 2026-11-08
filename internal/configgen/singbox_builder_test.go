@@ -72,4 +72,46 @@ func TestGenerateServerConfig(t *testing.T) {
 	if !hasDirect || !hasBlock {
 		t.Errorf("expected both direct and block outbounds, got %v", cfg.Outbounds)
 	}
+
+	// 验证 SOCKS 入站配置生成
+	_, err = model.DB.Exec("INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"socks-anon", "socks", "127.0.0.1", 1080, "{}", 1)
+	if err != nil {
+		t.Fatalf("insert socks-anon failed: %v", err)
+	}
+	_, err = model.DB.Exec("INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"socks-auth", "socks", "127.0.0.1", 1081, `{"username":"testuser","password":"testpass"}`, 1)
+	if err != nil {
+		t.Fatalf("insert socks-auth failed: %v", err)
+	}
+
+	cfgWithSocks, err := GenerateServerConfig()
+	if err != nil {
+		t.Fatalf("GenerateServerConfig with socks failed: %v", err)
+	}
+
+	var foundAnon, foundAuth bool
+	for _, ib := range cfgWithSocks.Inbounds {
+		if ib.Tag == "socks-anon" {
+			foundAnon = true
+			if ib.Type != "socks" {
+				t.Errorf("expected type socks, got %s", ib.Type)
+			}
+			if len(ib.Users) != 0 {
+				t.Errorf("expected 0 users for anon socks, got %d", len(ib.Users))
+			}
+		}
+		if ib.Tag == "socks-auth" {
+			foundAuth = true
+			if ib.Type != "socks" {
+				t.Errorf("expected type socks, got %s", ib.Type)
+			}
+			if len(ib.Users) != 1 || ib.Users[0].Username != "testuser" || ib.Users[0].Password != "testpass" {
+				t.Errorf("expected user testuser/testpass, got %+v", ib.Users)
+			}
+		}
+	}
+	if !foundAnon || !foundAuth {
+		t.Errorf("expected both socks-anon and socks-auth in inbounds, got %+v", cfgWithSocks.Inbounds)
+	}
 }

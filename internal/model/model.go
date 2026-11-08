@@ -26,7 +26,7 @@ type Member struct {
 type Inbound struct {
 	ID        int64     `json:"id"`
 	Tag       string    `json:"tag"`
-	Protocol  string    `json:"protocol"` // "vless-reality" | "vless-ws"
+	Protocol  string    `json:"protocol"` // "vless-reality" | "vless-ws" | "socks"
 	Listen    string    `json:"listen"`   // "::" 或 "127.0.0.1"
 	Port      int       `json:"port"`     // 端口
 	SpecJSON  string    `json:"spec_json"` // JSON 字符串
@@ -68,6 +68,12 @@ type VLESSWSSpec struct {
 	Host        string `json:"host"`         // ws host header
 	GroupDomain string `json:"group_domain"` // 分组指定域名 (SNI / Host)
 	TunnelID    int64  `json:"tunnel_id"`    // 关联的 Cloudflared 隧道 ID
+}
+
+// SocksSpec 是 SOCKS 入站协议参数
+type SocksSpec struct {
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
 }
 
 // Tunnel Cloudflared 隧道

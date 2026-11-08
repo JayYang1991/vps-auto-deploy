@@ -139,6 +139,23 @@ func GenerateSingboxClientConfig(member *model.Member) (string, error) {
 				outbounds = append(outbounds, outbound)
 				outboundTags = append(outboundTags, tag)
 			}
+
+		case "socks":
+			var spec model.SocksSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			tag := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			outbound := map[string]interface{}{
+				"type":        "socks",
+				"tag":         tag,
+				"server":      serverHost,
+				"server_port": ib.Port,
+			}
+			if spec.Username != "" && spec.Password != "" {
+				outbound["username"] = spec.Username
+				outbound["password"] = spec.Password
+			}
+			outbounds = append(outbounds, outbound)
+			outboundTags = append(outboundTags, tag)
 		}
 	}
 

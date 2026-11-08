@@ -82,4 +82,48 @@ func TestClusterPrefixSubgen(t *testing.T) {
 	if !strings.Contains(singboxJSON, "🇭🇰 香港主控 | vless-vision-443") {
 		t.Fatalf("Singbox JSON should contain customized node tag, got:\n%s", singboxJSON)
 	}
+
+	// 4. Test SOCKS inbound support
+	_, err = model.DB.Exec(
+		"INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"socks-local",
+		"socks",
+		"127.0.0.1",
+		1080,
+		`{"username":"myuser","password":"mypassword"}`,
+	)
+	if err != nil {
+		t.Fatalf("Failed to insert socks inbound: %v", err)
+	}
+
+	socksURIs, err := GenerateURIs(member)
+	if err != nil {
+		t.Fatalf("GenerateURIs with socks failed: %v", err)
+	}
+	var foundSocksURI bool
+	for _, u := range socksURIs {
+		if strings.HasPrefix(u, "socks5://myuser:mypassword@") && strings.Contains(u, "socks-local-1080") {
+			foundSocksURI = true
+			break
+		}
+	}
+	if !foundSocksURI {
+		t.Fatalf("expected socks5 URI with auth in %v", socksURIs)
+	}
+
+	socksClash, err := GenerateClashMetaConfig(member)
+	if err != nil {
+		t.Fatalf("GenerateClashMetaConfig with socks failed: %v", err)
+	}
+	if !strings.Contains(socksClash, "type: socks5") || !strings.Contains(socksClash, "username: myuser") {
+		t.Fatalf("expected socks5 in Clash Meta config: %s", socksClash)
+	}
+
+	socksSingbox, err := GenerateSingboxClientConfig(member)
+	if err != nil {
+		t.Fatalf("GenerateSingboxClientConfig with socks failed: %v", err)
+	}
+	if !strings.Contains(socksSingbox, `"type": "socks"`) || !strings.Contains(socksSingbox, `"username": "myuser"`) {
+		t.Fatalf("expected socks in Singbox client config: %s", socksSingbox)
+	}
 }

@@ -1043,6 +1043,9 @@
                         <span v-else-if="item.protocol === 'vless-reality'" style="color: #64748b; margin-left: 0.35rem; font-size: 0.725rem;">
                           (TCP Reality)
                         </span>
+                        <span v-else-if="item.protocol === 'socks'" style="color: #64748b; margin-left: 0.35rem; font-size: 0.725rem;">
+                          (SOCKS5)
+                        </span>
                       </div>
                     </td>
                     <td>

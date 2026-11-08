@@ -305,6 +305,26 @@ func buildInventoryItem(ib model.Inbound, nodeName, serverHost string, member *m
   password: "%s"
   sni: "%s"`, displayName, serverHost, ib.Port, uuid, serverHost)
 
+	case "socks":
+		item.ProtocolLabel = "SOCKS5"
+		var spec model.SocksSpec
+		_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+		if spec.Username != "" && spec.Password != "" {
+			item.Link = fmt.Sprintf("socks5://%s:%s@%s:%d#%s", url.QueryEscape(spec.Username), url.QueryEscape(spec.Password), serverHost, ib.Port, url.QueryEscape(displayName))
+			item.ClashSnippet = fmt.Sprintf(`- name: "%s"
+  type: socks5
+  server: "%s"
+  port: %d
+  username: "%s"
+  password: "%s"`, displayName, serverHost, ib.Port, spec.Username, spec.Password)
+		} else {
+			item.Link = fmt.Sprintf("socks5://%s:%d#%s", serverHost, ib.Port, url.QueryEscape(displayName))
+			item.ClashSnippet = fmt.Sprintf(`- name: "%s"
+  type: socks5
+  server: "%s"
+  port: %d`, displayName, serverHost, ib.Port)
+		}
+
 	default:
 		item.ProtocolLabel = strings.ToUpper(ib.Protocol)
 		item.Link = fmt.Sprintf("vless://%s@%s:%d#%s", uuid, serverHost, ib.Port, url.QueryEscape(displayName))

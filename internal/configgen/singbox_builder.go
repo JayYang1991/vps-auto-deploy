@@ -37,9 +37,11 @@ type InboundConfig struct {
 }
 
 type InboundUser struct {
-	Name string `json:"name"`
-	UUID string `json:"uuid"`
-	Flow string `json:"flow,omitempty"`
+	Name     string `json:"name,omitempty"`
+	UUID     string `json:"uuid,omitempty"`
+	Flow     string `json:"flow,omitempty"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
 }
 
 type InboundTLSConfig struct {
@@ -239,6 +241,19 @@ func GenerateServerConfig() (*SingboxConfig, error) {
 			inboundCfg.Transport = map[string]interface{}{
 				"type": "ws",
 				"path": path,
+			}
+
+		case "socks":
+			inboundCfg.Type = "socks"
+			var spec model.SocksSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			if strings.TrimSpace(spec.Username) != "" && strings.TrimSpace(spec.Password) != "" {
+				inboundCfg.Users = []InboundUser{
+					{
+						Username: strings.TrimSpace(spec.Username),
+						Password: strings.TrimSpace(spec.Password),
+					},
+				}
 			}
 		}
 
