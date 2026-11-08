@@ -36,7 +36,7 @@
         <button
           class="tab-btn"
           :class="{ 'tab-btn-active': activeTab === 'deploy' }"
-          @click="activeTab = 'deploy'"
+          @click="switchToDeployTab"
         >
           <span>➕ SSH 远程部署</span>
         </button>
@@ -314,17 +314,29 @@
           </div>
 
           <div class="terminal-footer">
-            <button
-              v-if="deployTaskStatus === 'success'"
-              class="btn-primary"
-              @click="finishDeployAndSwitch"
-            >
-              <span>✅ 完成并切换至该节点视角</span>
-            </button>
+            <template v-if="deployTaskStatus === 'success'">
+              <button
+                class="btn-primary"
+                @click="finishDeployAndSwitch"
+                type="button"
+              >
+                <span>✅ 完成并切换至该节点视角</span>
+              </button>
+              <button
+                class="btn-secondary"
+                @click="resetDeployForm"
+                type="button"
+                style="margin-left: 0.5rem;"
+                title="清空表单并准备部署另一台新服务器"
+              >
+                <span>➕ 继续部署新节点</span>
+              </button>
+            </template>
             <button
               v-else-if="deployTaskStatus === 'failed'"
               class="btn-secondary"
               @click="deployStep = 'form'"
+              type="button"
             >
               <span>🔄 返回修改参数并重试</span>
             </button>
@@ -766,12 +778,22 @@ function handleOverlayClick() {
   close()
 }
 
+function switchToDeployTab() {
+  if (deployStep.value === 'terminal' && deployTaskStatus.value === 'success') {
+    resetDeployForm()
+  }
+  activeTab.value = 'deploy'
+}
+
 watch(
   () => props.initialTab,
   (val) => {
     if (val) {
       if (activeRunningTask.value.running && val === 'nodes') {
         return
+      }
+      if (val === 'deploy' && deployStep.value === 'terminal' && deployTaskStatus.value === 'success') {
+        resetDeployForm()
       }
       activeTab.value = val
     }
@@ -784,6 +806,9 @@ watch(
   (val) => {
     if (val) {
       if (props.initialTab && !activeRunningTask.value.running) {
+        if (props.initialTab === 'deploy' && deployStep.value === 'terminal' && deployTaskStatus.value === 'success') {
+          resetDeployForm()
+        }
         activeTab.value = props.initialTab
       }
       fetchNodes()
@@ -991,9 +1016,29 @@ async function startDeploy() {
   }
 }
 
+function resetDeployForm() {
+  deployStep.value = 'form'
+  deployTaskStatus.value = 'running'
+  deployLogs.value = []
+  deployedNodeId = 0
+  deployReq.name = ''
+  deployReq.sub_prefix = ''
+  deployReq.host = ''
+  deployReq.ssh_password = ''
+  deployReq.ssh_private_key = ''
+  deployReq.admin_password = ''
+  deployReq.secret_path = ''
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+}
+
 function finishDeployAndSwitch() {
-  if (deployedNodeId > 0) {
-    switchNode(deployedNodeId)
+  const targetId = deployedNodeId
+  resetDeployForm()
+  if (targetId > 0) {
+    switchNode(targetId)
     toast.success('部署完成，已切换至新节点视角！')
   } else {
     toast.success('部署完成！')

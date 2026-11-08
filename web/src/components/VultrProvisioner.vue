@@ -596,13 +596,23 @@
         </div>
 
         <div class="terminal-footer">
-          <button
-            v-if="taskStatus === 'success'"
-            class="btn-primary"
-            @click="finishAndSwitch"
-          >
-            <span>✅ 完成并切换至新节点管理视角</span>
-          </button>
+          <template v-if="taskStatus === 'success'">
+            <button
+              class="btn-primary"
+              @click="finishAndSwitch"
+              type="button"
+            >
+              <span>✅ 完成并切换至新节点管理视角</span>
+            </button>
+            <button
+              class="btn-secondary"
+              @click="resetProvisionState"
+              type="button"
+              style="margin-left: 0.5rem;"
+            >
+              <span>➕ 继续开通下一台 VPS</span>
+            </button>
+          </template>
           <div v-else-if="taskStatus === 'failed'" class="terminal-failed-actions">
             <button
               v-if="createdInstanceId"
@@ -1289,9 +1299,27 @@ async function submitDestroyInstance() {
   }
 }
 
+function resetProvisionState() {
+  cloudStep.value = 'form'
+  currentStage.value = 1
+  taskStatus.value = 'running'
+  taskLogs.value = []
+  createdInstanceId.value = ''
+  createdInstanceIP.value = ''
+  deployedNodeId = 0
+  formReq.name = ''
+  formReq.sub_prefix = ''
+  if (eventSource) {
+    eventSource.close()
+    eventSource = null
+  }
+}
+
 function finishAndSwitch() {
-  if (deployedNodeId > 0) {
-    switchNode(deployedNodeId)
+  const targetId = deployedNodeId
+  resetProvisionState()
+  if (targetId > 0) {
+    switchNode(targetId)
     toast.success('已切换至新开通的云主机视角！')
   } else {
     toast.success('开机纳管完成！')
