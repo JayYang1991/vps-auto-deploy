@@ -48,6 +48,35 @@ func StartDeployNode(c *gin.Context) {
 	})
 }
 
+// StartUpgradeNode 开启异步 SSH 软件推流升级任务 (升级已有受管节点的二进制)
+func StartUpgradeNode(c *gin.Context) {
+	var req node.UpgradeSSHRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
+		return
+	}
+
+	if strings.TrimSpace(req.Host) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "目标服务器地址 (Host) 不能为空"})
+		return
+	}
+
+	taskName := "升级节点: " + req.Host
+	if req.NodeID > 0 {
+		if n, err := model.GetNode(req.NodeID); err == nil {
+			taskName = "升级节点: " + n.Name
+		}
+	}
+
+	task := node.CreateDeployTask(taskName, req.Host)
+	go node.RunUpgradeSSH(task, req)
+
+	c.JSON(http.StatusOK, gin.H{
+		"task_id": task.ID,
+		"message": "SSH 节点软件推流升级任务已启动",
+	})
+}
+
 // GetDeployStatus 查询部署任务当前状态
 func GetDeployStatus(c *gin.Context) {
 	taskID := c.Query("task_id")

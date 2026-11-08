@@ -36,6 +36,24 @@
       </div>
     </div>
 
+    <!-- 纳管节点需升级引导卡片 -->
+    <div v-if="nodeNeedsUpgrade" class="card" style="margin-bottom: 1.5rem; background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.35);">
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;">
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+          <span style="font-size: 1.6rem;">🔄</span>
+          <div>
+            <div style="font-weight: 600; color: #fbbf24; font-size: 0.95rem;">当前纳管节点运行的面板版本较低</div>
+            <div style="color: #94a3b8; font-size: 0.825rem; margin-top: 0.25rem;">
+              该远程节点尚未安装包含路由分流与全网凭据同步的新版 vps-panel。请在「集群管理」中对此节点一键推流升级。
+            </div>
+          </div>
+        </div>
+        <button @click="openClusterModal" class="btn btn-primary" style="font-size: 0.825rem; padding: 0.4rem 0.85rem;" type="button">
+          🚀 前往「集群管理」升级此节点
+        </button>
+      </div>
+    </div>
+
     <!-- 常用推荐预设胶囊栏 (One-Click Smart Presets) -->
     <div class="card" style="margin-bottom: 1.5rem; background: rgba(30, 41, 59, 0.4); border-color: #334155; padding: 0.85rem 1.15rem;">
       <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
@@ -429,6 +447,11 @@ const loading = ref(true)
 const saving = ref(false)
 const reordering = ref(false)
 const singboxInstalled = ref(true)
+const nodeNeedsUpgrade = ref(false)
+
+function openClusterModal() {
+  window.dispatchEvent(new CustomEvent('open-cluster-modal', { detail: 'nodes' }))
+}
 
 const customOutbounds = computed(() => {
   return outbounds.value.filter((o) => o.tag !== 'direct' && o.tag !== 'block')
@@ -618,6 +641,7 @@ async function applyPreset(preset: any) {
 
 async function loadData() {
   loading.value = true
+  nodeNeedsUpgrade.value = false
   try {
     const [compRes, routesRes, obRes] = await Promise.all([
       api.get('/components'),
@@ -632,7 +656,12 @@ async function loadData() {
     routes.value = routesRes.data || []
     outbounds.value = obRes.data || []
   } catch (err: any) {
-    toast.error('加载路由数据失败: ' + (err.response?.data?.error || err.message))
+    if (err.response?.status === 404 || err.response?.data?.error?.includes('not found')) {
+      nodeNeedsUpgrade.value = true
+      routes.value = []
+    } else {
+      toast.error('加载路由数据失败: ' + (err.response?.data?.error || err.message))
+    }
   } finally {
     loading.value = false
   }

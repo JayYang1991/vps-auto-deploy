@@ -167,6 +167,16 @@
 
               <button
                 v-if="!item.is_master"
+                class="btn-action btn-upgrade"
+                @click="openUpgradeModal(item)"
+                type="button"
+                title="向该节点推流升级最新版 vps-panel 二进制并自动同步全网凭据"
+              >
+                <span>🚀 升级节点</span>
+              </button>
+
+              <button
+                v-if="!item.is_master"
                 class="btn-action btn-delete"
                 @click="handleDelete(item)"
                 type="button"
@@ -664,6 +674,126 @@
             <button class="btn-primary" @click="saveNodePrefix" :disabled="savingPrefix" type="button">
               <span>{{ savingPrefix ? '⏳ 保存中...' : '💾 保存前缀设置' }}</span>
             </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 远程节点升级模态框 (Remote Node Upgrade Modal) -->
+    <div v-if="upgradeModalVisible" class="reveal-overlay" @click.self="closeUpgradeModal">
+      <div class="reveal-card" style="max-width: 620px; width: 95%;">
+        <div class="reveal-header">
+          <div class="reveal-title-box">
+            <span class="reveal-icon">🚀</span>
+            <div>
+              <h4 class="reveal-title">升级远程节点程序</h4>
+              <p class="reveal-desc">目标节点：{{ targetUpgradeNode?.name }} ({{ targetUpgradeNode?.host }})</p>
+            </div>
+          </div>
+          <button class="close-btn" @click="closeUpgradeModal" type="button" :disabled="isUpgrading && upgradeTaskStatus === 'running'">✕</button>
+        </div>
+
+        <!-- 步骤 1：SSH 连接参数输入表单 -->
+        <div v-if="upgradeStep === 'form'" class="reveal-body">
+          <div class="form-alert-info" style="margin-bottom: 1rem;">
+            <span>ℹ️</span>
+            <div>
+              <strong>零外网依赖热升级：</strong>
+              主控端将直接通过 SSH 管道向该节点推流传输当前最新的 <code>vps-panel</code> 单一二进制文件并平滑重启服务。
+              <strong>节点所有数据库、TLS 证书、入站/出站及穿透业务配置均完好保留</strong>，升级完成后会自动完成全网成员凭据同步。
+            </div>
+          </div>
+
+          <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+            <div class="form-group">
+              <label>SSH 端口 <span class="req">*</span></label>
+              <input v-model.number="upgradeReq.ssh_port" type="number" placeholder="22" />
+            </div>
+
+            <div class="form-group">
+              <label>SSH 用户名 <span class="req">*</span></label>
+              <input v-model="upgradeReq.ssh_user" type="text" placeholder="root" />
+            </div>
+
+            <div class="form-group full-width">
+              <label>SSH 认证方式 <span class="req">*</span></label>
+              <div class="radio-group" style="display: flex; gap: 1rem; margin-top: 0.25rem;">
+                <label class="radio-label" style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: #cbd5e1; font-size: 0.8125rem;">
+                  <input type="radio" value="password" v-model="upgradeReq.auth_type" />
+                  <span>密码认证</span>
+                </label>
+                <label class="radio-label" style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: #cbd5e1; font-size: 0.8125rem;">
+                  <input type="radio" value="key" v-model="upgradeReq.auth_type" />
+                  <span>SSH 私钥认证</span>
+                </label>
+              </div>
+            </div>
+
+            <div v-if="upgradeReq.auth_type === 'password'" class="form-group full-width">
+              <label>SSH 登录密码 <span class="req">*</span></label>
+              <input v-model="upgradeReq.ssh_password" type="password" placeholder="输入远程主机 root 密码" @keyup.enter="startUpgrade" />
+            </div>
+
+            <div v-else class="form-group full-width">
+              <label>SSH 私钥内容 (PEM) <span class="req">*</span></label>
+              <textarea
+                v-model="upgradeReq.ssh_private_key"
+                rows="4"
+                class="mono"
+                style="width: 100%; box-sizing: border-box; background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; border-radius: 0.375rem; color: #f8fafc; padding: 0.5rem; font-size: 0.8125rem;"
+                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----"
+              ></textarea>
+            </div>
+          </div>
+
+          <div class="reveal-footer" style="margin-top: 1.25rem;">
+            <button class="btn-secondary" @click="closeUpgradeModal" type="button">取消</button>
+            <button class="btn-primary" @click="startUpgrade" :disabled="isUpgrading" type="button">
+              <span>{{ isUpgrading ? '⏳ 正在连接...' : '🚀 立即开始推流升级' }}</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 步骤 2：实时推流升级控制台输出 -->
+        <div v-else class="reveal-body" style="padding: 0;">
+          <div class="terminal-container" style="border-radius: 0 0 0.5rem 0.5rem; border: none;">
+            <div class="terminal-header">
+              <div class="terminal-status-info">
+                <span class="pulse-indicator" :class="{ 'pulse-active': upgradeTaskStatus === 'running' }"></span>
+                <span class="terminal-title">
+                  {{ upgradeTaskStatus === 'running' ? '正在执行二进制推流与平滑升级...' : (upgradeTaskStatus === 'success' ? '🎉 升级成功' : '❌ 升级失败') }}
+                </span>
+              </div>
+              <span class="terminal-node-name">{{ targetUpgradeNode?.name }}</span>
+            </div>
+
+            <div class="terminal-body" ref="upgradeTerminalBodyRef" style="max-height: 280px;">
+              <div v-for="(log, idx) in upgradeLogs" :key="idx" class="terminal-line" :class="getLineClass(log)">
+                {{ log }}
+              </div>
+            </div>
+
+            <div class="terminal-footer">
+              <button
+                v-if="upgradeTaskStatus === 'success'"
+                class="btn-primary"
+                @click="closeUpgradeModal"
+                type="button"
+              >
+                <span>✅ 完成并返回</span>
+              </button>
+              <button
+                v-else-if="upgradeTaskStatus === 'failed'"
+                class="btn-secondary"
+                @click="upgradeStep = 'form'"
+                type="button"
+              >
+                <span>🔄 返回修改参数并重试</span>
+              </button>
+              <span v-else class="deploy-progress-hint">
+                推流升级中，请勿关闭弹窗...
+              </span>
+            </div>
           </div>
         </div>
       </div>
@@ -1221,8 +1351,121 @@ async function saveNodePrefix() {
   }
 }
 
+// ==================== 远程节点升级逻辑 ====================
+const upgradeModalVisible = ref(false)
+const targetUpgradeNode = ref<NodeItem | null>(null)
+const upgradeStep = ref<'form' | 'terminal'>('form')
+const isUpgrading = ref(false)
+const upgradeTaskStatus = ref<'running' | 'success' | 'failed'>('running')
+const upgradeLogs = ref<string[]>([])
+const upgradeTerminalBodyRef = ref<HTMLElement | null>(null)
+let upgradeEventSource: EventSource | null = null
+
+const upgradeReq = reactive({
+  node_id: 0,
+  ssh_port: 22,
+  ssh_user: 'root',
+  auth_type: 'password' as 'password' | 'key',
+  ssh_password: '',
+  ssh_private_key: '',
+})
+
+function openUpgradeModal(item: NodeItem) {
+  targetUpgradeNode.value = item
+  upgradeReq.node_id = item.id
+  upgradeReq.ssh_port = 22
+  upgradeReq.ssh_user = 'root'
+  upgradeReq.auth_type = 'password'
+  upgradeReq.ssh_password = ''
+  upgradeReq.ssh_private_key = ''
+  upgradeStep.value = 'form'
+  upgradeLogs.value = []
+  upgradeTaskStatus.value = 'running'
+  upgradeModalVisible.value = true
+}
+
+function closeUpgradeModal() {
+  if (isUpgrading.value && upgradeTaskStatus.value === 'running') {
+    return
+  }
+  upgradeModalVisible.value = false
+  targetUpgradeNode.value = null
+  if (upgradeEventSource) {
+    upgradeEventSource.close()
+    upgradeEventSource = null
+  }
+  fetchNodes()
+}
+
+function scrollUpgradeToBottom() {
+  nextTick(() => {
+    if (upgradeTerminalBodyRef.value) {
+      upgradeTerminalBodyRef.value.scrollTop = upgradeTerminalBodyRef.value.scrollHeight
+    }
+  })
+}
+
+async function startUpgrade() {
+  if (upgradeReq.auth_type === 'password' && !upgradeReq.ssh_password) {
+    toast.warning('请输入 SSH 登录密码')
+    return
+  }
+  if (upgradeReq.auth_type === 'key' && !upgradeReq.ssh_private_key) {
+    toast.warning('请输入 SSH 私钥内容')
+    return
+  }
+
+  isUpgrading.value = true
+  upgradeLogs.value = []
+  upgradeTaskStatus.value = 'running'
+  upgradeStep.value = 'terminal'
+
+  try {
+    const res = await api.post('/nodes/upgrade', upgradeReq)
+    const taskId = res.data.task_id
+
+    const secret = getSecretPath()
+    const token = localStorage.getItem('token') || ''
+    const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&token=${token}`
+
+    if (upgradeEventSource) {
+      upgradeEventSource.close()
+    }
+    upgradeEventSource = new EventSource(streamURL)
+
+    upgradeEventSource.onmessage = (event) => {
+      const line = event.data
+      upgradeLogs.value.push(line)
+      scrollUpgradeToBottom()
+
+      if (line.includes('[SUCCESS]')) {
+        upgradeTaskStatus.value = 'success'
+        upgradeEventSource?.close()
+        fetchNodes()
+      } else if (line.includes('[ERROR]')) {
+        upgradeTaskStatus.value = 'failed'
+        upgradeEventSource?.close()
+      }
+    }
+
+    upgradeEventSource.onerror = () => {
+      upgradeEventSource?.close()
+      if (upgradeTaskStatus.value === 'running') {
+        upgradeTaskStatus.value = 'failed'
+        upgradeLogs.value.push('[ERROR] 日志流连接异常中断')
+      }
+    }
+  } catch (err: any) {
+    upgradeTaskStatus.value = 'failed'
+    upgradeLogs.value.push('[ERROR] 启动升级任务失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    isUpgrading.value = false
+  }
+}
+
 onUnmounted(() => {
   if (eventSource) eventSource.close()
+  if (upgradeEventSource) upgradeEventSource.close()
   if (countdownTimer) clearInterval(countdownTimer)
 })
 </script>
@@ -1577,6 +1820,17 @@ onUnmounted(() => {
 }
 .btn-reveal:hover {
   background: rgba(245, 158, 11, 0.25);
+}
+
+.btn-upgrade {
+  background: rgba(14, 165, 233, 0.15);
+  color: #38bdf8;
+  border-color: rgba(14, 165, 233, 0.35);
+}
+.btn-upgrade:hover {
+  background: rgba(14, 165, 233, 0.28);
+  border-color: #38bdf8;
+  color: #e0f2fe;
 }
 
 .preset-pill-row {

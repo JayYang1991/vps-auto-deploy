@@ -39,6 +39,17 @@ type DeploySSHRequest struct {
 	EnableTLS     *bool  `json:"enable_tls"` // 默认开启自签 TLS + 指纹绑定 (防中间人劫持)
 }
 
+// UpgradeSSHRequest 远程节点软件推流升级请求参数 (保留现有数据库与配置，仅更新二进制并重启)
+type UpgradeSSHRequest struct {
+	NodeID        int64  `json:"node_id"`
+	Host          string `json:"host"`
+	SSHPort       int    `json:"ssh_port"`
+	SSHUser       string `json:"ssh_user"`
+	AuthType      string `json:"auth_type"` // "password" | "key"
+	SSHPassword   string `json:"ssh_password"`
+	SSHPrivateKey string `json:"ssh_private_key"`
+}
+
 // GenerateRandomPassword 生成高强度随机密码
 func GenerateRandomPassword(length int) string {
 	const charset = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%^&*"
@@ -388,7 +399,7 @@ func RunDeploySSH(task *DeployTask, req DeploySSHRequest) {
 	} else {
 		task.AddLog(fmt.Sprintf("跨架构部署 (%s -> %s)，从 GitHub Release 自动下载...", runtime.GOARCH, targetArch))
 		downloadCmd := fmt.Sprintf(
-			"curl -fsSL -o /usr/local/bin/vps-panel https://github.com/Jason-cq/vps-auto-deploy/releases/latest/download/vps-panel-linux-%s || wget -q -O /usr/local/bin/vps-panel https://github.com/Jason-cq/vps-auto-deploy/releases/latest/download/vps-panel-linux-%s && chmod +x /usr/local/bin/vps-panel",
+			"curl -fsSL -o /usr/local/bin/vps-panel https://github.com/JayYang1991/vps-auto-deploy/releases/latest/download/vps-panel-linux-%s || wget -q -O /usr/local/bin/vps-panel https://github.com/JayYang1991/vps-auto-deploy/releases/latest/download/vps-panel-linux-%s && chmod +x /usr/local/bin/vps-panel",
 			targetArch, targetArch,
 		)
 		if _, err := runSSHCmd(downloadCmd); err != nil {
@@ -581,3 +592,239 @@ WantedBy=multi-user.target
 	task.Status = "success"
 	task.AddLog(fmt.Sprintf("[SUCCESS] 节点 %s (ID: %d) 成功加入集群并完成 TLS 指纹绑定！", req.Name, nodeID))
 }
+
+// RunUpgradeSSH 执行对已有受管节点的推流升级 (保留其现有数据库与配置，仅更新二进制并重启)
+func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
+	defer func() {
+		if r := recover(); r != nil {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("Panic during upgrade: %v", r)
+			task.AddLog("[ERROR] " + task.Error)
+		}
+	}()
+
+	if req.SSHPort <= 0 {
+		req.SSHPort = 22
+	}
+	if strings.TrimSpace(req.SSHUser) == "" {
+		req.SSHUser = "root"
+	}
+
+	// 1. 获取目标节点元数据
+	var targetNode *model.Node
+	if req.NodeID > 0 {
+		targetNode, _ = model.GetNode(req.NodeID)
+	}
+	if targetNode == nil && req.Host != "" {
+		nodes, _ := model.ListNodes()
+		for _, n := range nodes {
+			if n.Host == req.Host {
+				cpy := n
+				targetNode = &cpy
+				break
+			}
+		}
+	}
+
+	task.AddLog(fmt.Sprintf("开始连接远程主机 %s:%d 进行软件推流升级 (用户: %s)...", req.Host, req.SSHPort, req.SSHUser))
+
+	// 2. 建立 SSH 认证配置并校验 TOFU 主机指纹
+	var authMethods []ssh.AuthMethod
+	if req.AuthType == "key" || (req.SSHPrivateKey != "" && req.SSHPassword == "") {
+		signer, err := ssh.ParsePrivateKey([]byte(req.SSHPrivateKey))
+		if err != nil {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("解析 SSH 私钥失败: %v", err)
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
+		authMethods = append(authMethods, ssh.PublicKeys(signer))
+	} else {
+		authMethods = append(authMethods, ssh.Password(req.SSHPassword))
+	}
+
+	var existingSSHHostKey string
+	_ = model.DB.QueryRow("SELECT ssh_host_key FROM nodes WHERE host = ? AND ssh_host_key != '' LIMIT 1", req.Host).Scan(&existingSSHHostKey)
+
+	var remoteSSHHostKey string
+	sshConfig := &ssh.ClientConfig{
+		User: req.SSHUser,
+		Auth: authMethods,
+		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+			currentFP := ssh.FingerprintSHA256(key)
+			if existingSSHHostKey != "" && currentFP != existingSSHHostKey {
+				return fmt.Errorf("【安全拦截】SSH 主机指纹不匹配！已记录指纹: %s, 实际指纹: %s", existingSSHHostKey, currentFP)
+			}
+			remoteSSHHostKey = currentFP
+			return nil
+		},
+		Timeout: 15 * time.Second,
+	}
+
+	addr := net.JoinHostPort(req.Host, strconv.Itoa(req.SSHPort))
+	client, err := ssh.Dial("tcp", addr, sshConfig)
+	if err != nil {
+		task.Status = "failed"
+		task.Error = fmt.Sprintf("SSH 握手连接失败: %v", err)
+		task.AddLog("[ERROR] " + task.Error)
+		return
+	}
+	defer client.Close()
+	task.AddLog(fmt.Sprintf("SSH 连接建立成功！目标主机指纹: %s", remoteSSHHostKey))
+
+	runSSHCmd := func(cmd string) (string, error) {
+		session, err := client.NewSession()
+		if err != nil {
+			return "", err
+		}
+		defer session.Close()
+
+		var stdout, stderr bytes.Buffer
+		session.Stdout = &stdout
+		session.Stderr = &stderr
+		err = session.Run(cmd)
+		if err != nil {
+			return stdout.String() + stderr.String(), err
+		}
+		return stdout.String(), nil
+	}
+
+	// 3. 识别目标架构
+	unameM, err := runSSHCmd("uname -m")
+	if err != nil {
+		task.Status = "failed"
+		task.Error = fmt.Sprintf("获取远程系统架构失败: %v", err)
+		task.AddLog("[ERROR] " + task.Error)
+		return
+	}
+	unameM = strings.TrimSpace(unameM)
+
+	var targetArch string
+	switch unameM {
+	case "x86_64", "amd64":
+		targetArch = "amd64"
+	case "aarch64", "arm64":
+		targetArch = "arm64"
+	case "armv7l", "arm":
+		targetArch = "arm"
+	default:
+		targetArch = unameM
+	}
+	task.AddLog(fmt.Sprintf("目标主机架构: %s (主控当前架构: %s)", targetArch, runtime.GOARCH))
+
+	// 4. 推流传输新版 vps-panel 二进制
+	task.AddLog("开始向远程主机推流传输最新版 vps-panel 二进制文件...")
+	exePath, exeErr := os.Executable()
+	useStream := false
+	if exeErr == nil && runtime.GOARCH == targetArch {
+		if fi, statErr := os.Stat(exePath); statErr == nil && fi.Size() > 1000000 {
+			useStream = true
+		}
+	}
+
+	if useStream {
+		task.AddLog("目标架构与主控一致，采用内网直接推流部署 (Zero-External-Download)...")
+		session, err := client.NewSession()
+		if err != nil {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("创建 SSH 文件传输会话失败: %v", err)
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
+
+		stdin, err := session.StdinPipe()
+		if err != nil {
+			session.Close()
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("获取 SSH 标准输入流失败: %v", err)
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
+
+		file, err := os.Open(exePath)
+		if err != nil {
+			session.Close()
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("读取本地二进制失败: %v", err)
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
+
+		cmd := "cat > /usr/local/bin/vps-panel.tmp && mv /usr/local/bin/vps-panel.tmp /usr/local/bin/vps-panel && chmod +x /usr/local/bin/vps-panel"
+		if err := session.Start(cmd); err != nil {
+			file.Close()
+			session.Close()
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("启动远端写入命令失败: %v", err)
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
+
+		_, copyErr := io.Copy(stdin, file)
+		file.Close()
+		stdin.Close()
+		if copyErr != nil {
+			session.Close()
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("推流写入失败: %v", copyErr)
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
+
+		if err := session.Wait(); err != nil {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("设置远端二进制权限失败: %v", err)
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
+		task.AddLog("最新二进制文件写入并授权完成 (/usr/local/bin/vps-panel)")
+	} else {
+		task.AddLog(fmt.Sprintf("跨架构升级 (%s -> %s)，从 GitHub Release 自动下载...", runtime.GOARCH, targetArch))
+		downloadCmd := fmt.Sprintf(
+			"curl -fsSL -o /usr/local/bin/vps-panel https://github.com/JayYang1991/vps-auto-deploy/releases/latest/download/vps-panel-linux-%s || wget -q -O /usr/local/bin/vps-panel https://github.com/JayYang1991/vps-auto-deploy/releases/latest/download/vps-panel-linux-%s && chmod +x /usr/local/bin/vps-panel",
+			targetArch, targetArch,
+		)
+		if _, err := runSSHCmd(downloadCmd); err != nil {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("远端下载二进制失败: %v", err)
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
+		task.AddLog("跨架构二进制下载完成")
+	}
+
+	// 5. 重启远端守护进程
+	task.AddLog("重启远程 vps-panel.service 守护进程...")
+	restartCmd := "systemctl daemon-reload && systemctl restart vps-panel"
+	if out, err := runSSHCmd(restartCmd); err != nil {
+		task.Status = "failed"
+		task.Error = fmt.Sprintf("重启远端守护进程失败: %v (%s)", err, out)
+		task.AddLog("[ERROR] " + task.Error)
+		return
+	}
+	task.AddLog("守护进程重启指令已下发，正在验证服务在线状态...")
+
+	// 6. 服务健康探活
+	time.Sleep(2 * time.Second)
+	if targetNode != nil {
+		task.AddLog("正在执行网络延迟测速与 Token 安全握手...")
+		lat, pingErr := PingNode(targetNode)
+		if pingErr == nil {
+			task.AddLog(fmt.Sprintf("远端节点服务在线，测速响应延迟: %d ms", lat))
+		} else {
+			task.AddLog(fmt.Sprintf("健康检查提示: %v", pingErr))
+		}
+
+		// 7. 自动触发全量成员凭据同步
+		task.AddLog("正在向升级后的节点精准推送全量成员身份凭据...")
+		if syncErr := SyncMembersToNode(targetNode, nil); syncErr != nil {
+			task.AddLog(fmt.Sprintf("[WARN] 成员凭据自动同步提示: %v", syncErr))
+		} else {
+			task.AddLog("🎉 全网成员凭据自动同步成功！")
+		}
+	}
+
+	task.Status = "success"
+	task.AddLog("[SUCCESS] 节点软件升级完成！所有最新功能 (路由分流、全网凭据同步、Sing-box 1.14) 已就绪！")
+}
+

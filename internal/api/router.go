@@ -40,6 +40,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			// 集群多节点管理（仅在主控执行，不被代理）
 			api.GET("/nodes", handler.ListNodes)
 			api.POST("/nodes/deploy", handler.StartDeployNode)
+			api.POST("/nodes/upgrade", handler.StartUpgradeNode)
 			api.GET("/nodes/deploy-status", handler.GetDeployStatus)
 			api.GET("/nodes/deploy-logs", handler.StreamDeployLogs)
 			api.POST("/nodes/import", handler.ImportNode)

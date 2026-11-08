@@ -114,7 +114,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import ToastContainer from './components/ToastContainer.vue'
 import ConfirmModal from './components/ConfirmModal.vue'
@@ -157,6 +157,12 @@ function openClusterModal(tab: 'nodes' | 'cloud' | 'deploy' | 'import' = 'nodes'
   clusterModalTab.value = tab
   showClusterModal.value = true
 }
+
+onMounted(() => {
+  window.addEventListener('open-cluster-modal', (e: any) => {
+    openClusterModal(e.detail || 'nodes')
+  })
+})
 
 const isServicesActive = computed(() => {
   const p = route.path
