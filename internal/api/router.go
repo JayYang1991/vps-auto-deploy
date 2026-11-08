@@ -81,6 +81,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.POST("/inbounds/:id/toggle", handler.ToggleInbound)
 			api.DELETE("/inbounds/:id", handler.DeleteInbound)
 			api.POST("/inbounds/reality-keys", handler.GenerateRealityKeys)
+			api.POST("/inbounds/tls-cert", handler.GenerateTLSCert)
 			api.GET("/inbounds/preview", handler.PreviewSingboxConfig)
 			api.POST("/inbounds/apply", handler.ApplySingboxConfig)
 			api.POST("/inbounds/import", handler.ImportExistingInbounds)

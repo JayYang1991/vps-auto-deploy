@@ -107,6 +107,19 @@ func GenerateRealityKeys(c *gin.Context) {
 	})
 }
 
+func GenerateTLSCert(c *gin.Context) {
+	certPath, keyPath, err := configgen.EnsureDefaultTLSCert()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成自签名证书失败: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"certificate_path": certPath,
+		"key_path":         keyPath,
+		"message":          "自签名证书已就绪",
+	})
+}
+
 func CreateInbound(c *gin.Context) {
 	var req InboundCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -116,7 +129,7 @@ func CreateInbound(c *gin.Context) {
 
 	listen := req.Listen
 	if listen == "" {
-		if req.Protocol == "vless-ws" || req.Protocol == "socks" {
+		if req.Protocol == "vless-ws" || req.Protocol == "socks" || req.Protocol == "mixed" || req.Protocol == "http" {
 			listen = "127.0.0.1"
 		} else {
 			listen = "::"
@@ -179,7 +192,7 @@ func UpdateInbound(c *gin.Context) {
 
 	listen := req.Listen
 	if listen == "" {
-		if req.Protocol == "vless-ws" || req.Protocol == "socks" {
+		if req.Protocol == "vless-ws" || req.Protocol == "socks" || req.Protocol == "mixed" || req.Protocol == "http" {
 			listen = "127.0.0.1"
 		} else {
 			listen = "::"

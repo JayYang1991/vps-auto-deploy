@@ -170,8 +170,8 @@ func ImportExistingSingboxConfig(cfgPath string) (*ImportStats, error) {
 				path = "/ws"
 			}
 			specMap["path"] = path
-		} else if ibType == "socks" {
-			protocol = "socks"
+		} else if ibType == "socks" || ibType == "mixed" || ibType == "http" {
+			protocol = ibType
 			if usersRaw, ok := ib["users"].([]interface{}); ok && len(usersRaw) > 0 {
 				if uMap, ok := usersRaw[0].(map[string]interface{}); ok {
 					if u, ok := uMap["username"].(string); ok && u != "" {
@@ -180,6 +180,97 @@ func ImportExistingSingboxConfig(cfgPath string) (*ImportStats, error) {
 					if p, ok := uMap["password"].(string); ok && p != "" {
 						specMap["password"] = p
 					}
+				}
+			}
+		} else if ibType == "shadowsocks" {
+			protocol = "shadowsocks"
+			if m, ok := ib["method"].(string); ok {
+				specMap["method"] = m
+			}
+			if p, ok := ib["password"].(string); ok {
+				specMap["password"] = p
+			}
+		} else if ibType == "trojan" {
+			protocol = "trojan"
+			if usersRaw, ok := ib["users"].([]interface{}); ok && len(usersRaw) > 0 {
+				if uMap, ok := usersRaw[0].(map[string]interface{}); ok {
+					if p, ok := uMap["password"].(string); ok {
+						specMap["password"] = p
+					}
+				}
+			}
+			if tlsMap != nil {
+				if sn, ok := tlsMap["server_name"].(string); ok {
+					specMap["server_name"] = sn
+				}
+				if cp, ok := tlsMap["certificate_path"].(string); ok {
+					specMap["certificate_path"] = cp
+				}
+				if kp, ok := tlsMap["key_path"].(string); ok {
+					specMap["key_path"] = kp
+				}
+			}
+		} else if ibType == "hysteria2" {
+			protocol = "hysteria2"
+			if usersRaw, ok := ib["users"].([]interface{}); ok && len(usersRaw) > 0 {
+				if uMap, ok := usersRaw[0].(map[string]interface{}); ok {
+					if p, ok := uMap["password"].(string); ok {
+						specMap["password"] = p
+					}
+				}
+			}
+			if up, ok := ib["up_mbps"].(float64); ok {
+				specMap["up_mbps"] = int(up)
+			}
+			if down, ok := ib["down_mbps"].(float64); ok {
+				specMap["down_mbps"] = int(down)
+			}
+			if obfs, ok := ib["obfs"].(map[string]interface{}); ok {
+				if pwd, ok := obfs["password"].(string); ok {
+					specMap["obfs_password"] = pwd
+				}
+			}
+			if tlsMap != nil {
+				if sn, ok := tlsMap["server_name"].(string); ok {
+					specMap["server_name"] = sn
+				}
+				if cp, ok := tlsMap["certificate_path"].(string); ok {
+					specMap["certificate_path"] = cp
+				}
+				if kp, ok := tlsMap["key_path"].(string); ok {
+					specMap["key_path"] = kp
+				}
+			}
+		} else if ibType == "vmess" {
+			protocol = "vmess"
+			if hasTransport && transportMap["type"] == "ws" {
+				specMap["network"] = "ws"
+				path, _ := transportMap["path"].(string)
+				specMap["path"] = path
+			} else {
+				specMap["network"] = "tcp"
+			}
+		} else if ibType == "tuic" {
+			protocol = "tuic"
+			if usersRaw, ok := ib["users"].([]interface{}); ok && len(usersRaw) > 0 {
+				if uMap, ok := usersRaw[0].(map[string]interface{}); ok {
+					if p, ok := uMap["password"].(string); ok {
+						specMap["password"] = p
+					}
+				}
+			}
+			if cc, ok := ib["congestion_control"].(string); ok {
+				specMap["congestion_control"] = cc
+			}
+			if tlsMap != nil {
+				if sn, ok := tlsMap["server_name"].(string); ok {
+					specMap["server_name"] = sn
+				}
+				if cp, ok := tlsMap["certificate_path"].(string); ok {
+					specMap["certificate_path"] = cp
+				}
+				if kp, ok := tlsMap["key_path"].(string); ok {
+					specMap["key_path"] = kp
 				}
 			}
 		} else {

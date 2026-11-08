@@ -114,4 +114,61 @@ func TestGenerateServerConfig(t *testing.T) {
 	if !foundAnon || !foundAuth {
 		t.Errorf("expected both socks-anon and socks-auth in inbounds, got %+v", cfgWithSocks.Inbounds)
 	}
+
+	// 验证拓展协议入站生成 (Shadowsocks, Trojan, Hysteria 2, VMess, TUIC, Mixed)
+	_, _ = model.DB.Exec("INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"ss-test", "shadowsocks", "::", 8388, `{"method":"aes-256-gcm","password":"sspassword"}`, 1)
+	_, _ = model.DB.Exec("INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"trojan-test", "trojan", "::", 10443, `{"password":"trojanpass","server_name":"example.com"}`, 1)
+	_, _ = model.DB.Exec("INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"hy2-test", "hysteria2", "::", 8443, `{"password":"hy2pass","server_name":"example.com","up_mbps":100,"down_mbps":200}`, 1)
+	_, _ = model.DB.Exec("INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"vmess-test", "vmess", "127.0.0.1", 10087, `{"network":"ws","path":"/vmess"}`, 1)
+	_, _ = model.DB.Exec("INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"tuic-test", "tuic", "::", 8444, `{"password":"tuicpass","congestion_control":"bbr","server_name":"example.com"}`, 1)
+	_, _ = model.DB.Exec("INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"mixed-test", "mixed", "127.0.0.1", 2080, `{"username":"mixeduser","password":"mixedpass"}`, 1)
+
+	fullCfg, err := GenerateServerConfig()
+	if err != nil {
+		t.Fatalf("GenerateServerConfig with all protocols failed: %v", err)
+	}
+
+	tagsFound := make(map[string]bool)
+	for _, ib := range fullCfg.Inbounds {
+		tagsFound[ib.Tag] = true
+		switch ib.Tag {
+		case "ss-test":
+			if ib.Type != "shadowsocks" || ib.Method != "aes-256-gcm" || ib.Password != "sspassword" {
+				t.Errorf("unexpected ss inbound: %+v", ib)
+			}
+		case "trojan-test":
+			if ib.Type != "trojan" || ib.TLS == nil || ib.TLS.ServerName != "example.com" {
+				t.Errorf("unexpected trojan inbound: %+v", ib)
+			}
+		case "hy2-test":
+			if ib.Type != "hysteria2" || ib.UpMbps != 100 || ib.DownMbps != 200 {
+				t.Errorf("unexpected hy2 inbound: %+v", ib)
+			}
+		case "vmess-test":
+			if ib.Type != "vmess" || ib.Transport == nil || ib.Transport["path"] != "/vmess" {
+				t.Errorf("unexpected vmess inbound: %+v", ib)
+			}
+		case "tuic-test":
+			if ib.Type != "tuic" || ib.CongestionControl != "bbr" {
+				t.Errorf("unexpected tuic inbound: %+v", ib)
+			}
+		case "mixed-test":
+			if ib.Type != "mixed" || len(ib.Users) != 1 {
+				t.Errorf("unexpected mixed inbound: %+v", ib)
+			}
+		}
+	}
+
+	expectedTags := []string{"ss-test", "trojan-test", "hy2-test", "vmess-test", "tuic-test", "mixed-test"}
+	for _, tag := range expectedTags {
+		if !tagsFound[tag] {
+			t.Errorf("expected inbound tag %s was not found in config", tag)
+		}
+	}
 }

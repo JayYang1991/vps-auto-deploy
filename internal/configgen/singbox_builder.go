@@ -11,6 +11,7 @@ import (
 	"vps-auto-deploy/internal/component"
 	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/pkg/crypto"
 )
 
 // SingboxConfig 代表完整的 sing-box 服务端配置
@@ -27,13 +28,21 @@ type LogConfig struct {
 }
 
 type InboundConfig struct {
-	Type       string                 `json:"type"`
-	Tag        string                 `json:"tag"`
-	Listen     string                 `json:"listen,omitempty"`
-	ListenPort int                    `json:"listen_port"`
-	Users      []InboundUser          `json:"users,omitempty"`
-	TLS        *InboundTLSConfig      `json:"tls,omitempty"`
-	Transport  map[string]interface{} `json:"transport,omitempty"`
+	Type                  string                 `json:"type"`
+	Tag                   string                 `json:"tag"`
+	Listen                string                 `json:"listen,omitempty"`
+	ListenPort            int                    `json:"listen_port"`
+	Users                 []InboundUser          `json:"users,omitempty"`
+	TLS                   *InboundTLSConfig      `json:"tls,omitempty"`
+	Transport             map[string]interface{} `json:"transport,omitempty"`
+	Method                string                 `json:"method,omitempty"`
+	Password              string                 `json:"password,omitempty"`
+	Network               string                 `json:"network,omitempty"`
+	UpMbps                int                    `json:"up_mbps,omitempty"`
+	DownMbps              int                    `json:"down_mbps,omitempty"`
+	Obfs                  map[string]interface{} `json:"obfs,omitempty"`
+	CongestionControl     string                 `json:"congestion_control,omitempty"`
+	IgnoreClientBandwidth bool                   `json:"ignore_client_bandwidth,omitempty"`
 }
 
 type InboundUser struct {
@@ -42,12 +51,15 @@ type InboundUser struct {
 	Flow     string `json:"flow,omitempty"`
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
+	AlterId  int    `json:"alterId,omitempty"`
 }
 
 type InboundTLSConfig struct {
-	Enabled    bool                 `json:"enabled"`
-	ServerName string               `json:"server_name,omitempty"`
-	Reality    *InboundRealityConfig `json:"reality,omitempty"`
+	Enabled         bool                  `json:"enabled"`
+	ServerName      string                `json:"server_name,omitempty"`
+	CertificatePath string                `json:"certificate_path,omitempty"`
+	KeyPath         string                `json:"key_path,omitempty"`
+	Reality         *InboundRealityConfig `json:"reality,omitempty"`
 }
 
 type InboundRealityConfig struct {
@@ -255,12 +267,217 @@ func GenerateServerConfig() (*SingboxConfig, error) {
 					},
 				}
 			}
+
+		case "mixed", "http":
+			inboundCfg.Type = "mixed"
+			if ib.Protocol == "http" {
+				inboundCfg.Type = "http"
+			}
+			var spec model.MixedSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			if strings.TrimSpace(spec.Username) != "" && strings.TrimSpace(spec.Password) != "" {
+				inboundCfg.Users = []InboundUser{
+					{
+						Username: strings.TrimSpace(spec.Username),
+						Password: strings.TrimSpace(spec.Password),
+					},
+				}
+			}
+
+		case "shadowsocks":
+			inboundCfg.Type = "shadowsocks"
+			var spec model.ShadowsocksInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			method := strings.TrimSpace(spec.Method)
+			if method == "" {
+				method = "2022-blake3-aes-128-gcm"
+			}
+			inboundCfg.Method = method
+			inboundCfg.Password = strings.TrimSpace(spec.Password)
+
+		case "trojan":
+			inboundCfg.Type = "trojan"
+			var spec model.TrojanInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+
+			pwd := strings.TrimSpace(spec.Password)
+			if pwd != "" {
+				inboundCfg.Users = []InboundUser{
+					{
+						Password: pwd,
+					},
+				}
+			} else {
+				for _, m := range members {
+					inboundCfg.Users = append(inboundCfg.Users, InboundUser{
+						Name:     m.Name,
+						Password: m.UUID,
+					})
+				}
+			}
+
+			certPath := strings.TrimSpace(spec.CertificatePath)
+			keyPath := strings.TrimSpace(spec.KeyPath)
+			if certPath == "" || keyPath == "" {
+				if defCert, defKey, err := EnsureDefaultTLSCert(); err == nil {
+					certPath = defCert
+					keyPath = defKey
+				}
+			}
+
+			inboundCfg.TLS = &InboundTLSConfig{
+				Enabled:         true,
+				ServerName:      spec.ServerName,
+				CertificatePath: certPath,
+				KeyPath:         keyPath,
+			}
+
+		case "hysteria2":
+			inboundCfg.Type = "hysteria2"
+			var spec model.Hysteria2InboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+
+			pwd := strings.TrimSpace(spec.Password)
+			if pwd != "" {
+				inboundCfg.Users = []InboundUser{
+					{
+						Password: pwd,
+					},
+				}
+			} else {
+				for _, m := range members {
+					inboundCfg.Users = append(inboundCfg.Users, InboundUser{
+						Name:     m.Name,
+						Password: m.UUID,
+					})
+				}
+			}
+
+			if spec.UpMbps > 0 {
+				inboundCfg.UpMbps = spec.UpMbps
+			}
+			if spec.DownMbps > 0 {
+				inboundCfg.DownMbps = spec.DownMbps
+			}
+			if spec.IgnoreClientBandwidth {
+				inboundCfg.IgnoreClientBandwidth = true
+			}
+			if strings.TrimSpace(spec.ObfsPassword) != "" {
+				inboundCfg.Obfs = map[string]interface{}{
+					"type":     "salamander",
+					"password": strings.TrimSpace(spec.ObfsPassword),
+				}
+			}
+
+			certPath := strings.TrimSpace(spec.CertificatePath)
+			keyPath := strings.TrimSpace(spec.KeyPath)
+			if certPath == "" || keyPath == "" {
+				if defCert, defKey, err := EnsureDefaultTLSCert(); err == nil {
+					certPath = defCert
+					keyPath = defKey
+				}
+			}
+
+			inboundCfg.TLS = &InboundTLSConfig{
+				Enabled:         true,
+				ServerName:      spec.ServerName,
+				CertificatePath: certPath,
+				KeyPath:         keyPath,
+			}
+
+		case "vmess":
+			inboundCfg.Type = "vmess"
+			var spec model.VMessInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+
+			for _, m := range members {
+				inboundCfg.Users = append(inboundCfg.Users, InboundUser{
+					Name: m.Name,
+					UUID: m.UUID,
+				})
+			}
+
+			if spec.Network == "ws" {
+				path := spec.Path
+				if path == "" {
+					path = "/vmess"
+				}
+				inboundCfg.Transport = map[string]interface{}{
+					"type": "ws",
+					"path": path,
+				}
+			}
+
+		case "tuic":
+			inboundCfg.Type = "tuic"
+			var spec model.TUICInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+
+			pwd := strings.TrimSpace(spec.Password)
+			if pwd == "" {
+				pwd = "tuic-password"
+			}
+			for _, m := range members {
+				inboundCfg.Users = append(inboundCfg.Users, InboundUser{
+					Name:     m.Name,
+					UUID:     m.UUID,
+					Password: pwd,
+				})
+			}
+
+			cc := strings.TrimSpace(spec.CongestionControl)
+			if cc == "" {
+				cc = "bbr"
+			}
+			inboundCfg.CongestionControl = cc
+
+			certPath := strings.TrimSpace(spec.CertificatePath)
+			keyPath := strings.TrimSpace(spec.KeyPath)
+			if certPath == "" || keyPath == "" {
+				if defCert, defKey, err := EnsureDefaultTLSCert(); err == nil {
+					certPath = defCert
+					keyPath = defKey
+				}
+			}
+
+			inboundCfg.TLS = &InboundTLSConfig{
+				Enabled:         true,
+				ServerName:      spec.ServerName,
+				CertificatePath: certPath,
+				KeyPath:         keyPath,
+			}
 		}
 
 		cfg.Inbounds = append(cfg.Inbounds, inboundCfg)
 	}
 
 	return cfg, nil
+}
+
+// EnsureDefaultTLSCert 确保 sing-box 所需的自签名 TLS 证书文件已存在于宿主机磁盘
+func EnsureDefaultTLSCert() (string, string, error) {
+	cfgPath := singbox.GetConfigPath()
+	dir := filepath.Dir(cfgPath)
+	certPath := filepath.Join(dir, "cert.pem")
+	keyPath := filepath.Join(dir, "key.pem")
+
+	if _, err := os.Stat(certPath); err == nil {
+		if _, err := os.Stat(keyPath); err == nil {
+			return certPath, keyPath, nil
+		}
+	}
+
+	pubIP, _ := model.GetSetting("public_ip")
+	hosts := []string{"localhost", "127.0.0.1"}
+	if pubIP != "" {
+		hosts = append(hosts, pubIP)
+	}
+
+	_, err := crypto.GenerateSelfSignedCert(certPath, keyPath, hosts)
+	if err != nil {
+		return "", "", err
+	}
+	return certPath, keyPath, nil
 }
 
 func probeSingboxHealth(driver *singbox.Driver) error {

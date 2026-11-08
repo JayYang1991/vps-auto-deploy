@@ -259,11 +259,103 @@ func GenerateURIs(member *model.Member) ([]string, error) {
 			}
 
 		case "hysteria2":
-			nodeRemark := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
-			u := fmt.Sprintf("hysteria2://%s@%s:%d?sni=%s&insecure=0#%s", member.UUID, serverHost, ib.Port, serverHost, url.QueryEscape(nodeRemark))
+			var spec model.Hysteria2InboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			pwd := spec.Password
+			if pwd == "" {
+				pwd = member.UUID
+			}
+			sni := spec.ServerName
+			if sni == "" {
+				sni = serverHost
+			}
+			remark := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			obfsPart := ""
+			if spec.ObfsPassword != "" {
+				obfsPart = fmt.Sprintf("&obfs=salamander&obfs-password=%s", url.QueryEscape(spec.ObfsPassword))
+			}
+			u := fmt.Sprintf("hysteria2://%s@%s:%d?sni=%s&insecure=1%s#%s", url.QueryEscape(pwd), serverHost, ib.Port, url.QueryEscape(sni), obfsPart, url.QueryEscape(remark))
 			uris = append(uris, u)
 
-		case "socks":
+		case "shadowsocks":
+			var spec model.ShadowsocksInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			method := spec.Method
+			if method == "" {
+				method = "2022-blake3-aes-128-gcm"
+			}
+			remark := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			userInfo := base64.URLEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", method, spec.Password)))
+			u := fmt.Sprintf("ss://%s@%s:%d#%s", userInfo, serverHost, ib.Port, url.QueryEscape(remark))
+			uris = append(uris, u)
+
+		case "trojan":
+			var spec model.TrojanInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			pwd := spec.Password
+			if pwd == "" {
+				pwd = member.UUID
+			}
+			sni := spec.ServerName
+			if sni == "" {
+				sni = serverHost
+			}
+			remark := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			u := fmt.Sprintf("trojan://%s@%s:%d?sni=%s&security=tls#%s", url.QueryEscape(pwd), serverHost, ib.Port, url.QueryEscape(sni), url.QueryEscape(remark))
+			uris = append(uris, u)
+
+		case "vmess":
+			var spec model.VMessInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			remark := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			net := "tcp"
+			path := ""
+			host := ""
+			if spec.Network == "ws" {
+				net = "ws"
+				path = spec.Path
+				if path == "" {
+					path = "/vmess"
+				}
+				host = spec.GroupDomain
+			}
+			vmessObj := map[string]interface{}{
+				"v":    "2",
+				"ps":   remark,
+				"add":  serverHost,
+				"port": ib.Port,
+				"id":   member.UUID,
+				"aid":  0,
+				"scy":  "auto",
+				"net":  net,
+				"type": "none",
+				"host": host,
+				"path": path,
+				"tls":  "",
+			}
+			b, _ := json.Marshal(vmessObj)
+			uris = append(uris, "vmess://"+base64.StdEncoding.EncodeToString(b))
+
+		case "tuic":
+			var spec model.TUICInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			pwd := spec.Password
+			if pwd == "" {
+				pwd = "tuic-password"
+			}
+			cc := spec.CongestionControl
+			if cc == "" {
+				cc = "bbr"
+			}
+			sni := spec.ServerName
+			if sni == "" {
+				sni = serverHost
+			}
+			remark := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			u := fmt.Sprintf("tuic://%s:%s@%s:%d?congestion_control=%s&sni=%s&allow_insecure=1#%s", member.UUID, url.QueryEscape(pwd), serverHost, ib.Port, cc, url.QueryEscape(sni), url.QueryEscape(remark))
+			uris = append(uris, u)
+
+		case "socks", "mixed", "http":
 			var spec model.SocksSpec
 			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
 			remark := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)

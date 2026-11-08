@@ -7,7 +7,7 @@
           <h1 style="font-size: 1.35rem; font-weight: 700; color: #f8fafc;">Sing-box 入站节点配置</h1>
         </div>
         <p style="color: #94a3b8; font-size: 0.85rem; margin-top: 0.25rem;">
-          支持直连首选的 VLESS-XTLS-Vision-Reality、配合 Cloudflared 隧道的 VLESS-WS 以及本地/回环 SOCKS5 代理入站
+          支持直连首选的 VLESS-Reality、Cloudflared 隧道 VLESS-WS、极速防封 Hysteria 2、Trojan、Shadowsocks、VMess、TUIC v5 及本地 SOCKS5/Mixed 代理入站
         </p>
       </div>
 
@@ -70,7 +70,7 @@
         <div>
           <div style="display: flex; align-items: center; gap: 0.75rem;">
             <span style="font-size: 1.1rem; font-weight: 600; color: #f8fafc;">{{ ib.tag }}</span>
-            <span :class="['badge', ib.protocol === 'vless-reality' ? 'badge-success' : (ib.protocol === 'socks' ? 'badge-info' : 'badge-warning')]">
+            <span :class="['badge', getProtocolBadge(ib.protocol)]">
               {{ ib.protocol }}
             </span>
             <span :class="['badge', ib.enabled ? 'badge-success' : 'badge-secondary']">
@@ -90,7 +90,25 @@
                 分组域名: <b style="color: #38bdf8;">{{ parseSpec(ib.spec_json).group_domain }}</b>
               </span>
             </span>
-            <span v-else-if="ib.protocol === 'socks'">
+            <span v-else-if="ib.protocol === 'hysteria2'">
+              SNI: <b style="color: #38bdf8;">{{ parseSpec(ib.spec_json).server_name || '默认' }}</b>
+              <span v-if="parseSpec(ib.spec_json).up_mbps" style="margin-left: 0.75rem;">
+                带宽限制: <b style="color: #34d399;">↑{{ parseSpec(ib.spec_json).up_mbps }}M ↓{{ parseSpec(ib.spec_json).down_mbps || parseSpec(ib.spec_json).up_mbps }}M</b>
+              </span>
+            </span>
+            <span v-else-if="ib.protocol === 'trojan'">
+              SNI: <b style="color: #38bdf8;">{{ parseSpec(ib.spec_json).server_name || '默认' }}</b>
+            </span>
+            <span v-else-if="ib.protocol === 'shadowsocks'">
+              加密方法: <b style="color: #38bdf8;">{{ parseSpec(ib.spec_json).method || '2022-blake3-aes-128-gcm' }}</b>
+            </span>
+            <span v-else-if="ib.protocol === 'vmess'">
+              传输模式: <b style="color: #38bdf8;">{{ parseSpec(ib.spec_json).network === 'ws' ? 'WebSocket (' + (parseSpec(ib.spec_json).path || '/vmess') + ')' : 'TCP' }}</b>
+            </span>
+            <span v-else-if="ib.protocol === 'tuic'">
+              拥塞控制: <b style="color: #38bdf8;">{{ (parseSpec(ib.spec_json).congestion_control || 'bbr').toUpperCase() }}</b>
+            </span>
+            <span v-else-if="ib.protocol === 'socks' || ib.protocol === 'mixed' || ib.protocol === 'http'">
               鉴权方式: <b style="color: #38bdf8;">{{ parseSpec(ib.spec_json).username ? '账号密码 (' + parseSpec(ib.spec_json).username + ')' : '免密匿名' }}</b>
             </span>
           </div>
@@ -130,7 +148,13 @@
             <select v-model="form.protocol" class="input" @change="onProtocolChange">
               <option value="vless-reality">VLESS-Vision-Reality (直连首选、极速免证书)</option>
               <option value="vless-ws">VLESS-WS (与 Cloudflared 配合使用)</option>
-              <option value="socks">SOCKS5 (本地回环/局域网代理入站)</option>
+              <option value="hysteria2">Hysteria 2 (UDP/QUIC 极速免封、抗丢包利器)</option>
+              <option value="trojan">Trojan (标准 TLS 伪装协议)</option>
+              <option value="shadowsocks">Shadowsocks (经典 / SS-2022 对称加密)</option>
+              <option value="vmess">VMess (经典 VMess-TCP / WS)</option>
+              <option value="tuic">TUIC v5 (基于 QUIC 拥塞控制现代协议)</option>
+              <option value="socks">SOCKS5 (本地/回环独立代理)</option>
+              <option value="mixed">Mixed (HTTP & SOCKS5 双协议混合入站)</option>
             </select>
           </div>
 
@@ -210,10 +234,191 @@
             </div>
           </div>
 
-          <!-- SOCKS 专属参数 -->
-          <div v-else-if="form.protocol === 'socks'" style="background-color: #0f172a; padding: 1rem; border-radius: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
+          <!-- Hysteria 2 专属参数 -->
+          <div v-else-if="form.protocol === 'hysteria2'" style="background-color: #0f172a; padding: 1rem; border-radius: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: 500; font-size: 0.875rem; color: #38bdf8;">Hysteria 2 UDP 极速参数</span>
+              <div style="display: flex; gap: 0.5rem;">
+                <button type="button" @click="generateTLSCertForInbound('hy2')" class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;">
+                  ⚡ 一键就绪自签名证书
+                </button>
+                <button type="button" @click="generateRandomPassword('hy2')" class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;">
+                  🔑 随机密码
+                </button>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">专属鉴权密码 (留空则自动复用团队多租户身份)</label>
+                <input v-model="hy2Spec.password" class="input" placeholder="留空则复用成员多租户" />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">TLS 伪装域名 (SNI)</label>
+                <input v-model="hy2Spec.server_name" class="input" placeholder="如 mydomain.com 或留空使用服务器 IP" />
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">证书路径 (Certificate Path)</label>
+                <input v-model="hy2Spec.certificate_path" class="input" placeholder="留空自动使用 /etc/sing-box/cert.pem" />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">私钥路径 (Key Path)</label>
+                <input v-model="hy2Spec.key_path" class="input" placeholder="留空自动使用 /etc/sing-box/key.pem" />
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem;">
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">上行带宽 Mbps (0为无限制)</label>
+                <input v-model.number="hy2Spec.up_mbps" type="number" class="input" placeholder="0" />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">下行带宽 Mbps (0为无限制)</label>
+                <input v-model.number="hy2Spec.down_mbps" type="number" class="input" placeholder="0" />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">混淆密码 Salamander (选填)</label>
+                <input v-model="hy2Spec.obfs_password" class="input" placeholder="选填混淆密码" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Trojan 专属参数 -->
+          <div v-else-if="form.protocol === 'trojan'" style="background-color: #0f172a; padding: 1rem; border-radius: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: 500; font-size: 0.875rem; color: #38bdf8;">Trojan TLS 伪装配置</span>
+              <div style="display: flex; gap: 0.5rem;">
+                <button type="button" @click="generateTLSCertForInbound('trojan')" class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;">
+                  ⚡ 一键就绪自签名证书
+                </button>
+                <button type="button" @click="generateRandomPassword('trojan')" class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;">
+                  🔑 随机密码
+                </button>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">专属鉴权密码 (留空则自动复用团队多租户身份)</label>
+                <input v-model="trojanSpec.password" class="input" placeholder="留空则复用成员多租户" />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">TLS 伪装域名 (SNI)</label>
+                <input v-model="trojanSpec.server_name" class="input" placeholder="如 mydomain.com 或留空使用服务器 IP" />
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">证书路径 (Certificate Path)</label>
+                <input v-model="trojanSpec.certificate_path" class="input" placeholder="留空自动使用 /etc/sing-box/cert.pem" />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">私钥路径 (Key Path)</label>
+                <input v-model="trojanSpec.key_path" class="input" placeholder="留空自动使用 /etc/sing-box/key.pem" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Shadowsocks 专属参数 -->
+          <div v-else-if="form.protocol === 'shadowsocks'" style="background-color: #0f172a; padding: 1rem; border-radius: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: 500; font-size: 0.875rem; color: #38bdf8;">Shadowsocks 对称加密配置</span>
+              <button type="button" @click="generateRandomSSPassword" class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;">
+                🔑 随机生成密码
+              </button>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">加密方法 (Method)</label>
+                <select v-model="ssSpec.method" class="input">
+                  <option value="2022-blake3-aes-128-gcm">2022-blake3-aes-128-gcm (SS2022 极速)</option>
+                  <option value="2022-blake3-aes-256-gcm">2022-blake3-aes-256-gcm (SS2022 高强)</option>
+                  <option value="aes-128-gcm">aes-128-gcm (AEAD)</option>
+                  <option value="aes-256-gcm">aes-256-gcm (AEAD)</option>
+                  <option value="chacha20-ietf-poly1305">chacha20-ietf-poly1305</option>
+                </select>
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">密码 (Password)</label>
+                <input v-model="ssSpec.password" class="input" required placeholder="SS 密码" />
+              </div>
+            </div>
+          </div>
+
+          <!-- VMess 专属参数 -->
+          <div v-else-if="form.protocol === 'vmess'" style="background-color: #0f172a; padding: 1rem; border-radius: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
+            <div style="font-size: 0.8rem; color: #94a3b8;">
+              💡 <strong>VMess 协议</strong>：经典 VMess 入站，支持直接 TCP 接入或搭配 WebSocket 传输。
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">底层传输协议</label>
+                <select v-model="vmessSpec.network" class="input">
+                  <option value="ws">WebSocket (推荐，配合 CDN/穿透)</option>
+                  <option value="tcp">TCP (直连原生)</option>
+                </select>
+              </div>
+              <div v-if="vmessSpec.network === 'ws'">
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">WebSocket Path</label>
+                <input v-model="vmessSpec.path" class="input" placeholder="/vmess" />
+              </div>
+            </div>
+          </div>
+
+          <!-- TUIC 专属参数 -->
+          <div v-else-if="form.protocol === 'tuic'" style="background-color: #0f172a; padding: 1rem; border-radius: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: 500; font-size: 0.875rem; color: #38bdf8;">TUIC v5 极速 QUIC 代理</span>
+              <div style="display: flex; gap: 0.5rem;">
+                <button type="button" @click="generateTLSCertForInbound('tuic')" class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;">
+                  ⚡ 一键就绪自签名证书
+                </button>
+                <button type="button" @click="generateRandomPassword('tuic')" class="btn btn-secondary" style="font-size: 0.75rem; padding: 0.2rem 0.5rem;">
+                  🔑 随机密码
+                </button>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">认证密码 (Password)</label>
+                <input v-model="tuicSpec.password" class="input" placeholder="默认 tuic-password" />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">拥塞控制算法 (Congestion Control)</label>
+                <select v-model="tuicSpec.congestion_control" class="input">
+                  <option value="bbr">BBR (推荐，高速防丢包)</option>
+                  <option value="cubic">Cubic</option>
+                  <option value="new_reno">New Reno</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem;">
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">TLS 伪装域名 (SNI)</label>
+                <input v-model="tuicSpec.server_name" class="input" placeholder="留空使用服务器 IP" />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">证书路径 (Cert)</label>
+                <input v-model="tuicSpec.certificate_path" class="input" placeholder="默认 /etc/sing-box/cert.pem" />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">私钥路径 (Key)</label>
+                <input v-model="tuicSpec.key_path" class="input" placeholder="默认 /etc/sing-box/key.pem" />
+              </div>
+            </div>
+          </div>
+
+          <!-- SOCKS / Mixed 专属参数 -->
+          <div v-else-if="form.protocol === 'socks' || form.protocol === 'mixed'" style="background-color: #0f172a; padding: 1rem; border-radius: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem;">
             <div style="font-size: 0.8rem; color: #94a3b8; line-height: 1.4;">
-              💡 <strong>SOCKS5 入站</strong>：主要用于本地回环服务（如 <code>127.0.0.1:1080</code>）、Argo 隧道端口反代或本地应用代理。可按需设置账号密码鉴权，留空则为匿名免密。
+              💡 <strong>{{ form.protocol === 'mixed' ? 'Mixed 混合代理' : 'SOCKS5 代理' }}</strong>：通常监听在本地回环（如 <code>127.0.0.1:{{ form.port }}</code>）供本机应用、Argo 隧道端口反代或本地应用代理。可按需设置账号密码鉴权，留空则为匿名免密。
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
               <div>
@@ -227,20 +432,20 @@
             </div>
           </div>
 
-          <!-- 用户鉴权与 Name 来源说明 (仅 VLESS 节点关联全局成员) -->
-          <div v-if="form.protocol !== 'socks'" style="background-color: rgba(30, 41, 59, 0.5); border: 1px dashed #334155; padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 0.8rem; color: #94a3b8;">
+          <!-- 用户鉴权与 Name 来源说明 -->
+          <div v-if="['vless-reality', 'vless-ws', 'vmess', 'trojan', 'hysteria2', 'tuic'].includes(form.protocol)" style="background-color: rgba(30, 41, 59, 0.5); border: 1px dashed #334155; padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 0.8rem; color: #94a3b8;">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.5rem;">
-              <span>👥 <strong>用户列表 (users)</strong>：已自动绑定当前所有启用的团队成员。</span>
+              <span>👥 <strong>用户列表 (users)</strong>：已自动同步当前所有启用的团队成员多租户身份。</span>
               <router-link to="/services?tab=subscriptions&sub=members" class="btn btn-secondary" style="font-size: 0.725rem; padding: 0.2rem 0.5rem; text-decoration: none;">
                 管理成员与 Name ↗
               </router-link>
             </div>
             <div style="font-size: 0.725rem; color: #64748b; margin-top: 0.35rem; line-height: 1.4;">
-              底层 sing-box 节点中的 <code style="color: #cbd5e1;">users[].name</code> 与 <code style="color: #cbd5e1;">uuid</code> 由系统全局多租户统一管理并自动同步生效，无需在每个入站中重复录入。
+              当本入站未设置独立专属密码时，系统将自动绑定所有成员的 UUID 作为凭证，支持一人一码及独立订阅分发。
             </div>
           </div>
           <div v-else style="background-color: rgba(30, 41, 59, 0.5); border: 1px dashed #334155; padding: 0.75rem 1rem; border-radius: 0.5rem; font-size: 0.8rem; color: #94a3b8;">
-            ℹ️ <strong>用户鉴权说明</strong>：SOCKS5 入站使用上方独立的用户名与密码（或匿名免密），不依赖团队成员 UUID 列表。
+            ℹ️ <strong>用户鉴权说明</strong>：此协议入站使用上方独立的账号密码（或免密访问），不绑定团队成员 UUID 列表。
           </div>
 
           <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1rem;">
@@ -330,6 +535,108 @@ const socksSpec = reactive({
   password: '',
 })
 
+const mixedSpec = reactive({
+  username: '',
+  password: '',
+})
+
+const ssSpec = reactive({
+  method: '2022-blake3-aes-128-gcm',
+  password: '',
+})
+
+const trojanSpec = reactive({
+  password: '',
+  server_name: '',
+  certificate_path: '',
+  key_path: '',
+})
+
+const hy2Spec = reactive({
+  password: '',
+  server_name: '',
+  certificate_path: '',
+  key_path: '',
+  up_mbps: 0,
+  down_mbps: 0,
+  obfs_password: '',
+  ignore_client_bandwidth: false,
+})
+
+const vmessSpec = reactive({
+  network: 'ws',
+  path: '/vmess',
+  group_domain: '',
+})
+
+const tuicSpec = reactive({
+  password: '',
+  congestion_control: 'bbr',
+  server_name: '',
+  certificate_path: '',
+  key_path: '',
+})
+
+function getProtocolBadge(proto: string) {
+  switch (proto) {
+    case 'vless-reality':
+    case 'hysteria2':
+      return 'badge-success'
+    case 'trojan':
+    case 'tuic':
+      return 'badge-primary'
+    case 'vless-ws':
+    case 'shadowsocks':
+      return 'badge-warning'
+    case 'vmess':
+    case 'socks':
+    case 'mixed':
+    case 'http':
+      return 'badge-info'
+    default:
+      return 'badge-secondary'
+  }
+}
+
+async function generateTLSCertForInbound(target: 'hy2' | 'trojan' | 'tuic') {
+  try {
+    const res = await api.post('/inbounds/tls-cert')
+    if (target === 'hy2') {
+      hy2Spec.certificate_path = res.data.certificate_path
+      hy2Spec.key_path = res.data.key_path
+    } else if (target === 'trojan') {
+      trojanSpec.certificate_path = res.data.certificate_path
+      trojanSpec.key_path = res.data.key_path
+    } else if (target === 'tuic') {
+      tuicSpec.certificate_path = res.data.certificate_path
+      tuicSpec.key_path = res.data.key_path
+    }
+    toast.success('自签名证书已就绪！')
+  } catch (err: any) {
+    toast.error('生成证书失败: ' + (err.response?.data?.error || err.message))
+  }
+}
+
+function generateRandomSSPassword() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+  let pwd = ''
+  for (let i = 0; i < 24; i++) {
+    pwd += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  ssSpec.password = pwd
+}
+
+function generateRandomPassword(target: 'hy2' | 'trojan' | 'tuic') {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+  let pwd = ''
+  for (let i = 0; i < 18; i++) {
+    pwd += chars.charAt(Math.floor(Math.random() * chars.length))
+  }
+  if (target === 'hy2') hy2Spec.password = pwd
+  else if (target === 'trojan') trojanSpec.password = pwd
+  else if (target === 'tuic') tuicSpec.password = pwd
+}
+
 const shareModal = reactive({
   show: false,
   title: '',
@@ -392,6 +699,30 @@ async function openCreateModal() {
   wsSpec.group_domain = ''
   socksSpec.username = ''
   socksSpec.password = ''
+  mixedSpec.username = ''
+  mixedSpec.password = ''
+  ssSpec.method = '2022-blake3-aes-128-gcm'
+  ssSpec.password = ''
+  trojanSpec.password = ''
+  trojanSpec.server_name = ''
+  trojanSpec.certificate_path = ''
+  trojanSpec.key_path = ''
+  hy2Spec.password = ''
+  hy2Spec.server_name = ''
+  hy2Spec.certificate_path = ''
+  hy2Spec.key_path = ''
+  hy2Spec.up_mbps = 0
+  hy2Spec.down_mbps = 0
+  hy2Spec.obfs_password = ''
+  hy2Spec.ignore_client_bandwidth = false
+  vmessSpec.network = 'ws'
+  vmessSpec.path = '/vmess'
+  vmessSpec.group_domain = ''
+  tuicSpec.password = ''
+  tuicSpec.congestion_control = 'bbr'
+  tuicSpec.server_name = ''
+  tuicSpec.certificate_path = ''
+  tuicSpec.key_path = ''
   await generateRealityKeys()
 }
 
@@ -400,7 +731,7 @@ function openEditModal(ib: any) {
   modal.id = ib.id
   form.tag = ib.tag
   form.protocol = ib.protocol
-  form.listen = ib.listen || (ib.protocol === 'vless-reality' ? '::' : '127.0.0.1')
+  form.listen = ib.listen || (['vless-ws', 'socks', 'mixed', 'http'].includes(ib.protocol) ? '127.0.0.1' : '::')
   form.port = ib.port
   form.enabled = !!ib.enabled
 
@@ -417,9 +748,36 @@ function openEditModal(ib: any) {
   } else if (ib.protocol === 'vless-ws') {
     wsSpec.path = spec.path || '/ws'
     wsSpec.group_domain = spec.group_domain || spec.host || ''
-  } else if (ib.protocol === 'socks') {
+  } else if (ib.protocol === 'socks' || ib.protocol === 'mixed' || ib.protocol === 'http') {
     socksSpec.username = spec.username || ''
     socksSpec.password = spec.password || ''
+  } else if (ib.protocol === 'shadowsocks') {
+    ssSpec.method = spec.method || '2022-blake3-aes-128-gcm'
+    ssSpec.password = spec.password || ''
+  } else if (ib.protocol === 'trojan') {
+    trojanSpec.password = spec.password || ''
+    trojanSpec.server_name = spec.server_name || ''
+    trojanSpec.certificate_path = spec.certificate_path || ''
+    trojanSpec.key_path = spec.key_path || ''
+  } else if (ib.protocol === 'hysteria2') {
+    hy2Spec.password = spec.password || ''
+    hy2Spec.server_name = spec.server_name || ''
+    hy2Spec.certificate_path = spec.certificate_path || ''
+    hy2Spec.key_path = spec.key_path || ''
+    hy2Spec.up_mbps = spec.up_mbps || 0
+    hy2Spec.down_mbps = spec.down_mbps || 0
+    hy2Spec.obfs_password = spec.obfs_password || ''
+    hy2Spec.ignore_client_bandwidth = !!spec.ignore_client_bandwidth
+  } else if (ib.protocol === 'vmess') {
+    vmessSpec.network = spec.network || 'ws'
+    vmessSpec.path = spec.path || '/vmess'
+    vmessSpec.group_domain = spec.group_domain || ''
+  } else if (ib.protocol === 'tuic') {
+    tuicSpec.password = spec.password || ''
+    tuicSpec.congestion_control = spec.congestion_control || 'bbr'
+    tuicSpec.server_name = spec.server_name || ''
+    tuicSpec.certificate_path = spec.certificate_path || ''
+    tuicSpec.key_path = spec.key_path || ''
   }
   modal.show = true
 }
@@ -450,21 +808,39 @@ function onProtocolChange() {
   if (form.protocol === 'vless-reality') {
     form.listen = '::'
     form.port = 443
-    if (!modal.isEdit) {
-      form.tag = 'vless-reality-443'
-    }
+    if (!modal.isEdit) form.tag = 'vless-reality-443'
   } else if (form.protocol === 'vless-ws') {
     form.listen = '127.0.0.1'
     form.port = 10086
-    if (!modal.isEdit) {
-      form.tag = 'vless-ws-10086'
-    }
+    if (!modal.isEdit) form.tag = 'vless-ws-10086'
+  } else if (form.protocol === 'hysteria2') {
+    form.listen = '::'
+    form.port = 8443
+    if (!modal.isEdit) form.tag = 'hy2-8443'
+  } else if (form.protocol === 'trojan') {
+    form.listen = '::'
+    form.port = 443
+    if (!modal.isEdit) form.tag = 'trojan-443'
+  } else if (form.protocol === 'shadowsocks') {
+    form.listen = '::'
+    form.port = 8388
+    if (!modal.isEdit) form.tag = 'ss-8388'
+  } else if (form.protocol === 'vmess') {
+    form.listen = vmessSpec.network === 'ws' ? '127.0.0.1' : '::'
+    form.port = 10087
+    if (!modal.isEdit) form.tag = 'vmess-10087'
+  } else if (form.protocol === 'tuic') {
+    form.listen = '::'
+    form.port = 8444
+    if (!modal.isEdit) form.tag = 'tuic-8444'
   } else if (form.protocol === 'socks') {
     form.listen = '127.0.0.1'
     form.port = 1080
-    if (!modal.isEdit) {
-      form.tag = 'socks-in-1080'
-    }
+    if (!modal.isEdit) form.tag = 'socks-in-1080'
+  } else if (form.protocol === 'mixed') {
+    form.listen = '127.0.0.1'
+    form.port = 2080
+    if (!modal.isEdit) form.tag = 'mixed-in-2080'
   }
 }
 
@@ -484,10 +860,47 @@ async function submitInbound() {
       group_domain: wsSpec.group_domain || '',
       host: wsSpec.group_domain || '',
     }
-  } else if (form.protocol === 'socks') {
+  } else if (form.protocol === 'socks' || form.protocol === 'mixed') {
     specObj = {
       username: socksSpec.username || '',
       password: socksSpec.password || '',
+    }
+  } else if (form.protocol === 'shadowsocks') {
+    specObj = {
+      method: ssSpec.method || '2022-blake3-aes-128-gcm',
+      password: ssSpec.password || '',
+    }
+  } else if (form.protocol === 'trojan') {
+    specObj = {
+      password: trojanSpec.password || '',
+      server_name: trojanSpec.server_name || '',
+      certificate_path: trojanSpec.certificate_path || '',
+      key_path: trojanSpec.key_path || '',
+    }
+  } else if (form.protocol === 'hysteria2') {
+    specObj = {
+      password: hy2Spec.password || '',
+      server_name: hy2Spec.server_name || '',
+      certificate_path: hy2Spec.certificate_path || '',
+      key_path: hy2Spec.key_path || '',
+      up_mbps: hy2Spec.up_mbps || 0,
+      down_mbps: hy2Spec.down_mbps || 0,
+      obfs_password: hy2Spec.obfs_password || '',
+      ignore_client_bandwidth: hy2Spec.ignore_client_bandwidth,
+    }
+  } else if (form.protocol === 'vmess') {
+    specObj = {
+      network: vmessSpec.network || 'ws',
+      path: vmessSpec.path || '/vmess',
+      group_domain: vmessSpec.group_domain || '',
+    }
+  } else if (form.protocol === 'tuic') {
+    specObj = {
+      password: tuicSpec.password || '',
+      congestion_control: tuicSpec.congestion_control || 'bbr',
+      server_name: tuicSpec.server_name || '',
+      certificate_path: tuicSpec.certificate_path || '',
+      key_path: tuicSpec.key_path || '',
     }
   }
 
@@ -495,7 +908,7 @@ async function submitInbound() {
     const payload = {
       tag: form.tag,
       protocol: form.protocol,
-      listen: form.listen || (form.protocol === 'vless-reality' ? '::' : '127.0.0.1'),
+      listen: form.listen || (['vless-ws', 'socks', 'mixed', 'http'].includes(form.protocol) ? '127.0.0.1' : '::'),
       port: form.port,
       spec: specObj,
       enabled: form.enabled,
@@ -537,28 +950,97 @@ async function showShareModal(ib: any) {
   try {
     const sysRes = await api.get('/system/overview')
     const ip = sysRes.data.public_ip || '127.0.0.1'
+    const spec = parseSpec(ib.spec_json)
 
-    if (ib.protocol === 'socks') {
-      const spec = parseSpec(ib.spec_json)
+    if (ib.protocol === 'socks' || ib.protocol === 'mixed' || ib.protocol === 'http') {
       const auth = (spec.username && spec.password)
         ? `${encodeURIComponent(spec.username)}:${encodeURIComponent(spec.password)}@`
         : ''
       const host = (ib.listen === '::' || ib.listen === '0.0.0.0') ? ip : (ib.listen || '127.0.0.1')
-      const uri = `socks5://${auth}${host}:${ib.port}#${encodeURIComponent(ib.tag)}`
-      shareModal.title = `${ib.tag} (SOCKS5)`
+      const scheme = ib.protocol === 'http' ? 'http' : 'socks5'
+      const uri = `${scheme}://${auth}${host}:${ib.port}#${encodeURIComponent(ib.tag)}`
+      shareModal.title = `${ib.tag} (${scheme.toUpperCase()})`
       shareModal.uri = uri
       shareModal.show = true
       return
     }
 
-    const membersRes = await api.get('/members')
-    const members = membersRes.data || []
-    if (members.length === 0) {
-      toast.warning('请先在「成员与订阅」中创建至少一个成员账号！')
+    if (ib.protocol === 'shadowsocks') {
+      const method = spec.method || '2022-blake3-aes-128-gcm'
+      const pwd = spec.password || ''
+      const userPart = btoa(`${method}:${pwd}`)
+      const host = (ib.listen === '::' || ib.listen === '0.0.0.0') ? ip : (ib.listen || '127.0.0.1')
+      const uri = `ss://${userPart}@${host}:${ib.port}#${encodeURIComponent(ib.tag)}`
+      shareModal.title = `${ib.tag} (Shadowsocks)`
+      shareModal.uri = uri
+      shareModal.show = true
       return
     }
-    const m = members[0]
-    const spec = parseSpec(ib.spec_json)
+
+    // 需要成员多租户 UUID 的协议
+    const membersRes = await api.get('/members')
+    const members = membersRes.data || []
+    const m = members.length > 0 ? members[0] : { name: 'default', uuid: 'c3a6027a-7d96-4018-a5d9-34c2e0fbee37' }
+
+    if (ib.protocol === 'hysteria2') {
+      const pwd = spec.password || m.uuid
+      const sni = spec.server_name || ip
+      let obfsPart = ''
+      if (spec.obfs_password) {
+        obfsPart = `&obfs=salamander&obfs-password=${encodeURIComponent(spec.obfs_password)}`
+      }
+      const uri = `hysteria2://${encodeURIComponent(pwd)}@${ip}:${ib.port}?sni=${encodeURIComponent(sni)}&insecure=1${obfsPart}#${encodeURIComponent(ib.tag)}`
+      shareModal.title = `${ib.tag} (Hysteria 2)`
+      shareModal.uri = uri
+      shareModal.show = true
+      return
+    }
+
+    if (ib.protocol === 'trojan') {
+      const pwd = spec.password || m.uuid
+      const sni = spec.server_name || ip
+      const uri = `trojan://${encodeURIComponent(pwd)}@${ip}:${ib.port}?sni=${encodeURIComponent(sni)}&security=tls#${encodeURIComponent(ib.tag)}`
+      shareModal.title = `${ib.tag} (Trojan)`
+      shareModal.uri = uri
+      shareModal.show = true
+      return
+    }
+
+    if (ib.protocol === 'tuic') {
+      const pwd = spec.password || 'tuic-password'
+      const cc = spec.congestion_control || 'bbr'
+      const sni = spec.server_name || ip
+      const uri = `tuic://${m.uuid}:${encodeURIComponent(pwd)}@${ip}:${ib.port}?congestion_control=${cc}&sni=${encodeURIComponent(sni)}&allow_insecure=1#${encodeURIComponent(ib.tag)}`
+      shareModal.title = `${ib.tag} (TUIC v5)`
+      shareModal.uri = uri
+      shareModal.show = true
+      return
+    }
+
+    if (ib.protocol === 'vmess') {
+      const net = spec.network || 'ws'
+      const path = spec.path || '/vmess'
+      const host = spec.group_domain || ''
+      const vmessObj = {
+        v: '2',
+        ps: ib.tag,
+        add: ip,
+        port: ib.port,
+        id: m.uuid,
+        aid: 0,
+        scy: 'auto',
+        net: net,
+        type: 'none',
+        host: host,
+        path: net === 'ws' ? path : '',
+        tls: '',
+      }
+      const uri = 'vmess://' + btoa(JSON.stringify(vmessObj))
+      shareModal.title = `${ib.tag} (VMess)`
+      shareModal.uri = uri
+      shareModal.show = true
+      return
+    }
 
     if (ib.protocol === 'vless-ws') {
       const host = spec.group_domain || spec.host || ip

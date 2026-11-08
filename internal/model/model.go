@@ -26,7 +26,7 @@ type Member struct {
 type Inbound struct {
 	ID        int64     `json:"id"`
 	Tag       string    `json:"tag"`
-	Protocol  string    `json:"protocol"` // "vless-reality" | "vless-ws" | "socks"
+	Protocol  string    `json:"protocol"` // "vless-reality" | "vless-ws" | "hysteria2" | "trojan" | "shadowsocks" | "vmess" | "tuic" | "socks" | "mixed"
 	Listen    string    `json:"listen"`   // "::" 或 "127.0.0.1"
 	Port      int       `json:"port"`     // 端口
 	SpecJSON  string    `json:"spec_json"` // JSON 字符串
@@ -39,7 +39,7 @@ type Inbound struct {
 type Outbound struct {
 	ID         int64     `json:"id"`
 	Tag        string    `json:"tag"`
-	Type       string    `json:"type"`       // "direct" | "block" | "socks" | "http" | "shadowsocks" | "vless" | "custom"
+	Type       string    `json:"type"`       // "direct" | "block" | "socks" | "http" | "shadowsocks" | "vless" | "trojan" | "hysteria2" | "wireguard" | "custom"
 	Server     string    `json:"server"`     // 上游目标服务器/IP
 	ServerPort int       `json:"server_port"`
 	SpecJSON   string    `json:"spec_json"`  // 详细参数 JSON
@@ -74,6 +74,54 @@ type VLESSWSSpec struct {
 type SocksSpec struct {
 	Username string `json:"username,omitempty"`
 	Password string `json:"password,omitempty"`
+}
+
+// MixedSpec 是 Mixed (HTTP & SOCKS5) 入站协议参数
+type MixedSpec struct {
+	Username string `json:"username,omitempty"`
+	Password string `json:"password,omitempty"`
+}
+
+// ShadowsocksInboundSpec 是 Shadowsocks 入站参数
+type ShadowsocksInboundSpec struct {
+	Method   string `json:"method"`
+	Password string `json:"password"`
+}
+
+// TrojanInboundSpec 是 Trojan 入站参数
+type TrojanInboundSpec struct {
+	Password        string `json:"password,omitempty"`
+	ServerName      string `json:"server_name,omitempty"`
+	CertificatePath string `json:"certificate_path,omitempty"`
+	KeyPath         string `json:"key_path,omitempty"`
+}
+
+// Hysteria2InboundSpec 是 Hysteria 2 入站参数
+type Hysteria2InboundSpec struct {
+	Password              string `json:"password,omitempty"`
+	ServerName            string `json:"server_name,omitempty"`
+	CertificatePath       string `json:"certificate_path,omitempty"`
+	KeyPath               string `json:"key_path,omitempty"`
+	UpMbps                int    `json:"up_mbps,omitempty"`
+	DownMbps              int    `json:"down_mbps,omitempty"`
+	ObfsPassword          string `json:"obfs_password,omitempty"`
+	IgnoreClientBandwidth bool   `json:"ignore_client_bandwidth,omitempty"`
+}
+
+// VMessInboundSpec 是 VMess 入站参数
+type VMessInboundSpec struct {
+	Network     string `json:"network"` // "tcp" | "ws"
+	Path        string `json:"path,omitempty"`
+	GroupDomain string `json:"group_domain,omitempty"`
+}
+
+// TUICInboundSpec 是 TUIC v5 入站参数
+type TUICInboundSpec struct {
+	Password          string `json:"password,omitempty"`
+	CongestionControl string `json:"congestion_control,omitempty"` // "bbr" | "cubic"
+	ServerName        string `json:"server_name,omitempty"`
+	CertificatePath   string `json:"certificate_path,omitempty"`
+	KeyPath           string `json:"key_path,omitempty"`
 }
 
 // Tunnel Cloudflared 隧道

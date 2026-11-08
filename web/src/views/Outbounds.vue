@@ -157,6 +157,8 @@
                 <option value="http">HTTP Proxy (上游 HTTP 代理)</option>
                 <option value="shadowsocks">Shadowsocks (节点转发)</option>
                 <option value="vless">VLESS (上游中继节点)</option>
+                <option value="trojan">Trojan (上游 TLS 代理)</option>
+                <option value="hysteria2">Hysteria 2 (上游 UDP 极速节点)</option>
                 <option value="custom">Custom (高级自定义 JSON 片段)</option>
               </select>
             </div>
@@ -264,6 +266,34 @@
             </div>
           </div>
 
+          <!-- Trojan / Hysteria 2 出站参数 -->
+          <div
+            v-else-if="form.type === 'trojan' || form.type === 'hysteria2'"
+            style="background-color: #0f172a; padding: 1rem; border-radius: 0.5rem; display: flex; flex-direction: column; gap: 0.75rem;"
+          >
+            <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 0.75rem;">
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">上游服务器地址</label>
+                <input v-model="form.server" class="input" placeholder="domain.com 或 IP" required />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">端口</label>
+                <input v-model.number="form.server_port" type="number" class="input" placeholder="443" required />
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">密码 (Password)</label>
+                <input v-model="extraSpec.password" class="input" required placeholder="节点认证密码" />
+              </div>
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">TLS SNI 域名 (可选)</label>
+                <input v-model="extraSpec.server_name" class="input" placeholder="留空默认使用服务器地址" />
+              </div>
+            </div>
+          </div>
+
           <!-- Custom 自定义 JSON 参数 -->
           <div
             v-else-if="form.type === 'custom'"
@@ -351,6 +381,11 @@ const vlessSpec = reactive({
   uuid: '',
 })
 
+const extraSpec = reactive({
+  password: '',
+  server_name: '',
+})
+
 const customSpecJSON = ref('')
 
 async function loadOutbounds() {
@@ -379,6 +414,8 @@ function getTypeBadge(type: string) {
     case 'http': return 'badge-warning'
     case 'shadowsocks':
     case 'vless':
+    case 'trojan':
+    case 'hysteria2':
     case 'wireguard': return 'badge-primary'
     default: return 'badge-secondary'
   }
@@ -409,6 +446,8 @@ function openCreateModal() {
   ssSpec.method = '2022-blake3-aes-128-gcm'
   ssSpec.password = ''
   vlessSpec.uuid = ''
+  extraSpec.password = ''
+  extraSpec.server_name = ''
   customSpecJSON.value = ''
 }
 
@@ -430,6 +469,8 @@ function openEditModal(ob: OutboundItem) {
   ssSpec.method = '2022-blake3-aes-128-gcm'
   ssSpec.password = ''
   vlessSpec.uuid = ''
+  extraSpec.password = ''
+  extraSpec.server_name = ''
   customSpecJSON.value = ''
 
   try {
@@ -442,6 +483,9 @@ function openEditModal(ob: OutboundItem) {
       ssSpec.password = spec.password || ''
     } else if (ob.type === 'vless') {
       vlessSpec.uuid = spec.uuid || ''
+    } else if (ob.type === 'trojan' || ob.type === 'hysteria2') {
+      extraSpec.password = spec.password || ''
+      extraSpec.server_name = spec.server_name || (spec.tls?.server_name) || ''
     } else if (ob.type === 'custom') {
       customSpecJSON.value = JSON.stringify(spec, null, 2)
     }
@@ -460,6 +504,15 @@ async function submitOutbound() {
     specObj.password = ssSpec.password
   } else if (form.type === 'vless') {
     specObj.uuid = vlessSpec.uuid
+  } else if (form.type === 'trojan' || form.type === 'hysteria2') {
+    specObj.password = extraSpec.password
+    if (extraSpec.server_name) {
+      specObj.tls = {
+        enabled: true,
+        server_name: extraSpec.server_name,
+        insecure: true,
+      }
+    }
   } else if (form.type === 'custom') {
     try {
       specObj = JSON.parse(customSpecJSON.value || '{}')

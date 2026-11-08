@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -297,16 +298,151 @@ func buildInventoryItem(ib model.Inbound, nodeName, serverHost string, member *m
 
 	case "hysteria2":
 		item.ProtocolLabel = "Hysteria 2"
-		item.Link = fmt.Sprintf("hysteria2://%s@%s:%d?sni=%s&insecure=0#%s", uuid, serverHost, ib.Port, serverHost, url.QueryEscape(displayName))
+		var spec model.Hysteria2InboundSpec
+		_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+		pwd := spec.Password
+		if pwd == "" {
+			pwd = uuid
+		}
+		sni := spec.ServerName
+		if sni == "" {
+			sni = serverHost
+		}
+		item.ServerName = sni
+		obfsPart := ""
+		if spec.ObfsPassword != "" {
+			obfsPart = fmt.Sprintf("&obfs=salamander&obfs-password=%s", url.QueryEscape(spec.ObfsPassword))
+		}
+		item.Link = fmt.Sprintf("hysteria2://%s@%s:%d?sni=%s&insecure=1%s#%s", url.QueryEscape(pwd), serverHost, ib.Port, url.QueryEscape(sni), obfsPart, url.QueryEscape(displayName))
 		item.ClashSnippet = fmt.Sprintf(`- name: "%s"
   type: hysteria2
   server: "%s"
   port: %d
   password: "%s"
-  sni: "%s"`, displayName, serverHost, ib.Port, uuid, serverHost)
+  sni: "%s"
+  skip-cert-verify: true`, displayName, serverHost, ib.Port, pwd, sni)
 
-	case "socks":
-		item.ProtocolLabel = "SOCKS5"
+	case "shadowsocks":
+		item.ProtocolLabel = "Shadowsocks"
+		var spec model.ShadowsocksInboundSpec
+		_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+		method := spec.Method
+		if method == "" {
+			method = "2022-blake3-aes-128-gcm"
+		}
+		userInfo := base64.URLEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", method, spec.Password)))
+		item.Link = fmt.Sprintf("ss://%s@%s:%d#%s", userInfo, serverHost, ib.Port, url.QueryEscape(displayName))
+		item.ClashSnippet = fmt.Sprintf(`- name: "%s"
+  type: ss
+  server: "%s"
+  port: %d
+  cipher: %s
+  password: "%s"`, displayName, serverHost, ib.Port, method, spec.Password)
+
+	case "trojan":
+		item.ProtocolLabel = "Trojan"
+		var spec model.TrojanInboundSpec
+		_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+		pwd := spec.Password
+		if pwd == "" {
+			pwd = uuid
+		}
+		sni := spec.ServerName
+		if sni == "" {
+			sni = serverHost
+		}
+		item.ServerName = sni
+		item.Link = fmt.Sprintf("trojan://%s@%s:%d?sni=%s&security=tls#%s", url.QueryEscape(pwd), serverHost, ib.Port, url.QueryEscape(sni), url.QueryEscape(displayName))
+		item.ClashSnippet = fmt.Sprintf(`- name: "%s"
+  type: trojan
+  server: "%s"
+  port: %d
+  password: "%s"
+  sni: "%s"
+  skip-cert-verify: true`, displayName, serverHost, ib.Port, pwd, sni)
+
+	case "vmess":
+		item.ProtocolLabel = "VMess"
+		var spec model.VMessInboundSpec
+		_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+		net := "tcp"
+		path := ""
+		host := ""
+		if spec.Network == "ws" {
+			net = "ws"
+			path = spec.Path
+			if path == "" {
+				path = "/vmess"
+			}
+			host = spec.GroupDomain
+		}
+		vmessObj := map[string]interface{}{
+			"v":    "2",
+			"ps":   displayName,
+			"add":  serverHost,
+			"port": ib.Port,
+			"id":   uuid,
+			"aid":  0,
+			"scy":  "auto",
+			"net":  net,
+			"type": "none",
+			"host": host,
+			"path": path,
+			"tls":  "",
+		}
+		vmessBytes, _ := json.Marshal(vmessObj)
+		item.Link = "vmess://" + base64.StdEncoding.EncodeToString(vmessBytes)
+		if net == "ws" {
+			item.ClashSnippet = fmt.Sprintf(`- name: "%s"
+  type: vmess
+  server: "%s"
+  port: %d
+  uuid: "%s"
+  alterId: 0
+  cipher: auto
+  network: ws
+  ws-opts:
+    path: "%s"`, displayName, serverHost, ib.Port, uuid, path)
+		} else {
+			item.ClashSnippet = fmt.Sprintf(`- name: "%s"
+  type: vmess
+  server: "%s"
+  port: %d
+  uuid: "%s"
+  alterId: 0
+  cipher: auto`, displayName, serverHost, ib.Port, uuid)
+		}
+
+	case "tuic":
+		item.ProtocolLabel = "TUIC v5"
+		var spec model.TUICInboundSpec
+		_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+		pwd := spec.Password
+		if pwd == "" {
+			pwd = "tuic-password"
+		}
+		cc := spec.CongestionControl
+		if cc == "" {
+			cc = "bbr"
+		}
+		sni := spec.ServerName
+		if sni == "" {
+			sni = serverHost
+		}
+		item.ServerName = sni
+		item.Link = fmt.Sprintf("tuic://%s:%s@%s:%d?congestion_control=%s&sni=%s&allow_insecure=1#%s", uuid, url.QueryEscape(pwd), serverHost, ib.Port, cc, url.QueryEscape(sni), url.QueryEscape(displayName))
+		item.ClashSnippet = fmt.Sprintf(`- name: "%s"
+  type: tuic
+  server: "%s"
+  port: %d
+  uuid: "%s"
+  password: "%s"
+  congestion-controller: %s
+  sni: "%s"
+  skip-cert-verify: true`, displayName, serverHost, ib.Port, uuid, pwd, cc, sni)
+
+	case "socks", "mixed", "http":
+		item.ProtocolLabel = strings.ToUpper(ib.Protocol)
 		var spec model.SocksSpec
 		_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
 		if spec.Username != "" && spec.Password != "" {

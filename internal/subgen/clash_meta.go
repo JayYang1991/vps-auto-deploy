@@ -146,7 +146,7 @@ func GenerateClashMetaConfig(member *model.Member) (string, error) {
 				proxyNames = append(proxyNames, name)
 			}
 
-		case "socks":
+		case "socks", "mixed", "http":
 			var spec model.SocksSpec
 			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
 			name := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
@@ -159,6 +159,134 @@ func GenerateClashMetaConfig(member *model.Member) (string, error) {
 			if spec.Username != "" && spec.Password != "" {
 				proxy["username"] = spec.Username
 				proxy["password"] = spec.Password
+			}
+			proxies = append(proxies, proxy)
+			proxyNames = append(proxyNames, name)
+
+		case "shadowsocks":
+			var spec model.ShadowsocksInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			method := spec.Method
+			if method == "" {
+				method = "2022-blake3-aes-128-gcm"
+			}
+			name := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			proxy := map[string]interface{}{
+				"name":     name,
+				"type":     "ss",
+				"server":   serverHost,
+				"port":     ib.Port,
+				"cipher":   method,
+				"password": spec.Password,
+			}
+			proxies = append(proxies, proxy)
+			proxyNames = append(proxyNames, name)
+
+		case "trojan":
+			var spec model.TrojanInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			pwd := spec.Password
+			if pwd == "" {
+				pwd = member.UUID
+			}
+			sni := spec.ServerName
+			if sni == "" {
+				sni = serverHost
+			}
+			name := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			proxy := map[string]interface{}{
+				"name":             name,
+				"type":             "trojan",
+				"server":           serverHost,
+				"port":             ib.Port,
+				"password":         pwd,
+				"sni":              sni,
+				"skip-cert-verify": true,
+			}
+			proxies = append(proxies, proxy)
+			proxyNames = append(proxyNames, name)
+
+		case "hysteria2":
+			var spec model.Hysteria2InboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			pwd := spec.Password
+			if pwd == "" {
+				pwd = member.UUID
+			}
+			sni := spec.ServerName
+			if sni == "" {
+				sni = serverHost
+			}
+			name := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			proxy := map[string]interface{}{
+				"name":             name,
+				"type":             "hysteria2",
+				"server":           serverHost,
+				"port":             ib.Port,
+				"password":         pwd,
+				"sni":              sni,
+				"skip-cert-verify": true,
+			}
+			if spec.ObfsPassword != "" {
+				proxy["obfs"] = "salamander"
+				proxy["obfs-password"] = spec.ObfsPassword
+			}
+			proxies = append(proxies, proxy)
+			proxyNames = append(proxyNames, name)
+
+		case "vmess":
+			var spec model.VMessInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			name := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			proxy := map[string]interface{}{
+				"name":     name,
+				"type":     "vmess",
+				"server":   serverHost,
+				"port":     ib.Port,
+				"uuid":     member.UUID,
+				"alterId":  0,
+				"cipher":   "auto",
+				"network":  "tcp",
+			}
+			if spec.Network == "ws" {
+				path := spec.Path
+				if path == "" {
+					path = "/vmess"
+				}
+				proxy["network"] = "ws"
+				proxy["ws-opts"] = map[string]interface{}{
+					"path": path,
+				}
+			}
+			proxies = append(proxies, proxy)
+			proxyNames = append(proxyNames, name)
+
+		case "tuic":
+			var spec model.TUICInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			pwd := spec.Password
+			if pwd == "" {
+				pwd = "tuic-password"
+			}
+			cc := spec.CongestionControl
+			if cc == "" {
+				cc = "bbr"
+			}
+			sni := spec.ServerName
+			if sni == "" {
+				sni = serverHost
+			}
+			name := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			proxy := map[string]interface{}{
+				"name":                  name,
+				"type":                  "tuic",
+				"server":                serverHost,
+				"port":                  ib.Port,
+				"uuid":                  member.UUID,
+				"password":              pwd,
+				"congestion-controller": cc,
+				"sni":                   sni,
+				"skip-cert-verify":      true,
 			}
 			proxies = append(proxies, proxy)
 			proxyNames = append(proxyNames, name)

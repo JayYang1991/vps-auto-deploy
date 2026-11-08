@@ -140,7 +140,7 @@ func GenerateSingboxClientConfig(member *model.Member) (string, error) {
 				outboundTags = append(outboundTags, tag)
 			}
 
-		case "socks":
+		case "socks", "mixed", "http":
 			var spec model.SocksSpec
 			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
 			tag := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
@@ -153,6 +153,143 @@ func GenerateSingboxClientConfig(member *model.Member) (string, error) {
 			if spec.Username != "" && spec.Password != "" {
 				outbound["username"] = spec.Username
 				outbound["password"] = spec.Password
+			}
+			outbounds = append(outbounds, outbound)
+			outboundTags = append(outboundTags, tag)
+
+		case "shadowsocks":
+			var spec model.ShadowsocksInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			method := spec.Method
+			if method == "" {
+				method = "2022-blake3-aes-128-gcm"
+			}
+			tag := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			outbound := map[string]interface{}{
+				"type":        "shadowsocks",
+				"tag":         tag,
+				"server":      serverHost,
+				"server_port": ib.Port,
+				"method":      method,
+				"password":    spec.Password,
+			}
+			outbounds = append(outbounds, outbound)
+			outboundTags = append(outboundTags, tag)
+
+		case "trojan":
+			var spec model.TrojanInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			pwd := spec.Password
+			if pwd == "" {
+				pwd = member.UUID
+			}
+			sni := spec.ServerName
+			if sni == "" {
+				sni = serverHost
+			}
+			tag := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			outbound := map[string]interface{}{
+				"type":        "trojan",
+				"tag":         tag,
+				"server":      serverHost,
+				"server_port": ib.Port,
+				"password":    pwd,
+				"tls": map[string]interface{}{
+					"enabled":     true,
+					"server_name": sni,
+					"insecure":    true,
+				},
+			}
+			outbounds = append(outbounds, outbound)
+			outboundTags = append(outboundTags, tag)
+
+		case "hysteria2":
+			var spec model.Hysteria2InboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			pwd := spec.Password
+			if pwd == "" {
+				pwd = member.UUID
+			}
+			sni := spec.ServerName
+			if sni == "" {
+				sni = serverHost
+			}
+			tag := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			outbound := map[string]interface{}{
+				"type":        "hysteria2",
+				"tag":         tag,
+				"server":      serverHost,
+				"server_port": ib.Port,
+				"password":    pwd,
+				"tls": map[string]interface{}{
+					"enabled":     true,
+					"server_name": sni,
+					"insecure":    true,
+				},
+			}
+			if spec.ObfsPassword != "" {
+				outbound["obfs"] = map[string]interface{}{
+					"type":     "salamander",
+					"password": spec.ObfsPassword,
+				}
+			}
+			outbounds = append(outbounds, outbound)
+			outboundTags = append(outboundTags, tag)
+
+		case "vmess":
+			var spec model.VMessInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			tag := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			outbound := map[string]interface{}{
+				"type":        "vmess",
+				"tag":         tag,
+				"server":      serverHost,
+				"server_port": ib.Port,
+				"uuid":        member.UUID,
+				"security":    "auto",
+			}
+			if spec.Network == "ws" {
+				path := spec.Path
+				if path == "" {
+					path = "/vmess"
+				}
+				outbound["transport"] = map[string]interface{}{
+					"type": "ws",
+					"path": path,
+				}
+			}
+			outbounds = append(outbounds, outbound)
+			outboundTags = append(outboundTags, tag)
+
+		case "tuic":
+			var spec model.TUICInboundSpec
+			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
+			pwd := spec.Password
+			if pwd == "" {
+				pwd = "tuic-password"
+			}
+			cc := spec.CongestionControl
+			if cc == "" {
+				cc = "bbr"
+			}
+			sni := spec.ServerName
+			if sni == "" {
+				sni = serverHost
+			}
+			tag := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+			outbound := map[string]interface{}{
+				"type":               "tuic",
+				"tag":                tag,
+				"server":             serverHost,
+				"server_port":        ib.Port,
+				"uuid":               member.UUID,
+				"password":           pwd,
+				"congestion_control": cc,
+				"tls": map[string]interface{}{
+					"enabled":     true,
+					"server_name": sni,
+					"insecure":    true,
+				},
 			}
 			outbounds = append(outbounds, outbound)
 			outboundTags = append(outboundTags, tag)

@@ -126,4 +126,53 @@ func TestClusterPrefixSubgen(t *testing.T) {
 	if !strings.Contains(socksSingbox, `"type": "socks"`) || !strings.Contains(socksSingbox, `"username": "myuser"`) {
 		t.Fatalf("expected socks in Singbox client config: %s", socksSingbox)
 	}
+
+	// 5. Test Extended Protocols (Shadowsocks, Trojan, Hysteria2, VMess, TUIC)
+	_, _ = model.DB.Exec("INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"ss-node", "shadowsocks", "::", 8388, `{"method":"aes-256-gcm","password":"secretpassword"}`)
+	_, _ = model.DB.Exec("INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"trojan-node", "trojan", "::", 4433, `{"password":"trojanpass","server_name":"example.com"}`)
+	_, _ = model.DB.Exec("INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"hy2-node", "hysteria2", "::", 8443, `{"password":"hy2pass","server_name":"example.com"}`)
+	_, _ = model.DB.Exec("INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"vmess-node", "vmess", "::", 10087, `{"network":"ws","path":"/vmess"}`)
+	_, _ = model.DB.Exec("INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"tuic-node", "tuic", "::", 8444, `{"password":"tuicpass","congestion_control":"bbr","server_name":"example.com"}`)
+
+	extURIs, err := GenerateURIs(member)
+	if err != nil {
+		t.Fatalf("GenerateURIs with extended protocols failed: %v", err)
+	}
+
+	uriMap := make(map[string]bool)
+	for _, u := range extURIs {
+		scheme := strings.Split(u, "://")[0]
+		uriMap[scheme] = true
+	}
+
+	for _, s := range []string{"vless", "socks5", "ss", "trojan", "hysteria2", "vmess", "tuic"} {
+		if !uriMap[s] {
+			t.Errorf("expected URI scheme %s not found in generated URIs: %v", s, extURIs)
+		}
+	}
+
+	extClash, err := GenerateClashMetaConfig(member)
+	if err != nil {
+		t.Fatalf("GenerateClashMetaConfig failed: %v", err)
+	}
+	for _, typeStr := range []string{"type: ss", "type: trojan", "type: hysteria2", "type: vmess", "type: tuic"} {
+		if !strings.Contains(extClash, typeStr) {
+			t.Errorf("expected %s in Clash config: %s", typeStr, extClash)
+		}
+	}
+
+	extSingbox, err := GenerateSingboxClientConfig(member)
+	if err != nil {
+		t.Fatalf("GenerateSingboxClientConfig failed: %v", err)
+	}
+	for _, typeStr := range []string{`"type": "shadowsocks"`, `"type": "trojan"`, `"type": "hysteria2"`, `"type": "vmess"`, `"type": "tuic"`} {
+		if !strings.Contains(extSingbox, typeStr) {
+			t.Errorf("expected %s in Singbox config: %s", typeStr, extSingbox)
+		}
+	}
 }
