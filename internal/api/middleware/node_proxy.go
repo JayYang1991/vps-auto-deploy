@@ -33,13 +33,14 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// 集群管理自身接口与主控系统设置必须在主控节点执行，不予代理
+		// 集群管理自身接口、主控系统设置与统一凭据管理必须在主控节点执行，不予代理
 		reqPath := c.Request.URL.Path
 		secret := c.Param("secret")
 		basePrefix := "/" + secret + "/api"
 		if strings.HasPrefix(reqPath, basePrefix+"/nodes") ||
 			strings.HasPrefix(reqPath, basePrefix+"/settings") ||
-			strings.HasPrefix(reqPath, basePrefix+"/auth/password") {
+			strings.HasPrefix(reqPath, basePrefix+"/auth/password") ||
+			strings.HasPrefix(reqPath, basePrefix+"/members") {
 			c.Next()
 			return
 		}

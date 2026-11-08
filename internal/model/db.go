@@ -394,3 +394,56 @@ func SetSetting(key, val string) error {
 	return err
 }
 
+// ListMembers 列出数据库中所有成员
+func ListMembers() ([]Member, error) {
+	rows, err := DB.Query("SELECT id, name, uuid, sub_token, enabled, created_at, updated_at FROM members ORDER BY id ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []Member
+	for rows.Next() {
+		var m Member
+		var enabledInt int
+		if err := rows.Scan(&m.ID, &m.Name, &m.UUID, &m.SubToken, &enabledInt, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			return nil, err
+		}
+		m.Enabled = enabledInt == 1
+		list = append(list, m)
+	}
+	return list, nil
+}
+
+// ReplaceMembers 全量原子替换本地成员数据（用于跨节点从主控同步）
+func ReplaceMembers(members []Member) error {
+	tx, err := DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec("DELETE FROM members"); err != nil {
+		return err
+	}
+
+	stmt, err := tx.Prepare("INSERT INTO members (id, name, uuid, sub_token, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, m := range members {
+		enabledInt := 0
+		if m.Enabled {
+			enabledInt = 1
+		}
+		if _, err := stmt.Exec(m.ID, m.Name, m.UUID, m.SubToken, enabledInt, m.CreatedAt, m.UpdatedAt); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+

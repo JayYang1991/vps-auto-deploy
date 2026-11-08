@@ -549,7 +549,17 @@ WantedBy=multi-user.target
 		return
 	}
 
+	newNode.ID = nodeID
 	task.NodeID = nodeID
+
+	// 10. 自动将主控端所有成员身份与凭据同步至新纳管节点
+	task.AddLog("正在同步全集群用户凭据至新节点...")
+	if syncErr := SyncMembersToNode(newNode, nil); syncErr != nil {
+		task.AddLog(fmt.Sprintf("[WARN] 初始用户凭据同步提示: %v", syncErr))
+	} else {
+		task.AddLog("已自动将主控端所有用户凭据同步至新节点！")
+	}
+
 	task.Status = "success"
 	task.AddLog(fmt.Sprintf("[SUCCESS] 节点 %s (ID: %d) 成功加入集群并完成 TLS 指纹绑定！", req.Name, nodeID))
 }

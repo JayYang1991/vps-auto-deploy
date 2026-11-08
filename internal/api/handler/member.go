@@ -3,6 +3,7 @@ package handler
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/configgen"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/node"
 )
 
 type MemberCreateRequest struct {
@@ -77,6 +79,9 @@ func CreateMember(c *gin.Context) {
 		return
 	}
 
+	// 异步全网广播同步至各受管节点
+	go node.BroadcastMembersSync()
+
 	c.JSON(http.StatusOK, gin.H{
 		"id":        id,
 		"uuid":      newUUID,
@@ -98,6 +103,8 @@ func ResetMemberToken(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	go node.BroadcastMembersSync()
 
 	c.JSON(http.StatusOK, gin.H{
 		"sub_token": newToken,
@@ -167,6 +174,8 @@ func UpdateMember(c *gin.Context) {
 		return
 	}
 
+	go node.BroadcastMembersSync()
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "member updated successfully",
 		"id":      id,
@@ -208,6 +217,55 @@ func DeleteMember(c *gin.Context) {
 		return
 	}
 
+	go node.BroadcastMembersSync()
+
 	c.JSON(http.StatusOK, gin.H{"message": "member deleted"})
 }
+
+// SyncMembers 被纳管节点接收来自主控端的成员身份全量同步
+func SyncMembers(c *gin.Context) {
+	var members []model.Member
+	if err := c.ShouldBindJSON(&members); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的成员数据: " + err.Error()})
+		return
+	}
+
+	if err := model.ReplaceMembers(members); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "写入本地成员数据失败: " + err.Error()})
+		return
+	}
+
+	// 重新生成本地 sing-box 服务端配置并热重载
+	if err := configgen.ApplyAndReload(singbox.GetConfigPath()); err != nil {
+		log.Printf("[SyncMembers] 成员同步成功，但 sing-box 配置应用告警: %v", err)
+		c.JSON(http.StatusOK, gin.H{
+			"message": "成员已存入数据库，但 sing-box 配置重载提示: " + err.Error(),
+			"count":   len(members),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "members synchronized successfully",
+		"count":   len(members),
+	})
+}
+
+// BroadcastSyncMembers 主控端主动触发全集群成员凭据广播同步
+func BroadcastSyncMembers(c *gin.Context) {
+	total, success, failed, errs := node.BroadcastMembersSync()
+	var errMsgs []string
+	for _, e := range errs {
+		errMsgs = append(errMsgs, e.Error())
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "全网凭据广播同步完成",
+		"total":   total,
+		"success": success,
+		"failed":  failed,
+		"errors":  errMsgs,
+	})
+}
+
 

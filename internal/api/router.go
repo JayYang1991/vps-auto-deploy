@@ -109,6 +109,8 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.PUT("/members/:id", handler.UpdateMember)
 			api.POST("/members/:id/reset-token", handler.ResetMemberToken)
 			api.DELETE("/members/:id", handler.DeleteMember)
+			api.POST("/members/sync", handler.SyncMembers)
+			api.POST("/members/broadcast-sync", handler.BroadcastSyncMembers)
 
 			// Subconverter 订阅转换引擎与规则模板
 			api.GET("/subconverter/status", handler.GetSubconverterStatus)

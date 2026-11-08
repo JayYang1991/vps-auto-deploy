@@ -106,8 +106,23 @@
         </router-link>
       </div>
 
-      <div style="display: flex; justify-content: flex-end; margin-bottom: 1rem;">
-        <button @click="openCreateMemberModal" class="btn btn-primary">+ 添加成员</button>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div style="font-size: 0.85rem; color: #94a3b8; display: flex; align-items: center; gap: 0.5rem;">
+          <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #10b981;"></span>
+          <span>主控统一凭据源 (SSOT) · 自动同步至全集群纳管节点</span>
+        </div>
+        <div style="display: flex; gap: 0.5rem;">
+          <button 
+            @click="broadcastSyncMembers" 
+            :disabled="syncingMembers" 
+            class="btn btn-secondary"
+            style="font-size: 0.825rem; display: flex; align-items: center; gap: 0.35rem;"
+            title="将当前成员 UUID 与凭据推送到所有被纳管 VPS 节点并热重载底层 sing-box"
+          >
+            {{ syncingMembers ? '⏳ 正在全网广播...' : '⚡ 同步全网凭据' }}
+          </button>
+          <button @click="openCreateMemberModal" class="btn btn-primary">+ 添加成员</button>
+        </div>
       </div>
 
       <!-- 加载中指示器 -->
@@ -1559,6 +1574,29 @@ function openSubQR(memberName: string, subToken: string, target: string) {
   qrModal.show = true
 }
 
+const syncingMembers = ref(false)
+
+async function broadcastSyncMembers() {
+  if (syncingMembers.value) return
+  syncingMembers.value = true
+  try {
+    const res = await api.post('/members/broadcast-sync')
+    const { total, success, failed, errors } = res.data
+    if (total === 0) {
+      toast.success('当前仅有主控单机，无需额外同步')
+    } else if (failed === 0) {
+      toast.success(`全网同步完成！已将凭据推送到全部 ${success} 个受管节点并触发热重载`)
+    } else {
+      const detail = errors && errors.length ? `(${errors.join('; ')})` : ''
+      toast.warning(`同步完成：成功 ${success} 个节点，失败 ${failed} 个节点 ${detail}`)
+    }
+  } catch (err: any) {
+    toast.error('广播同步失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    syncingMembers.value = false
+  }
+}
+
 async function saveMember() {
   try {
     if (modal.isEdit) {
@@ -1567,13 +1605,13 @@ async function saveMember() {
         uuid: form.uuid,
         enabled: form.enabled,
       })
-      toast.success(`成员 ${form.name} 更新成功，底层节点 users 配置已同步热重载`)
+      toast.success(`成员 ${form.name} 更新成功，全网受管节点已广播同步`)
     } else {
       await api.post('/members', {
         name: form.name,
         enabled: true,
       })
-      toast.success(`成员 ${form.name} 创建成功！`)
+      toast.success(`成员 ${form.name} 创建成功，全网受管节点已广播同步`)
     }
     modal.show = false
     await loadMembers()
