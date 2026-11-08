@@ -52,6 +52,14 @@
             <span>📤</span>
             <span>出站规则 (Outbounds)</span>
           </button>
+          <button
+            @click="selectSingboxSubTab('routes')"
+            :class="['sub-tab-btn', singboxSubTab === 'routes' ? 'sub-tab-active' : '']"
+            type="button"
+          >
+            <span>🔀</span>
+            <span>路由分流 (Routes)</span>
+          </button>
         </div>
 
         <!-- Sing-box 专属操作：配置透视与热重载 -->
@@ -72,6 +80,7 @@
         <keep-alive>
           <Inbounds v-if="singboxSubTab === 'inbounds'" />
           <Outbounds v-else-if="singboxSubTab === 'outbounds'" />
+          <Routes v-else-if="singboxSubTab === 'routes'" />
         </keep-alive>
       </div>
     </div>
@@ -168,6 +177,7 @@ import { ref, reactive, watch, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Inbounds from './Inbounds.vue'
 import Outbounds from './Outbounds.vue'
+import Routes from './Routes.vue'
 import Tunnels from './Tunnels.vue'
 import Subscriptions from './Subscriptions.vue'
 import api from '../api'
@@ -199,7 +209,7 @@ const componentTabs = [
 ]
 
 const activeComponent = ref('singbox')
-const singboxSubTab = ref<'inbounds' | 'outbounds'>('inbounds')
+const singboxSubTab = ref<'inbounds' | 'outbounds' | 'routes'>('inbounds')
 const reloading = ref(false)
 
 const configViewer = reactive({
@@ -218,7 +228,7 @@ function selectComponent(key: string) {
   syncRoute()
 }
 
-function selectSingboxSubTab(sub: 'inbounds' | 'outbounds') {
+function selectSingboxSubTab(sub: 'inbounds' | 'outbounds' | 'routes') {
   singboxSubTab.value = sub
   syncRoute()
 }
@@ -273,7 +283,7 @@ function parseRouteParams() {
   const tab = (route.query.tab as string) || ''
   const sub = (route.query.sub as string) || ''
 
-  // 兼容历史快捷跳转：/services?tab=inbounds, /services?tab=outbounds, /services?tab=tunnels
+  // 兼容历史快捷跳转：/services?tab=inbounds, /services?tab=outbounds, /services?tab=routes, /services?tab=tunnels
   if (tab === 'inbounds') {
     activeComponent.value = 'singbox'
     singboxSubTab.value = 'inbounds'
@@ -282,6 +292,11 @@ function parseRouteParams() {
   if (tab === 'outbounds') {
     activeComponent.value = 'singbox'
     singboxSubTab.value = 'outbounds'
+    return
+  }
+  if (tab === 'routes') {
+    activeComponent.value = 'singbox'
+    singboxSubTab.value = 'routes'
     return
   }
   if (tab === 'tunnels') {
@@ -299,7 +314,7 @@ function parseRouteParams() {
     activeComponent.value = 'singbox'
   }
 
-  if (sub === 'outbounds' || sub === 'inbounds') {
+  if (sub === 'outbounds' || sub === 'inbounds' || sub === 'routes') {
     singboxSubTab.value = sub
   }
 }

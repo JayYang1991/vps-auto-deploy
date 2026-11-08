@@ -126,3 +126,4 @@ func BuildRelayOutbound(c *gin.Context) {
 
 	c.JSON(http.StatusOK, outbound)
 }
+

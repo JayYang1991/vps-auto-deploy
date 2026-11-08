@@ -147,6 +147,30 @@ func migrate() error {
 		updated_at DATETIME NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_cf_preferred_ips_ip ON cf_preferred_ips(ip);
+
+	CREATE TABLE IF NOT EXISTS routes (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		action TEXT NOT NULL DEFAULT 'route',
+		outbound_tag TEXT NOT NULL,
+		inbound_tags TEXT NOT NULL DEFAULT '',
+		domains TEXT NOT NULL DEFAULT '',
+		domain_suffix TEXT NOT NULL DEFAULT '',
+		domain_keyword TEXT NOT NULL DEFAULT '',
+		ip_cidr TEXT NOT NULL DEFAULT '',
+		ip_is_private INTEGER NOT NULL DEFAULT 0,
+		port TEXT NOT NULL DEFAULT '',
+		port_range TEXT NOT NULL DEFAULT '',
+		protocol TEXT NOT NULL DEFAULT '',
+		rule_set TEXT NOT NULL DEFAULT '',
+		rule_set_urls TEXT NOT NULL DEFAULT '',
+		invert INTEGER NOT NULL DEFAULT 0,
+		priority INTEGER NOT NULL DEFAULT 10,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_routes_priority ON routes(priority ASC);
 	`
 	if _, err := DB.Exec(schema); err != nil {
 		return err
@@ -238,6 +262,24 @@ func initDefaults() error {
 			now,
 		)
 		log.Println("[Init] Created default master node")
+	}
+
+	// 7. 初始化默认路由分流规则 (sing-box 1.14: 私网直连与BT防版权阻断)
+	var routeCount int
+	err = DB.QueryRow("SELECT COUNT(*) FROM routes").Scan(&routeCount)
+	if err == nil && routeCount == 0 {
+		now := time.Now()
+		_, _ = DB.Exec(
+			`INSERT INTO routes (name, action, outbound_tag, inbound_tags, domains, domain_suffix, domain_keyword, ip_cidr, ip_is_private, port, port_range, protocol, rule_set, rule_set_urls, invert, priority, enabled, created_at, updated_at) 
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			"私有网络直连", "route", "direct", "", "", "", "", "", 1, "", "", "", "", "", 0, 1, 1, now, now,
+		)
+		_, _ = DB.Exec(
+			`INSERT INTO routes (name, action, outbound_tag, inbound_tags, domains, domain_suffix, domain_keyword, ip_cidr, ip_is_private, port, port_range, protocol, rule_set, rule_set_urls, invert, priority, enabled, created_at, updated_at) 
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			"阻断 BT/P2P 下载 (防版权封机)", "reject", "block", "", "", "", "", "", 0, "", "", "bittorrent", "", "", 0, 2, 1, now, now,
+		)
+		log.Println("[Init] Created default sing-box route rules")
 	}
 
 	return nil
@@ -487,5 +529,187 @@ func ReplaceMembers(members []Member) error {
 
 	return tx.Commit()
 }
+
+// ListRouteRules 查询全部路由分流规则 (按 priority ASC, id ASC)
+func ListRouteRules() ([]RouteRule, error) {
+	rows, err := DB.Query(`
+		SELECT id, name, action, outbound_tag, inbound_tags, domains, domain_suffix, domain_keyword, 
+		       ip_cidr, ip_is_private, port, port_range, protocol, rule_set, rule_set_urls, 
+		       invert, priority, enabled, created_at, updated_at 
+		FROM routes 
+		ORDER BY priority ASC, id ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []RouteRule
+	for rows.Next() {
+		var r RouteRule
+		var ipPrivateInt, invertInt, enabledInt int
+		err := rows.Scan(
+			&r.ID, &r.Name, &r.Action, &r.OutboundTag, &r.InboundTags,
+			&r.Domains, &r.DomainSuffix, &r.DomainKeyword, &r.IPCIDR,
+			&ipPrivateInt, &r.Port, &r.PortRange, &r.Protocol, &r.RuleSet,
+			&r.RuleSetURLs, &invertInt, &r.Priority, &enabledInt,
+			&r.CreatedAt, &r.UpdatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+		r.IPIsPrivate = ipPrivateInt == 1
+		r.Invert = invertInt == 1
+		r.Enabled = enabledInt == 1
+		list = append(list, r)
+	}
+	return list, nil
+}
+
+// GetRouteRule 获取单条路由分流规则
+func GetRouteRule(id int64) (*RouteRule, error) {
+	row := DB.QueryRow(`
+		SELECT id, name, action, outbound_tag, inbound_tags, domains, domain_suffix, domain_keyword, 
+		       ip_cidr, ip_is_private, port, port_range, protocol, rule_set, rule_set_urls, 
+		       invert, priority, enabled, created_at, updated_at 
+		FROM routes WHERE id = ?
+	`, id)
+
+	var r RouteRule
+	var ipPrivateInt, invertInt, enabledInt int
+	err := row.Scan(
+		&r.ID, &r.Name, &r.Action, &r.OutboundTag, &r.InboundTags,
+		&r.Domains, &r.DomainSuffix, &r.DomainKeyword, &r.IPCIDR,
+		&ipPrivateInt, &r.Port, &r.PortRange, &r.Protocol, &r.RuleSet,
+		&r.RuleSetURLs, &invertInt, &r.Priority, &enabledInt,
+		&r.CreatedAt, &r.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	r.IPIsPrivate = ipPrivateInt == 1
+	r.Invert = invertInt == 1
+	r.Enabled = enabledInt == 1
+	return &r, nil
+}
+
+// CreateRouteRule 创建路由分流规则
+func CreateRouteRule(r *RouteRule) (int64, error) {
+	now := time.Now()
+	ipPrivateInt := 0
+	if r.IPIsPrivate {
+		ipPrivateInt = 1
+	}
+	invertInt := 0
+	if r.Invert {
+		invertInt = 1
+	}
+	enabledInt := 1
+	if !r.Enabled {
+		enabledInt = 0
+	}
+	if r.Action == "" {
+		r.Action = "route"
+	}
+	if r.OutboundTag == "" {
+		r.OutboundTag = "direct"
+	}
+
+	res, err := DB.Exec(`
+		INSERT INTO routes (
+			name, action, outbound_tag, inbound_tags, domains, domain_suffix, domain_keyword,
+			ip_cidr, ip_is_private, port, port_range, protocol, rule_set, rule_set_urls,
+			invert, priority, enabled, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, r.Name, r.Action, r.OutboundTag, r.InboundTags, r.Domains, r.DomainSuffix, r.DomainKeyword,
+		r.IPCIDR, ipPrivateInt, r.Port, r.PortRange, r.Protocol, r.RuleSet, r.RuleSetURLs,
+		invertInt, r.Priority, enabledInt, now, now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// UpdateRouteRule 更新路由分流规则
+func UpdateRouteRule(r *RouteRule) error {
+	now := time.Now()
+	ipPrivateInt := 0
+	if r.IPIsPrivate {
+		ipPrivateInt = 1
+	}
+	invertInt := 0
+	if r.Invert {
+		invertInt = 1
+	}
+	enabledInt := 1
+	if !r.Enabled {
+		enabledInt = 0
+	}
+	if r.Action == "" {
+		r.Action = "route"
+	}
+	if r.OutboundTag == "" {
+		r.OutboundTag = "direct"
+	}
+
+	_, err := DB.Exec(`
+		UPDATE routes SET
+			name = ?, action = ?, outbound_tag = ?, inbound_tags = ?, domains = ?, domain_suffix = ?, domain_keyword = ?,
+			ip_cidr = ?, ip_is_private = ?, port = ?, port_range = ?, protocol = ?, rule_set = ?, rule_set_urls = ?,
+			invert = ?, priority = ?, enabled = ?, updated_at = ?
+		WHERE id = ?
+	`, r.Name, r.Action, r.OutboundTag, r.InboundTags, r.Domains, r.DomainSuffix, r.DomainKeyword,
+		r.IPCIDR, ipPrivateInt, r.Port, r.PortRange, r.Protocol, r.RuleSet, r.RuleSetURLs,
+		invertInt, r.Priority, enabledInt, now, r.ID,
+	)
+	return err
+}
+
+// DeleteRouteRule 删除路由分流规则
+func DeleteRouteRule(id int64) error {
+	_, err := DB.Exec("DELETE FROM routes WHERE id = ?", id)
+	return err
+}
+
+// ToggleRouteRule 切换路由规则启用/停用状态
+func ToggleRouteRule(id int64) (bool, error) {
+	row := DB.QueryRow("SELECT enabled FROM routes WHERE id = ?", id)
+	var enabledInt int
+	if err := row.Scan(&enabledInt); err != nil {
+		return false, err
+	}
+	newStatus := 1
+	if enabledInt == 1 {
+		newStatus = 0
+	}
+	_, err := DB.Exec("UPDATE routes SET enabled = ?, updated_at = ? WHERE id = ?", newStatus, time.Now(), id)
+	return newStatus == 1, err
+}
+
+// ReorderRouteRules 按给定 ID 列表顺序重置各规则的 priority
+func ReorderRouteRules(ids []int64) error {
+	tx, err := DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare("UPDATE routes SET priority = ?, updated_at = ? WHERE id = ?")
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	now := time.Now()
+	for idx, id := range ids {
+		priority := idx + 1
+		if _, err := stmt.Exec(priority, now, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 
 

@@ -1,6 +1,7 @@
 package configgen
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -172,3 +173,82 @@ func TestGenerateServerConfig(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerateServerConfig_Singbox114Routes(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_routes.db")
+	db, err := model.InitDB(dbPath)
+	if err != nil {
+		t.Fatalf("failed to init db: %v", err)
+	}
+	defer db.Close()
+
+	// 1. 验证默认初始化的路由分流
+	cfg, err := GenerateServerConfig()
+	if err != nil {
+		t.Fatalf("GenerateServerConfig failed: %v", err)
+	}
+	if cfg.Route == nil {
+		t.Fatalf("expected non-nil cfg.Route")
+	}
+	if !cfg.Route.AutoDetectInterface {
+		t.Errorf("expected route.auto_detect_interface to be true")
+	}
+	if cfg.Route.Final != "direct" {
+		t.Errorf("expected route.final to be direct, got %s", cfg.Route.Final)
+	}
+	if len(cfg.Route.Rules) < 2 {
+		t.Fatalf("expected at least 2 default rules, got %d", len(cfg.Route.Rules))
+	}
+
+	// 2. 插入自定义 sing-box 1.14 规则集路由
+	_, err = model.CreateRouteRule(&model.RouteRule{
+		Name:         "广告拦截与国内直连",
+		Action:       "route",
+		OutboundTag:  "direct",
+		RuleSet:      "geosite-category-ads-all,geosite-cn,geoip-cn",
+		DomainSuffix: "cn,com.cn",
+		Priority:     5,
+		Enabled:      true,
+	})
+	if err != nil {
+		t.Fatalf("create route rule failed: %v", err)
+	}
+
+	cfgWithRS, err := GenerateServerConfig()
+	if err != nil {
+		t.Fatalf("GenerateServerConfig with rule_set failed: %v", err)
+	}
+
+	// 验证 sing-box 1.14 规范的 http_clients 与 route.default_http_client
+	if len(cfgWithRS.HTTPClients) == 0 || cfgWithRS.HTTPClients[0].Tag != "default-client" {
+		t.Errorf("expected http_clients with default-client, got %+v", cfgWithRS.HTTPClients)
+	}
+	if cfgWithRS.Route.DefaultHTTPClient != "default-client" {
+		t.Errorf("expected default_http_client to be default-client, got %s", cfgWithRS.Route.DefaultHTTPClient)
+	}
+
+	// 验证 rule_set 列表包含广告与国内 srs
+	rsMap := make(map[string]string)
+	for _, rs := range cfgWithRS.Route.RuleSet {
+		rsMap[rs.Tag] = rs.URL
+	}
+	for _, expectedTag := range []string{"geosite-category-ads-all", "geosite-cn", "geoip-cn"} {
+		if _, ok := rsMap[expectedTag]; !ok {
+			t.Errorf("expected rule_set tag %s not found in %+v", expectedTag, cfgWithRS.Route.RuleSet)
+		}
+	}
+
+	// 3. 将完整配置落盘，通过宿主机已安装的 sing-box 1.14 进行严格语法预检
+	tmpCfgPath := filepath.Join(t.TempDir(), "singbox_1_14_verify.json")
+	rawJSON, err := json.MarshalIndent(cfgWithRS, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal json failed: %v", err)
+	}
+	if err := os.WriteFile(tmpCfgPath, rawJSON, 0644); err != nil {
+		t.Fatalf("write tmp file failed: %v", err)
+	}
+	if err := singbox.CheckConfig(tmpCfgPath); err != nil {
+		t.Fatalf("sing-box 1.14 syntax check failed: %v\nJSON:\n%s", err, string(rawJSON))
+	}
+}
+

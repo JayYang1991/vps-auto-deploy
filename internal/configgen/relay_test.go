@@ -113,3 +113,4 @@ func TestBuildRelayOutbound(t *testing.T) {
 		t.Errorf("hy2 outbound mismatch: %+v", obHy2)
 	}
 }
+

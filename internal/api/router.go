@@ -96,6 +96,15 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.GET("/cluster/relay-candidates", handler.GetRelayCandidates)
 			api.POST("/cluster/build-relay-outbound", handler.BuildRelayOutbound)
 
+			// 路由分流规则管理 (sing-box 1.14)
+			api.GET("/routes", handler.ListRoutes)
+			api.POST("/routes", handler.CreateRoute)
+			api.GET("/routes/:id", handler.GetRoute)
+			api.PUT("/routes/:id", handler.UpdateRoute)
+			api.POST("/routes/:id/toggle", handler.ToggleRoute)
+			api.DELETE("/routes/:id", handler.DeleteRoute)
+			api.POST("/routes/reorder", handler.ReorderRoutes)
+
 			// sing-box 完整配置透视与重载
 			api.GET("/singbox/config", handler.GetSingboxFullConfig)
 			api.POST("/singbox/reload", handler.ReloadSingboxService)

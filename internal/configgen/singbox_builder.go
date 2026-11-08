@@ -14,12 +14,18 @@ import (
 	"vps-auto-deploy/internal/pkg/crypto"
 )
 
-// SingboxConfig 代表完整的 sing-box 服务端配置
+// SingboxConfig 代表完整的 sing-box 服务端配置 (符合 sing-box 1.14 最新语法)
 type SingboxConfig struct {
-	Log       *LogConfig               `json:"log,omitempty"`
-	Inbounds  []InboundConfig          `json:"inbounds"`
-	Outbounds []map[string]interface{} `json:"outbounds"`
-	Route     *RouteConfig             `json:"route,omitempty"`
+	Log         *LogConfig               `json:"log,omitempty"`
+	HTTPClients []HTTPClientConfig       `json:"http_clients,omitempty"`
+	Inbounds    []InboundConfig          `json:"inbounds"`
+	Outbounds   []map[string]interface{} `json:"outbounds"`
+	Route       *RouteConfig             `json:"route,omitempty"`
+}
+
+type HTTPClientConfig struct {
+	Tag    string `json:"tag"`
+	Detour string `json:"detour,omitempty"`
 }
 
 type LogConfig struct {
@@ -75,7 +81,65 @@ type OutboundConfig struct {
 }
 
 type RouteConfig struct {
-	Rules []map[string]interface{} `json:"rules,omitempty"`
+	DefaultHTTPClient   string                   `json:"default_http_client,omitempty"`
+	RuleSet             []RuleSetConfig          `json:"rule_set,omitempty"`
+	Rules               []map[string]interface{} `json:"rules,omitempty"`
+	AutoDetectInterface bool                     `json:"auto_detect_interface"`
+	Final               string                   `json:"final,omitempty"`
+}
+
+type RuleSetConfig struct {
+	Tag            string `json:"tag"`
+	Type           string `json:"type"`                      // "remote"
+	Format         string `json:"format"`                    // "binary"
+	URL            string `json:"url"`
+	UpdateInterval string `json:"update_interval,omitempty"` // "1d"
+}
+
+var defaultRuleSetURLs = map[string]string{
+	"geosite-category-ads-all": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads-all.srs",
+	"geosite-cn":               "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+	"geoip-cn":                 "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-cn.srs",
+	"geosite-geolocation-!cn":  "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-geolocation-!cn.srs",
+	"geosite-openai":           "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-openai.srs",
+	"geosite-netflix":          "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-netflix.srs",
+	"geosite-youtube":          "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-youtube.srs",
+	"geosite-google":           "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-google.srs",
+	"geosite-telegram":         "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-telegram.srs",
+	"geosite-github":           "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-github.srs",
+	"geosite-bilibili":         "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-bilibili.srs",
+}
+
+func getRuleSetURL(tag string, custom map[string]string) string {
+	if custom != nil {
+		if u, ok := custom[tag]; ok && strings.TrimSpace(u) != "" {
+			return strings.TrimSpace(u)
+		}
+	}
+	if u, ok := defaultRuleSetURLs[tag]; ok {
+		return u
+	}
+	if strings.HasPrefix(tag, "geoip-") {
+		return "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/" + tag + ".srs"
+	}
+	if strings.HasPrefix(tag, "geosite-") {
+		return "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/" + tag + ".srs"
+	}
+	return "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-" + tag + ".srs"
+}
+
+func splitAndTrim(s string) []string {
+	var result []string
+	fields := strings.FieldsFunc(s, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n' || r == '\r'
+	})
+	for _, f := range fields {
+		trimmed := strings.TrimSpace(f)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
 }
 
 // GenerateServerConfig 根据数据库中的数据构建 sing-box 完整配置
@@ -451,6 +515,164 @@ func GenerateServerConfig() (*SingboxConfig, error) {
 		cfg.Inbounds = append(cfg.Inbounds, inboundCfg)
 	}
 
+	// 4. 构建符合 sing-box 1.14 最新语法的路由分流 (Route Rules & RuleSet)
+	routeRules, err := model.ListRouteRules()
+	if err == nil {
+		routeCfg := &RouteConfig{
+			Rules:               []map[string]interface{}{},
+			AutoDetectInterface: true,
+			Final:               "direct",
+		}
+
+		neededRuleSets := make(map[string]bool)
+		customRuleSetURLs := make(map[string]string)
+
+		for _, r := range routeRules {
+			if !r.Enabled {
+				continue
+			}
+
+			// 解析自定义规则集 URL (每行 tag=url)
+			if strings.TrimSpace(r.RuleSetURLs) != "" {
+				lines := strings.Split(r.RuleSetURLs, "\n")
+				for _, line := range lines {
+					line = strings.TrimSpace(line)
+					if idx := strings.Index(line, "="); idx > 0 {
+						k := strings.TrimSpace(line[:idx])
+						v := strings.TrimSpace(line[idx+1:])
+						if k != "" && v != "" {
+							customRuleSetURLs[k] = v
+						}
+					}
+				}
+			}
+
+			ruleMap := make(map[string]interface{})
+
+			// 条件 1: 私有局域网 IP (sing-box 1.14 原生字段替代废弃的 geoip: private)
+			if r.IPIsPrivate {
+				ruleMap["ip_is_private"] = true
+			}
+
+			// 条件 2: 协议嗅探 (如 bittorrent)
+			if strings.TrimSpace(r.Protocol) != "" {
+				protos := splitAndTrim(r.Protocol)
+				if len(protos) > 0 {
+					ruleMap["protocol"] = protos
+				}
+			}
+
+			// 条件 3: 域名规则 (完全匹配、后缀匹配、关键词匹配)
+			if strings.TrimSpace(r.Domains) != "" {
+				domains := splitAndTrim(r.Domains)
+				if len(domains) > 0 {
+					ruleMap["domain"] = domains
+				}
+			}
+			if strings.TrimSpace(r.DomainSuffix) != "" {
+				suffixes := splitAndTrim(r.DomainSuffix)
+				if len(suffixes) > 0 {
+					ruleMap["domain_suffix"] = suffixes
+				}
+			}
+			if strings.TrimSpace(r.DomainKeyword) != "" {
+				kw := splitAndTrim(r.DomainKeyword)
+				if len(kw) > 0 {
+					ruleMap["domain_keyword"] = kw
+				}
+			}
+
+			// 条件 4: IP / CIDR 网段
+			if strings.TrimSpace(r.IPCIDR) != "" {
+				cidrs := splitAndTrim(r.IPCIDR)
+				if len(cidrs) > 0 {
+					ruleMap["ip_cidr"] = cidrs
+				}
+			}
+
+			// 条件 5: 端口 / 端口范围
+			if strings.TrimSpace(r.Port) != "" {
+				var ports []int
+				for _, pStr := range splitAndTrim(r.Port) {
+					var pInt int
+					if _, err := fmt.Sscanf(pStr, "%d", &pInt); err == nil && pInt > 0 {
+						ports = append(ports, pInt)
+					}
+				}
+				if len(ports) > 0 {
+					ruleMap["port"] = ports
+				}
+			}
+			if strings.TrimSpace(r.PortRange) != "" {
+				ranges := splitAndTrim(r.PortRange)
+				if len(ranges) > 0 {
+					ruleMap["port_range"] = ranges
+				}
+			}
+
+			// 条件 6: 入站限定
+			if strings.TrimSpace(r.InboundTags) != "" {
+				inbounds := splitAndTrim(r.InboundTags)
+				if len(inbounds) > 0 {
+					ruleMap["inbound"] = inbounds
+				}
+			}
+
+			// 条件 7: sing-box 1.14 标准规则集引用 (rule_set)
+			if strings.TrimSpace(r.RuleSet) != "" {
+				rsList := splitAndTrim(r.RuleSet)
+				if len(rsList) > 0 {
+					ruleMap["rule_set"] = rsList
+					for _, rs := range rsList {
+						neededRuleSets[rs] = true
+					}
+				}
+			}
+
+			// 条件 8: 反向匹配
+			if r.Invert {
+				ruleMap["invert"] = true
+			}
+
+			// 出站动作
+			targetOutbound := strings.TrimSpace(r.OutboundTag)
+			if targetOutbound == "" {
+				targetOutbound = "direct"
+			}
+			ruleMap["outbound"] = targetOutbound
+
+			if r.Action == "reject" || targetOutbound == "block" {
+				ruleMap["action"] = "reject"
+			}
+
+			routeCfg.Rules = append(routeCfg.Rules, ruleMap)
+		}
+
+		// 为所有被引用的 rule_set 注入远程定义 (sing-box 1.14 规范)
+		if len(neededRuleSets) > 0 {
+			var ruleSetList []RuleSetConfig
+			for rsTag := range neededRuleSets {
+				url := getRuleSetURL(rsTag, customRuleSetURLs)
+				ruleSetList = append(ruleSetList, RuleSetConfig{
+					Tag:            rsTag,
+					Type:           "remote",
+					Format:         "binary",
+					URL:            url,
+					UpdateInterval: "1d",
+				})
+			}
+			routeCfg.RuleSet = ruleSetList
+
+			// sing-box 1.14: 根级定义 http_clients，route 中引用 default_http_client
+			cfg.HTTPClients = []HTTPClientConfig{
+				{Tag: "default-client"},
+			}
+			routeCfg.DefaultHTTPClient = "default-client"
+		}
+
+		cfg.Route = routeCfg
+	}
+
 	return cfg, nil
 }
 
@@ -554,8 +776,8 @@ func ApplyAndReload(destPath string) error {
 		return fmt.Errorf("写入配置文件失败: %w", err)
 	}
 
-	// 4. 重载服务并探活
-	if installedVer != "" {
+	// 4. 重载服务并探活 (测试环境若设置 SKIP_SERVICE_RELOAD 则跳过 systemd 启停，但始终保留上一步的 sing-box check 语法预检)
+	if installedVer != "" && os.Getenv("SKIP_SERVICE_RELOAD") != "1" {
 		if err := driver.ReloadOrRestart(); err != nil {
 			rollbackSingbox(destPath, oldConfig, driver, wasActive)
 			return fmt.Errorf("sing-box 重启/重载失败，已自动回滚原配置: %w", err)

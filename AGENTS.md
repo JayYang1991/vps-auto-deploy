@@ -87,10 +87,11 @@ type ServiceStatus struct {
   2. **二级子分类（组件专属工作区，以 Sing-box 为例）**：
      - **🌐 入站节点 (Inbounds)**：完整支持增、删、改、查（CRUD）、监听地址与端口管理、一键启用/停用、Reality 密钥伪装生成与二维码/链接导出。
      - **📤 出站规则 (Outbounds)**：完整支持增删改查、直连/拦截/代理出站（SOCKS/HTTP/Shadowsocks/VLESS/自定义 JSON）与优先级权重排序。
+     - **🔀 路由分流 (Routes)**：支持 Sing-box 1.14 最新语法（`ip_is_private`、根级 `http_clients`、`route.rule_set` 远程二进制 SRS、`route.rules` 条件组合、优先级次序调整与常用工业级一键预设）。
      - **📜 完整配置透视与热重载**：提供 live 完整服务端 JSON 查看、落盘路径校验、`singbox check` 语法预检及 `[ ⚡ 强制热重载 ]` 触发。
 - **状态持久化与平滑切换**：
   - 子视图之间切换使用 `<keep-alive>`，确保在配置入站或出站表单时临时切换 Tab 不会丢失表单输入状态。
-  - 路由兼容历史与快捷直达：`/services?tab=singbox&sub=inbounds`、`/services?tab=singbox&sub=outbounds`、`/services?tab=cloudflared`，历史路由 `?tab=inbounds`、`?tab=outbounds`、`?tab=tunnels` 自动平滑重定向。
+  - 路由兼容历史与快捷直达：`/services?tab=singbox&sub=inbounds`、`/services?tab=singbox&sub=outbounds`、`/services?tab=singbox&sub=routes`、`/services?tab=cloudflared`，历史路由 `?tab=inbounds`、`?tab=outbounds`、`?tab=routes`、`?tab=tunnels` 自动平滑重定向。
 
 ### 3. 软件中心 (`web/src/views/Components.vue`) 扩展约束
 - **动态分类过滤**：顶部分类 Tab 应支持按 `category` 过滤（`全部服务`、`代理核心 (proxy)`、`隧道穿透 (tunnel)`、`订阅与规则 (converter)` 等），禁止使用非此即彼的二元三目运算符（如 `c.category === 'proxy' ? ... : ...`），必须使用字典映射表 `CATEGORY_MAP[c.category]`。

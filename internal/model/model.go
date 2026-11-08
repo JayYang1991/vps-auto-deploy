@@ -167,6 +167,30 @@ type Node struct {
 	UpdatedAt         time.Time `json:"updated_at"`
 }
 
+// RouteRule sing-box 1.14 路由分流规则
+type RouteRule struct {
+	ID            int64     `json:"id"`
+	Name          string    `json:"name"`           // 规则名称/描述
+	Action        string    `json:"action"`         // "route" | "reject" | "direct" (sing-box 1.14 规范)
+	OutboundTag   string    `json:"outbound_tag"`   // 目标出站 tag ("direct", "block", 或自定义 outbound tag)
+	InboundTags   string    `json:"inbound_tags"`   // 限制匹配的入站 tag (逗号分隔，空代表匹配全部)
+	Domains       string    `json:"domains"`        // 完整域名匹配 (逗号或换行分隔)
+	DomainSuffix  string    `json:"domain_suffix"`  // 域名后缀匹配 (逗号或换行分隔，如 ".google.com, .openai.com")
+	DomainKeyword string    `json:"domain_keyword"` // 域名关键词匹配 (逗号或换行分隔，如 "google, netflix")
+	IPCIDR        string    `json:"ip_cidr"`        // IP CIDR 列表 (逗号或换行分隔，如 "192.168.1.0/24")
+	IPIsPrivate   bool      `json:"ip_is_private"`  // 是否匹配局域网私有 IP (sing-box 1.14 原生支持替代 geoip:private)
+	Port          string    `json:"port"`           // 目标端口 (逗号分隔，如 "80,443")
+	PortRange     string    `json:"port_range"`     // 端口范围 (如 "8000:9000")
+	Protocol      string    `json:"protocol"`       // 嗅探协议 (逗号分隔，如 "bittorrent")
+	RuleSet       string    `json:"rule_set"`       // sing-box 1.14 标准规则集 (逗号分隔，如 "geosite-category-ads-all,geosite-cn,geoip-cn")
+	RuleSetURLs   string    `json:"rule_set_urls"`  // 自定义规则集 URL 映射 (每行一个格式: tag=url)
+	Invert        bool      `json:"invert"`         // 是否反向匹配
+	Priority      int       `json:"priority"`       // 优先级 (数值越小越靠前优先匹配)
+	Enabled       bool      `json:"enabled"`        // 是否启用
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
 // DB 全局数据库对象
 var DB *sql.DB
 
