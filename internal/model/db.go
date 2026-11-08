@@ -415,7 +415,42 @@ func ListMembers() ([]Member, error) {
 	return list, nil
 }
 
-// ReplaceMembers 全量原子替换本地成员数据（用于跨节点从主控同步）
+// SyncMembers 将主控端成员无损合并至本地（保留受管节点本地原有的用户，增量同步与更新主控成员）
+func SyncMembers(members []Member) error {
+	tx, err := DB.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	stmt, err := tx.Prepare(`
+		INSERT INTO members (name, uuid, sub_token, enabled, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+		ON CONFLICT(uuid) DO UPDATE SET
+			name = excluded.name,
+			sub_token = excluded.sub_token,
+			enabled = excluded.enabled,
+			updated_at = excluded.updated_at
+	`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, m := range members {
+		enabledInt := 0
+		if m.Enabled {
+			enabledInt = 1
+		}
+		if _, err := stmt.Exec(m.Name, m.UUID, m.SubToken, enabledInt, m.CreatedAt, m.UpdatedAt); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+// ReplaceMembers 全量原子替换本地成员数据
 func ReplaceMembers(members []Member) error {
 	tx, err := DB.Begin()
 	if err != nil {

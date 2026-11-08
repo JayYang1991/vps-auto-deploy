@@ -56,22 +56,36 @@ func TestSyncMembersHandler(t *testing.T) {
 		t.Fatalf("expected HTTP 200, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// 3. 校验本地成员表是否已完全镜像为主控数据
+	// 3. 校验本地成员表：本地原有的用户得到保留，且主控的新成员已成功合并
 	members, err := model.ListMembers()
 	if err != nil {
 		t.Fatalf("ListMembers failed: %v", err)
 	}
 
-	if len(members) != 2 {
-		t.Fatalf("expected 2 members after sync, got %d", len(members))
+	// 初始默认包含 1 个 owner，同步 2 个新成员后应为 3 个成员
+	if len(members) != 3 {
+		t.Fatalf("expected 3 members after sync (1 local preserved + 2 from master), got %d", len(members))
 	}
 
-	if members[0].Name != "Master-User-A" || members[0].UUID != "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" || !members[0].Enabled {
-		t.Fatalf("member 0 mismatch: %+v", members[0])
+	// 查找并校验本地原有成员与同步的新成员
+	var foundOwner, foundA, foundB bool
+	for _, m := range members {
+		if m.Name == "Default Owner" {
+			foundOwner = true
+		}
+		if m.Name == "Master-User-A" && m.UUID == "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" && m.Enabled {
+			foundA = true
+		}
+		if m.Name == "Master-User-B" && m.UUID == "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" && !m.Enabled {
+			foundB = true
+		}
 	}
 
-	if members[1].Name != "Master-User-B" || members[1].UUID != "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb" || members[1].Enabled {
-		t.Fatalf("member 1 mismatch: %+v", members[1])
+	if !foundOwner {
+		t.Fatalf("local owner member was unexpectedly removed")
+	}
+	if !foundA || !foundB {
+		t.Fatalf("synced master members missing or mismatched: %+v", members)
 	}
 }
 

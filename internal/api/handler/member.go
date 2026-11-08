@@ -222,7 +222,7 @@ func DeleteMember(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "member deleted"})
 }
 
-// SyncMembers 被纳管节点接收来自主控端的成员身份全量同步
+// SyncMembers 被纳管节点接收来自主控端的成员身份无损增量同步（保留本地原有用户）
 func SyncMembers(c *gin.Context) {
 	var members []model.Member
 	if err := c.ShouldBindJSON(&members); err != nil {
@@ -230,7 +230,7 @@ func SyncMembers(c *gin.Context) {
 		return
 	}
 
-	if err := model.ReplaceMembers(members); err != nil {
+	if err := model.SyncMembers(members); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "写入本地成员数据失败: " + err.Error()})
 		return
 	}
