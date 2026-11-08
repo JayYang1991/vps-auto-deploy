@@ -263,8 +263,19 @@ func GetSingboxFullConfig(c *gin.Context) {
 	rawJSON, _ := json.MarshalIndent(cfg, "", "  ")
 
 	cfgPath := singbox.GetConfigPath()
-	_, fileErr := os.Stat(cfgPath)
+	diskBytes, fileErr := os.ReadFile(cfgPath)
 	fileExists := fileErr == nil
+	diskRawJSON := ""
+	diskInboundCount := 0
+	if fileExists {
+		diskRawJSON = string(diskBytes)
+		var diskRaw struct {
+			Inbounds []map[string]interface{} `json:"inbounds"`
+		}
+		if err := json.Unmarshal(diskBytes, &diskRaw); err == nil {
+			diskInboundCount = len(diskRaw.Inbounds)
+		}
+	}
 
 	driver := singbox.NewDriver()
 	st, _ := driver.Status()
@@ -285,14 +296,16 @@ func GetSingboxFullConfig(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"config":         cfg,
-		"raw_json":       string(rawJSON),
-		"config_path":    cfgPath,
-		"file_exists":    fileExists,
-		"check_ok":       checkOK,
-		"check_output":   checkOutput,
-		"running_status": st.RunningStatus,
-		"installed":      st.Installed,
+		"config":             cfg,
+		"raw_json":           string(rawJSON),
+		"disk_raw_json":      diskRawJSON,
+		"config_path":        cfgPath,
+		"file_exists":        fileExists,
+		"check_ok":           checkOK,
+		"check_output":       checkOutput,
+		"running_status":     st.RunningStatus,
+		"installed":          st.Installed,
+		"disk_inbound_count": diskInboundCount,
 	})
 }
 

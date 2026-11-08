@@ -280,6 +280,10 @@ func rollbackSingbox(destPath string, oldConfig []byte, driver *singbox.Driver, 
 // ApplyAndReload 将生成的配置写入并重启/重载 sing-box 服务
 // 若配置语法校验不通过或启动探活失败，自动回滚至上一次的配置并恢复服务
 func ApplyAndReload(destPath string) error {
+	if destPath == "" {
+		destPath = singbox.GetConfigPath()
+	}
+
 	cfg, err := GenerateServerConfig()
 	if err != nil {
 		return fmt.Errorf("生成服务端配置失败: %w", err)

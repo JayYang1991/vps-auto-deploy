@@ -16,6 +16,7 @@ import (
 	"vps-auto-deploy/internal/component/cloudflared"
 	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/component/subconverter"
+	"vps-auto-deploy/internal/configgen"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/node"
 	"vps-auto-deploy/internal/pkg/crypto"
@@ -57,6 +58,19 @@ func main() {
 	_, err := model.InitDB(dbPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	// 自动探测并导入宿主机已有 sing-box 配置（当数据库入站规则为空时）
+	var ibCount int
+	_ = model.DB.QueryRow("SELECT COUNT(*) FROM inbounds").Scan(&ibCount)
+	if ibCount == 0 {
+		cfgPath := singbox.GetConfigPath()
+		if fi, err := os.Stat(cfgPath); err == nil && !fi.IsDir() {
+			stats, err := configgen.ImportExistingSingboxConfig(cfgPath)
+			if err == nil && (stats.InboundsImported > 0 || stats.MembersImported > 0) {
+				log.Printf("[Auto-Import] 成功从宿主机配置 %s 自动导入 %d 个入站节点、%d 个成员与 %d 个出站规则", cfgPath, stats.InboundsImported, stats.MembersImported, stats.OutboundsImported)
+			}
+		}
 	}
 
 	// 2. 处理重置管理员账号、密码与安全路径的 CLI 参数

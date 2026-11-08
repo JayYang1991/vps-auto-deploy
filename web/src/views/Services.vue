@@ -97,28 +97,57 @@
     <!-- Sing-box 服务端完整配置透视弹窗 -->
     <div v-if="configViewer.show" class="modal-overlay" @click.self="configViewer.show = false">
       <div class="modal-content" style="max-width: 840px; max-height: 88vh; display: flex; flex-direction: column;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
           <div>
             <div style="display: flex; align-items: center; gap: 0.5rem;">
               <span style="font-size: 1.25rem;">📜</span>
-              <h3 style="font-size: 1.15rem; font-weight: 600; color: #f8fafc;">Sing-box 服务端完整配置透视</h3>
+              <h3 style="font-size: 1.15rem; font-weight: 600; color: #f8fafc;">Sing-box 服务端配置透视</h3>
               <span :class="['badge', configViewer.check_ok ? 'badge-success' : 'badge-danger']">
                 {{ configViewer.check_ok ? '✓ 语法校验通过' : '❌ 校验异常' }}
               </span>
             </div>
             <div style="color: #64748b; font-size: 0.75rem; margin-top: 0.25rem; font-family: monospace;">
-              落盘路径: {{ configViewer.config_path }}
+              配置路径: {{ configViewer.config_path }}
             </div>
           </div>
 
           <div style="display: flex; gap: 0.5rem;">
             <button @click="copyConfig" class="btn btn-primary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">
-              📋 复制全部配置
+              📋 复制当前配置
             </button>
             <button @click="configViewer.show = false" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">
               ✕ 关闭
             </button>
           </div>
+        </div>
+
+        <!-- 视图切换：磁盘真实文件 vs 面板动态构建 -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; background: #0b0f19; padding: 0.4rem 0.75rem; border-radius: 0.4rem; border: 1px solid #1e293b; flex-wrap: wrap; gap: 0.5rem;">
+          <div style="display: flex; gap: 0.4rem; align-items: center;">
+            <span style="font-size: 0.75rem; color: #94a3b8;">透视视角:</span>
+            <button
+              @click="configViewer.viewMode = 'disk'"
+              :class="['btn', configViewer.viewMode === 'disk' ? 'btn-primary' : 'btn-secondary']"
+              style="font-size: 0.75rem; padding: 0.2rem 0.6rem;"
+              type="button"
+            >
+              📄 磁盘文件内容 {{ configViewer.file_exists ? '(已落盘)' : '(未落盘)' }}
+            </button>
+            <button
+              @click="configViewer.viewMode = 'generated'"
+              :class="['btn', configViewer.viewMode === 'generated' ? 'btn-primary' : 'btn-secondary']"
+              style="font-size: 0.75rem; padding: 0.2rem 0.6rem;"
+              type="button"
+            >
+              ⚡ 面板数据库生成
+            </button>
+          </div>
+          <span v-if="configViewer.file_exists && configViewer.disk_raw_json === configViewer.raw_json" class="badge badge-success" style="font-size: 0.7rem;">
+            ✓ 磁盘与面板数据 100% 同步
+          </span>
+          <span v-else-if="configViewer.file_exists" class="badge badge-warning" style="font-size: 0.7rem;">
+            ⚠️ 磁盘配置与面板存在差异（可点击强制热重载更新）
+          </span>
         </div>
 
         <div v-if="!configViewer.check_ok" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); padding: 0.6rem 0.85rem; border-radius: 0.5rem; margin-bottom: 0.75rem; color: #fca5a5; font-size: 0.8rem;">
@@ -128,7 +157,7 @@
         <!-- 格式化代码阅读器 -->
         <pre
           style="flex: 1; background-color: #0b0f19; border: 1px solid #1e293b; padding: 1rem; border-radius: 0.5rem; overflow-y: auto; font-family: 'JetBrains Mono', monospace; font-size: 0.825rem; line-height: 1.45; color: #cbd5e1;"
-        >{{ configViewer.raw_json }}</pre>
+        >{{ configViewer.viewMode === 'disk' ? (configViewer.disk_raw_json || '磁盘上配置文件暂无内容') : configViewer.raw_json }}</pre>
       </div>
     </div>
   </div>
@@ -176,9 +205,12 @@ const reloading = ref(false)
 const configViewer = reactive({
   show: false,
   raw_json: '',
+  disk_raw_json: '',
   config_path: '',
   check_ok: true,
   check_output: '',
+  file_exists: false,
+  viewMode: 'disk' as 'disk' | 'generated',
 })
 
 function selectComponent(key: string) {
@@ -203,9 +235,17 @@ async function openConfigViewer() {
   try {
     const res = await api.get('/singbox/config')
     configViewer.raw_json = res.data.raw_json || ''
+    configViewer.disk_raw_json = res.data.disk_raw_json || ''
     configViewer.config_path = res.data.config_path || ''
     configViewer.check_ok = res.data.check_ok
     configViewer.check_output = res.data.check_output || ''
+    configViewer.file_exists = res.data.file_exists
+    // 若磁盘文件存在且有内容，优先默认展示真实磁盘文件
+    if (res.data.file_exists && res.data.disk_raw_json) {
+      configViewer.viewMode = 'disk'
+    } else {
+      configViewer.viewMode = 'generated'
+    }
     configViewer.show = true
   } catch (err: any) {
     toast.error('获取完整配置失败: ' + (err.response?.data?.error || err.message))
@@ -213,7 +253,8 @@ async function openConfigViewer() {
 }
 
 async function copyConfig() {
-  await copyToClipboard(configViewer.raw_json, '完整配置 JSON')
+  const content = configViewer.viewMode === 'disk' ? (configViewer.disk_raw_json || configViewer.raw_json) : configViewer.raw_json
+  await copyToClipboard(content, '完整配置 JSON')
 }
 
 async function reloadConfig() {

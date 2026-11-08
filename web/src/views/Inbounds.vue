@@ -11,7 +11,16 @@
         </p>
       </div>
 
-      <div>
+      <div style="display: flex; gap: 0.5rem;">
+        <button
+          @click="importExistingConfig"
+          class="btn btn-secondary"
+          :disabled="importing"
+          title="从宿主机已有配置（如 /etc/sing-box/config.json）一键同步导入入站节点与用户"
+        >
+          <span>📥</span>
+          <span>{{ importing ? '正在导入...' : '导入宿主机配置' }}</span>
+        </button>
         <button @click="openCreateModal" class="btn btn-primary">+ 新增节点</button>
       </div>
     </div>
@@ -41,10 +50,19 @@
     </div>
 
     <!-- 节点列表空状态 -->
-    <div v-else-if="inbounds.length === 0" class="card" style="text-align: center; padding: 3rem;">
+    <div v-else-if="inbounds.length === 0" class="card" style="text-align: center; padding: 2.5rem 1.5rem;">
       <div style="font-size: 2.25rem; margin-bottom: 0.5rem;">🌐</div>
-      <p style="color: #94a3b8; margin-bottom: 1.25rem;">暂无已配置的入站节点，点击下方按钮一键配置首个 VLESS-Reality 节点。</p>
-      <button @click="openCreateModal" class="btn btn-primary">+ 一键配置首个 VLESS-Reality 节点</button>
+      <h3 style="font-size: 1.1rem; font-weight: 600; color: #f8fafc; margin-bottom: 0.5rem;">暂无已配置的入站节点</h3>
+      <p style="color: #94a3b8; font-size: 0.85rem; max-width: 540px; margin: 0 auto 1.25rem; line-height: 1.5;">
+        若在安装面板前宿主机已安装 Sing-box 并在 <code>/etc/sing-box/config.json</code> 中配置过节点，点击下方按钮可一键导入至面板集中管理；亦可直接新增首个节点。
+      </p>
+      <div style="display: flex; justify-content: center; gap: 0.75rem; flex-wrap: wrap;">
+        <button @click="importExistingConfig" class="btn btn-secondary" :disabled="importing">
+          <span>📥</span>
+          <span>{{ importing ? '正在导入...' : '一键导入宿主机已有配置' }}</span>
+        </button>
+        <button @click="openCreateModal" class="btn btn-primary">+ 一键配置首个 VLESS-Reality 节点</button>
+      </div>
     </div>
 
     <div v-else style="display: flex; flex-direction: column; gap: 1rem;">
@@ -288,6 +306,21 @@ const shareModal = reactive({
   title: '',
   uri: '',
 })
+
+const importing = ref(false)
+
+async function importExistingConfig() {
+  importing.value = true
+  try {
+    const res = await api.post('/inbounds/import')
+    toast.success(res.data.message || '导入成功！')
+    await loadInbounds()
+  } catch (err: any) {
+    toast.error('导入宿主机配置失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    importing.value = false
+  }
+}
 
 async function loadInbounds() {
   loading.value = true

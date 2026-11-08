@@ -27,11 +27,83 @@ const (
 )
 
 var (
-	ConfigPath = GetConfigPath()
+	ConfigPath string
 )
 
+func init() {
+	ConfigPath = GetConfigPath()
+}
+
+func findRunningConfigPath() string {
+	out, err := executil.RunCommand(2*time.Second, "pgrep", "-x", DriverName)
+	if err != nil || strings.TrimSpace(out) == "" {
+		return ""
+	}
+	pids := strings.Fields(out)
+	for _, pid := range pids {
+		cmdlineBytes, err := os.ReadFile(filepath.Join("/proc", pid, "cmdline"))
+		if err != nil {
+			continue
+		}
+		args := strings.Split(string(cmdlineBytes), "\x00")
+		for i, arg := range args {
+			if arg == "-c" && i+1 < len(args) {
+				candidate := strings.TrimSpace(args[i+1])
+				if candidate != "" {
+					if _, err := os.Stat(candidate); err == nil {
+						return candidate
+					}
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func GetConfigPath() string {
-	return component.GetDefaultConfigPath(DriverName, "config.json")
+	// 1. 若宿主机当前已有运行中的 sing-box 进程，优先继承其实际读取的配置文件路径
+	if runningPath := findRunningConfigPath(); runningPath != "" {
+		ConfigPath = runningPath
+		return runningPath
+	}
+
+	// 2. 依次探测宿主机常见的已有标准配置路径
+	candidates := []string{
+		"/etc/sing-box/config.json",
+		"/usr/local/etc/sing-box/config.json",
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		candidates = append([]string{filepath.Join(home, ".config", "sing-box", "config.json")}, candidates...)
+	}
+
+	for _, c := range candidates {
+		if fi, err := os.Stat(c); err == nil && !fi.IsDir() {
+			ConfigPath = c
+			return c
+		}
+	}
+
+	// 3. 检查历史/默认路径是否存在
+	defaultPanelPath := component.GetDefaultConfigPath(DriverName, "config.json")
+	if fi, err := os.Stat(defaultPanelPath); err == nil && !fi.IsDir() {
+		ConfigPath = defaultPanelPath
+		return defaultPanelPath
+	}
+
+	// 4. 若全都不存在，根据运行身份首选标准路径
+	var target string
+	if component.IsUserMode() {
+		if home, err := os.UserHomeDir(); err == nil && home != "" {
+			target = filepath.Join(home, ".config", "sing-box", "config.json")
+		} else {
+			target = defaultPanelPath
+		}
+	} else {
+		target = "/etc/sing-box/config.json"
+	}
+
+	ConfigPath = target
+	return target
 }
 
 type Driver struct {

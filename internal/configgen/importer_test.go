@@ -1,0 +1,127 @@
+package configgen
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+
+	"vps-auto-deploy/internal/model"
+)
+
+func TestImportExistingSingboxConfig(t *testing.T) {
+	// 初始化测试内存/临时数据库
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	db, err := model.InitDB(dbPath)
+	if err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+	defer db.Close()
+
+	// 构造测试 sing-box 配置文件
+	configJSON := `{
+  "log": {
+    "level": "info"
+  },
+  "inbounds": [
+    {
+      "type": "vless",
+      "tag": "vless-reality-20443",
+      "listen": "::",
+      "listen_port": 20443,
+      "users": [
+        {
+          "name": "jason",
+          "uuid": "c3a6027a-7d96-4018-a5d9-34c2e0fbee37",
+          "flow": "xtls-rprx-vision"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "dl.google.com",
+        "reality": {
+          "enabled": true,
+          "handshake": {
+            "server": "dl.google.com",
+            "server_port": 443
+          },
+          "private_key": "private_key_sample",
+          "short_id": [
+            "a4bde05d"
+          ]
+        }
+      }
+    },
+    {
+      "type": "vless",
+      "tag": "vless-ws-10086",
+      "listen": "127.0.0.1",
+      "listen_port": 10086,
+      "users": [
+        {
+          "name": "jason",
+          "uuid": "c3a6027a-7d96-4018-a5d9-34c2e0fbee37"
+        }
+      ],
+      "transport": {
+        "path": "/myws",
+        "type": "ws"
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "direct",
+      "type": "direct"
+    },
+    {
+      "tag": "block",
+      "type": "block"
+    },
+    {
+      "tag": "my-warp",
+      "type": "socks",
+      "server": "127.0.0.1",
+      "server_port": 40000
+    }
+  ]
+}`
+
+	cfgFile := filepath.Join(t.TempDir(), "config.json")
+	if err := os.WriteFile(cfgFile, []byte(configJSON), 0644); err != nil {
+		t.Fatalf("failed to write test config file: %v", err)
+	}
+
+	stats, err := ImportExistingSingboxConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("ImportExistingSingboxConfig failed: %v", err)
+	}
+
+	if stats.InboundsImported != 2 {
+		t.Errorf("expected 2 inbounds imported, got %d", stats.InboundsImported)
+	}
+	if stats.MembersImported != 1 {
+		t.Errorf("expected 1 member imported, got %d", stats.MembersImported)
+	}
+	if stats.OutboundsImported != 1 {
+		t.Errorf("expected 1 custom outbound imported, got %d", stats.OutboundsImported)
+	}
+
+	// 验证 SQLite 中数据已正确插入
+	var count int
+	_ = model.DB.QueryRow("SELECT COUNT(*) FROM inbounds WHERE tag IN ('vless-reality-20443', 'vless-ws-10086')").Scan(&count)
+	if count != 2 {
+		t.Errorf("expected 2 inbounds in DB, got %d", count)
+	}
+
+	var memberName string
+	_ = model.DB.QueryRow("SELECT name FROM members WHERE uuid = 'c3a6027a-7d96-4018-a5d9-34c2e0fbee37'").Scan(&memberName)
+	if memberName != "jason" {
+		t.Errorf("expected member name 'jason', got '%s'", memberName)
+	}
+
+	var outboundTag string
+	_ = model.DB.QueryRow("SELECT tag FROM outbounds WHERE tag = 'my-warp'").Scan(&outboundTag)
+	if outboundTag != "my-warp" {
+		t.Errorf("expected outbound tag 'my-warp', got '%s'", outboundTag)
+	}
+}

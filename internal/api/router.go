@@ -82,6 +82,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.POST("/inbounds/reality-keys", handler.GenerateRealityKeys)
 			api.GET("/inbounds/preview", handler.PreviewSingboxConfig)
 			api.POST("/inbounds/apply", handler.ApplySingboxConfig)
+			api.POST("/inbounds/import", handler.ImportExistingInbounds)
 
 			// 出站规则管理
 			api.GET("/outbounds", handler.ListOutbounds)

@@ -2,8 +2,11 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -80,10 +83,10 @@ func ToggleInbound(c *gin.Context) {
 		return
 	}
 
-	if err := configgen.ApplyAndReload(singbox.ConfigPath); err != nil {
+	if err := configgen.ApplyAndReload(singbox.GetConfigPath()); err != nil {
 		// 回滚数据库记录并重刷配置
 		_, _ = model.DB.Exec("UPDATE inbounds SET enabled = ?, updated_at = ? WHERE id = ?", enabled, time.Now(), id)
-		_ = configgen.ApplyAndReload(singbox.ConfigPath)
+		_ = configgen.ApplyAndReload(singbox.GetConfigPath())
 		c.JSON(http.StatusBadRequest, gin.H{"error": "入站状态切换失败，已自动回滚: " + err.Error()})
 		return
 	}
@@ -133,10 +136,10 @@ func CreateInbound(c *gin.Context) {
 	id, _ := res.LastInsertId()
 
 	// 自动触发一次配置生成与生效探活
-	if err := configgen.ApplyAndReload(singbox.ConfigPath); err != nil {
+	if err := configgen.ApplyAndReload(singbox.GetConfigPath()); err != nil {
 		// 回滚入站记录
 		_, _ = model.DB.Exec("DELETE FROM inbounds WHERE id = ?", id)
-		_ = configgen.ApplyAndReload(singbox.ConfigPath)
+		_ = configgen.ApplyAndReload(singbox.GetConfigPath())
 		c.JSON(http.StatusBadRequest, gin.H{"error": "入站配置生效失败，已自动回滚: " + err.Error()})
 		return
 	}
@@ -188,13 +191,13 @@ func UpdateInbound(c *gin.Context) {
 		return
 	}
 
-	if err := configgen.ApplyAndReload(singbox.ConfigPath); err != nil {
+	if err := configgen.ApplyAndReload(singbox.GetConfigPath()); err != nil {
 		// 回滚数据库记录
 		_, _ = model.DB.Exec(
 			"UPDATE inbounds SET tag = ?, protocol = ?, listen = ?, port = ?, spec_json = ?, enabled = ?, updated_at = ? WHERE id = ?",
 			oldIb.Tag, oldIb.Protocol, oldIb.Listen, oldIb.Port, oldIb.SpecJSON, oldIb.Enabled, oldIb.UpdatedAt, id,
 		)
-		_ = configgen.ApplyAndReload(singbox.ConfigPath)
+		_ = configgen.ApplyAndReload(singbox.GetConfigPath())
 		c.JSON(http.StatusBadRequest, gin.H{"error": "入站更新后配置生效失败，已自动回滚: " + err.Error()})
 		return
 	}
@@ -224,13 +227,13 @@ func DeleteInbound(c *gin.Context) {
 		return
 	}
 
-	if err := configgen.ApplyAndReload(singbox.ConfigPath); err != nil {
+	if err := configgen.ApplyAndReload(singbox.GetConfigPath()); err != nil {
 		// 回滚恢复被删除的记录
 		_, _ = model.DB.Exec(
 			"INSERT INTO inbounds (id, tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
 			oldIb.ID, oldIb.Tag, oldIb.Protocol, oldIb.Listen, oldIb.Port, oldIb.SpecJSON, oldIb.Enabled, oldIb.CreatedAt, oldIb.UpdatedAt,
 		)
-		_ = configgen.ApplyAndReload(singbox.ConfigPath)
+		_ = configgen.ApplyAndReload(singbox.GetConfigPath())
 		c.JSON(http.StatusBadRequest, gin.H{"error": "入站删除后配置生效失败，已自动恢复: " + err.Error()})
 		return
 	}
@@ -248,10 +251,42 @@ func PreviewSingboxConfig(c *gin.Context) {
 }
 
 func ApplySingboxConfig(c *gin.Context) {
-	if err := configgen.ApplyAndReload(singbox.ConfigPath); err != nil {
+	if err := configgen.ApplyAndReload(singbox.GetConfigPath()); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "sing-box 配置生效失败: " + err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "sing-box configuration verified and reloaded successfully"})
+}
+
+// ImportExistingInbounds 从宿主机已有 sing-box 配置文件一键导入节点与用户
+func ImportExistingInbounds(c *gin.Context) {
+	cfgPath := singbox.GetConfigPath()
+	var req struct {
+		Path string `json:"path"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	if strings.TrimSpace(req.Path) != "" {
+		cfgPath = strings.TrimSpace(req.Path)
+	}
+
+	if _, err := os.Stat(cfgPath); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "未找到配置文件: " + cfgPath})
+		return
+	}
+
+	stats, err := configgen.ImportExistingSingboxConfig(cfgPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "导入已有配置失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":            fmt.Sprintf("导入成功！已导入 %d 个入站节点、%d 个团队成员、%d 个出站规则", stats.InboundsImported, stats.MembersImported, stats.OutboundsImported),
+		"inbounds_imported":  stats.InboundsImported,
+		"members_imported":   stats.MembersImported,
+		"outbounds_imported": stats.OutboundsImported,
+		"tags":               stats.InboundTags,
+		"config_path":        cfgPath,
+	})
 }
 
