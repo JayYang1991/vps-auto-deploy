@@ -34,7 +34,7 @@
           <span>🖥️ 集群节点</span>
           <span class="node-count">({{ nodes.length }})</span>
         </div>
-        <button class="manage-btn" @click="handleOpenCluster">
+        <button class="manage-btn" @click.stop="handleOpenCluster" type="button">
           ⚙️ 节点管理
         </button>
       </div>
@@ -74,11 +74,11 @@
       </div>
 
       <div class="dropdown-footer">
-        <button class="deploy-shortcut-btn btn-cloud-shortcut" @click="handleCloudShortcut">
+        <button class="deploy-shortcut-btn btn-cloud-shortcut" @click.stop="handleCloudShortcut" type="button">
           <span>☁️</span>
           <span>云端创建 VPS</span>
         </button>
-        <button class="deploy-shortcut-btn" @click="handleDeployShortcut">
+        <button class="deploy-shortcut-btn" @click.stop="handleDeployShortcut" type="button">
           <span>➕</span>
           <span>SSH 部署</span>
         </button>

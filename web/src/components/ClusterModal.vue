@@ -701,6 +701,31 @@ function handleVultrTaskChange(info: { running: boolean; name: string; tab: 'clo
   vultrTaskInfo.tab = info.tab
 }
 
+// ==================== SSH 远程一键部署状态定义 (置于 activeRunningTask 之前，防 TDZ) ====================
+const deployStep = ref<'form' | 'terminal'>('form')
+const isDeploying = ref(false)
+const deployReq = reactive({
+  name: '',
+  sub_prefix: '',
+  host: '',
+  ssh_port: 22,
+  ssh_user: 'root',
+  auth_type: 'password' as 'password' | 'key',
+  ssh_password: '',
+  ssh_private_key: '',
+  panel_port: 20888,
+  admin_username: 'admin',
+  admin_password: '',
+  secret_path: '',
+  enable_tls: true,
+})
+
+const deployTaskStatus = ref<'running' | 'success' | 'failed'>('running')
+const deployLogs = ref<string[]>([])
+const terminalBodyRef = ref<HTMLElement | null>(null)
+let eventSource: EventSource | null = null
+let deployedNodeId = 0
+
 const isSSHDeployRunning = computed(() => deployStep.value === 'terminal' && deployTaskStatus.value === 'running')
 
 const activeRunningTask = computed(() => {
@@ -758,6 +783,9 @@ watch(
   () => props.modelValue,
   (val) => {
     if (val) {
+      if (props.initialTab && !activeRunningTask.value.running) {
+        activeTab.value = props.initialTab
+      }
       fetchNodes()
     }
   }
@@ -881,31 +909,7 @@ async function handleDelete(item: NodeItem) {
   }
 }
 
-// ==================== SSH 远程一键部署 ====================
-const deployStep = ref<'form' | 'terminal'>('form')
-const isDeploying = ref(false)
-const deployReq = reactive({
-  name: '',
-  sub_prefix: '',
-  host: '',
-  ssh_port: 22,
-  ssh_user: 'root',
-  auth_type: 'password' as 'password' | 'key',
-  ssh_password: '',
-  ssh_private_key: '',
-  panel_port: 20888,
-  admin_username: 'admin',
-  admin_password: '',
-  secret_path: '',
-  enable_tls: true,
-})
-
-const deployTaskStatus = ref<'running' | 'success' | 'failed'>('running')
-const deployLogs = ref<string[]>([])
-const terminalBodyRef = ref<HTMLElement | null>(null)
-let eventSource: EventSource | null = null
-let deployedNodeId = 0
-
+// ==================== SSH 远程一键部署逻辑 ====================
 function getLineClass(line: string) {
   if (line.includes('[SUCCESS]')) return 'line-success'
   if (line.includes('[ERROR]')) return 'line-error'
