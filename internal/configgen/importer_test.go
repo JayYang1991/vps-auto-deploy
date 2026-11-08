@@ -125,3 +125,4 @@ func TestImportExistingSingboxConfig(t *testing.T) {
 		t.Errorf("expected outbound tag 'my-warp', got '%s'", outboundTag)
 	}
 }
+
