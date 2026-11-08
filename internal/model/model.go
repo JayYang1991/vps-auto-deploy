@@ -90,6 +90,7 @@ type Tunnel struct {
 type Node struct {
 	ID                int64     `json:"id"`
 	Name              string    `json:"name"`
+	SubPrefix         string    `json:"sub_prefix"`       // 订阅节点名称前缀 (如 "🇭🇰 香港主控", "[JP-01]")
 	Host              string    `json:"host"`
 	SSHPort           int       `json:"ssh_port"`
 	PanelPort         int       `json:"panel_port"`

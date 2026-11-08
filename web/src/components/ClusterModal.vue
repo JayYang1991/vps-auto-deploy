@@ -119,6 +119,10 @@
                   {{ item.ssh_host_key.slice(0, 19) }}...
                 </span>
               </div>
+              <div class="prop-item">
+                <span class="prop-label">订阅前缀:</span>
+                <span class="prop-val font-semibold text-emerald-400">{{ item.sub_prefix || '(未设置，默认用节点名)' }}</span>
+              </div>
             </div>
 
             <!-- 操作按钮组 -->
@@ -132,6 +136,15 @@
                 <span>⚡ 切换视角</span>
               </button>
               <span v-else class="active-notice">✓ 当前正在管理此节点</span>
+
+              <button
+                class="btn-action btn-prefix"
+                @click="openPrefixModal(item)"
+                type="button"
+                title="定制生成订阅节点信息时的名称前缀 (如 🇭🇰 香港主控, 🇯🇵 日本东京)"
+              >
+                <span>✏️ 定制前缀</span>
+              </button>
 
               <button
                 class="btn-action btn-ping"
@@ -187,6 +200,11 @@
             <div class="form-group">
               <label>节点友好名称 <span class="req">*</span></label>
               <input v-model="deployReq.name" type="text" placeholder="例如：香港 HK-01 或 日本东京" />
+            </div>
+
+            <div class="form-group">
+              <label>订阅节点前缀 (可选)</label>
+              <input v-model="deployReq.sub_prefix" type="text" placeholder="例如：🇭🇰 香港01 (留空默认使用名称)" />
             </div>
 
             <div class="form-group">
@@ -329,9 +347,14 @@
           </div>
 
           <div class="form-grid">
-            <div class="form-group full-width">
+            <div class="form-group">
               <label>节点友好名称 <span class="req">*</span></label>
               <input v-model="importReq.name" type="text" placeholder="例如：美国西雅图 或 备用节点 02" />
+            </div>
+
+            <div class="form-group">
+              <label>订阅节点前缀 (可选)</label>
+              <input v-model="importReq.sub_prefix" type="text" placeholder="例如：🇺🇸 美西02 (留空默认使用名称)" />
             </div>
 
             <div class="form-group">
@@ -546,6 +569,88 @@
               :disabled="deletingNode || (destroyCloudInstance && !deleteMasterPassword)"
             >
               <span>{{ deletingNode ? '⏳ 正在处理...' : (destroyCloudInstance ? '💥 确认销毁并移出' : '🔗 仅解除纳管') }}</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 定制订阅节点名称前缀模态框 -->
+    <div v-if="prefixModalVisible" class="reveal-overlay" @click.self="closePrefixModal">
+      <div class="reveal-card">
+        <div class="reveal-header">
+          <div class="reveal-title-box">
+            <span class="reveal-icon">✏️</span>
+            <div>
+              <h4 class="reveal-title">定制订阅节点前缀</h4>
+              <p class="reveal-desc">设置该 VPS 在导出 Clash / Sing-box / Subconverter 时的名称与分流前缀</p>
+            </div>
+          </div>
+          <button class="close-btn" @click="closePrefixModal" type="button">✕</button>
+        </div>
+
+        <div class="reveal-body">
+          <div class="form-alert-info" style="margin-bottom: 1rem;">
+            <span>💡</span>
+            <div>
+              <strong>智能分流策略组匹配：</strong>
+              包含国家/地区旗帜与中文地名（如 <code>🇭🇰 香港</code>、<code>🇯🇵 日本</code>、<code>🇺🇸 美国</code>），Subconverter 与客户端可自动归类至对应国家的代理分流组中。
+            </div>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0.85rem;">
+            <label>节点友好名称 (Name) <span class="req">*</span></label>
+            <input
+              v-model="editingNodeName"
+              type="text"
+              placeholder="例如：🏠 本机 (Master) 或 香港-HK01"
+            />
+          </div>
+
+          <div class="form-group" style="margin-bottom: 0.85rem;">
+            <label>订阅节点前缀 (Sub Prefix)</label>
+            <input
+              v-model="editingNodePrefix"
+              type="text"
+              placeholder="例如：🇭🇰 香港主控 或 🇯🇵 日本东京"
+            />
+          </div>
+
+          <!-- 常用地区快捷填入药丸 -->
+          <div class="form-group" style="margin-bottom: 1rem;">
+            <label style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.35rem;">常用地区预设快捷填入：</label>
+            <div class="preset-pill-row">
+              <button
+                v-for="p in regionPresets"
+                :key="p.name"
+                type="button"
+                class="preset-pill-btn"
+                @click="applyPrefixPreset(p)"
+              >
+                {{ p.emoji }} {{ p.name }}
+              </button>
+            </div>
+          </div>
+
+          <!-- 实时效果预览 -->
+          <div class="preview-box">
+            <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.5rem; font-weight: 600;">
+              🔍 客户端订阅节点名称效果预览：
+            </div>
+            <div class="preview-item">
+              <span class="preview-label">Reality 节点:</span>
+              <span class="preview-code mono">{{ previewRealityName }}</span>
+            </div>
+            <div class="preview-item">
+              <span class="preview-label">WS 优选节点:</span>
+              <span class="preview-code mono">{{ previewWSName }}</span>
+            </div>
+          </div>
+
+          <div class="reveal-footer" style="margin-top: 1.25rem;">
+            <button class="btn-secondary" @click="closePrefixModal" type="button">取消</button>
+            <button class="btn-primary" @click="saveNodePrefix" :disabled="savingPrefix" type="button">
+              <span>{{ savingPrefix ? '⏳ 保存中...' : '💾 保存前缀设置' }}</span>
             </button>
           </div>
         </div>
@@ -781,6 +886,7 @@ const deployStep = ref<'form' | 'terminal'>('form')
 const isDeploying = ref(false)
 const deployReq = reactive({
   name: '',
+  sub_prefix: '',
   host: '',
   ssh_port: 22,
   ssh_user: 'root',
@@ -895,6 +1001,7 @@ function finishDeployAndSwitch() {
 const isImporting = ref(false)
 const importReq = reactive({
   name: '',
+  sub_prefix: '',
   host: '',
   panel_port: 20888,
   secret_path: '',
@@ -986,6 +1093,83 @@ async function submitReveal() {
 
 function copyText(text: string, label: string) {
   copyToClipboard(text, label)
+}
+
+// ==================== 定制节点订阅前缀 (Sub Prefix) ====================
+const prefixModalVisible = ref(false)
+const targetPrefixNode = ref<NodeItem | null>(null)
+const editingNodeName = ref('')
+const editingNodePrefix = ref('')
+const savingPrefix = ref(false)
+
+const regionPresets = [
+  { emoji: '🇭🇰', name: '香港', full: '🇭🇰 香港' },
+  { emoji: '🇯🇵', name: '日本', full: '🇯🇵 日本' },
+  { emoji: '🇸🇬', name: '新加坡', full: '🇸🇬 新加坡' },
+  { emoji: '🇺🇸', name: '美国', full: '🇺🇸 美国' },
+  { emoji: '🇰🇷', name: '韩国', full: '🇰🇷 韩国' },
+  { emoji: '🇹🇼', name: '台湾', full: '🇹🇼 台湾' },
+  { emoji: '🇬🇧', name: '英国', full: '🇬🇧 英国' },
+  { emoji: '🇩🇪', name: '德国', full: '🇩🇪 德国' },
+]
+
+function openPrefixModal(item: NodeItem) {
+  targetPrefixNode.value = item
+  editingNodeName.value = item.name
+  editingNodePrefix.value = item.sub_prefix || ''
+  prefixModalVisible.value = true
+}
+
+function closePrefixModal() {
+  prefixModalVisible.value = false
+  targetPrefixNode.value = null
+}
+
+function applyPrefixPreset(p: { emoji: string; name: string; full: string }) {
+  if (targetPrefixNode.value?.is_master) {
+    editingNodePrefix.value = `${p.full}主控`
+  } else {
+    editingNodePrefix.value = `${p.full}`
+  }
+}
+
+const currentEffectivePrefix = computed(() => {
+  const p = editingNodePrefix.value.trim()
+  if (p) return p
+  const n = editingNodeName.value.trim()
+  if (n) return n
+  return '节点'
+})
+
+const previewRealityName = computed(() => {
+  return `${currentEffectivePrefix.value} | vless-reality-443`
+})
+
+const previewWSName = computed(() => {
+  return `${currentEffectivePrefix.value} | vless-ws-Cloudflare优选`
+})
+
+async function saveNodePrefix() {
+  if (!targetPrefixNode.value) return
+  if (!editingNodeName.value.trim()) {
+    toast.warning('节点友好名称不能为空')
+    return
+  }
+
+  savingPrefix.value = true
+  try {
+    await api.put(`/nodes/${targetPrefixNode.value.id}`, {
+      name: editingNodeName.value.trim(),
+      sub_prefix: editingNodePrefix.value.trim(),
+    })
+    toast.success('节点名称与订阅前缀已成功更新！')
+    closePrefixModal()
+    await fetchNodes()
+  } catch (err: any) {
+    toast.error('保存失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    savingPrefix.value = false
+  }
 }
 
 onUnmounted(() => {
@@ -1328,6 +1512,15 @@ onUnmounted(() => {
   background: #475569;
 }
 
+.btn-prefix {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border-color: rgba(16, 185, 129, 0.3);
+}
+.btn-prefix:hover {
+  background: rgba(16, 185, 129, 0.25);
+}
+
 .btn-reveal {
   background: rgba(245, 158, 11, 0.15);
   color: #fbbf24;
@@ -1335,6 +1528,59 @@ onUnmounted(() => {
 }
 .btn-reveal:hover {
   background: rgba(245, 158, 11, 0.25);
+}
+
+.preset-pill-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.preset-pill-btn {
+  background: rgba(51, 65, 85, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  color: #e2e8f0;
+  border-radius: 9999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.preset-pill-btn:hover {
+  background: rgba(16, 185, 129, 0.2);
+  border-color: rgba(52, 211, 153, 0.5);
+  color: #6ee7b7;
+  transform: translateY(-1px);
+}
+
+.preview-box {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(51, 65, 85, 0.6);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+.preview-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  margin-top: 0.25rem;
+}
+
+.preview-label {
+  color: #94a3b8;
+  font-size: 0.75rem;
+  min-width: 5.5rem;
+}
+
+.preview-code {
+  color: #38bdf8;
+  background: rgba(0, 0, 0, 0.3);
+  padding: 0.15rem 0.4rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
 }
 
 .btn-delete {

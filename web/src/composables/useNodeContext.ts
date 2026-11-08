@@ -4,6 +4,7 @@ import api from '../api'
 export interface NodeItem {
   id: number
   name: string
+  sub_prefix?: string
   host: string
   ssh_port: number
   panel_port: number

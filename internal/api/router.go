@@ -44,6 +44,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.GET("/nodes/deploy-logs", handler.StreamDeployLogs)
 			api.POST("/nodes/import", handler.ImportNode)
 			api.POST("/nodes/:id/ping", handler.PingNode)
+			api.PUT("/nodes/:id", handler.UpdateNode)
 			api.DELETE("/nodes/:id", handler.DeleteNode)
 			api.POST("/nodes/:id/reveal-credentials", handler.RevealNodeCredentials)
 

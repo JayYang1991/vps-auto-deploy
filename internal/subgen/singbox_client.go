@@ -5,36 +5,27 @@ import (
 	"fmt"
 
 	"vps-auto-deploy/internal/model"
-	"vps-auto-deploy/internal/pkg/netutil"
 )
 
 type SingboxClientConfig struct {
 	Outbounds []map[string]interface{} `json:"outbounds"`
 }
 
-// GenerateSingboxClientConfig 为指定成员生成 sing-box 客户端配置 JSON
+// GenerateSingboxClientConfig 为指定成员生成 sing-box 客户端配置 JSON (聚合全集群各节点并附带定制前缀)
 func GenerateSingboxClientConfig(member *model.Member) (string, error) {
-	serverIP, _ := model.GetSetting("public_ip")
-	if serverIP == "" {
-		serverIP = netutil.GetPublicIP()
-	}
-
-	rows, err := model.DB.Query("SELECT id, tag, protocol, listen, port, spec_json FROM inbounds WHERE enabled = 1")
+	clusterInbounds, err := FetchAllClusterInbounds()
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
 
 	var outbounds []map[string]interface{}
 	var outboundTags []string
+	prefIPs, _ := model.ListCFPreferredIPs("")
 
-	for rows.Next() {
-		var ib model.Inbound
-		if err := rows.Scan(&ib.ID, &ib.Tag, &ib.Protocol, &ib.Listen, &ib.Port, &ib.SpecJSON); err != nil {
-			continue
-		}
-
-		tag := fmt.Sprintf("%s-%d", ib.Tag, ib.Port)
+	for _, item := range clusterInbounds {
+		ib := item.Inbound
+		prefix := item.NodePrefix
+		serverHost := item.ServerHost
 
 		switch ib.Protocol {
 		case "vless-reality":
@@ -55,10 +46,12 @@ func GenerateSingboxClientConfig(member *model.Member) (string, error) {
 				serverName = "dl.google.com"
 			}
 
+			tag := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+
 			outbound := map[string]interface{}{
 				"type":        "vless",
 				"tag":         tag,
-				"server":      serverIP,
+				"server":      serverHost,
 				"server_port": ib.Port,
 				"uuid":        member.UUID,
 				"flow":        flow,
@@ -72,7 +65,7 @@ func GenerateSingboxClientConfig(member *model.Member) (string, error) {
 					"reality": map[string]interface{}{
 						"enabled":    true,
 						"public_key": spec.PublicKey,
-						"short_id":   spec.ShortID,
+						"short-id":   spec.ShortID,
 					},
 				},
 			}
@@ -83,13 +76,12 @@ func GenerateSingboxClientConfig(member *model.Member) (string, error) {
 			var spec model.VLESSWSSpec
 			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
 
-			groupDomain := ResolveWSGroupDomain(&spec, serverIP)
+			groupDomain := ResolveWSGroupDomain(&spec, serverHost, item.TunnelsMap)
 			path := spec.Path
 			if path == "" {
 				path = "/ws"
 			}
 
-			prefIPs, _ := model.ListCFPreferredIPs("")
 			if len(prefIPs) > 0 {
 				for _, p := range prefIPs {
 					targetPort := p.Port
@@ -101,7 +93,7 @@ func GenerateSingboxClientConfig(member *model.Member) (string, error) {
 					if nodeName == "" {
 						nodeName = fmt.Sprintf("%s-%s", p.IP, p.Colo)
 					}
-					nodeTag := fmt.Sprintf("%s-%s", ib.Tag, nodeName)
+					nodeTag := fmt.Sprintf("%s | %s-%s", prefix, ib.Tag, nodeName)
 
 					outbound := map[string]interface{}{
 						"type":        "vless",
@@ -125,6 +117,7 @@ func GenerateSingboxClientConfig(member *model.Member) (string, error) {
 					outboundTags = append(outboundTags, nodeTag)
 				}
 			} else {
+				tag := fmt.Sprintf("%s | %s-Argo", prefix, ib.Tag)
 				outbound := map[string]interface{}{
 					"type":        "vless",
 					"tag":         tag,
@@ -175,4 +168,3 @@ func GenerateSingboxClientConfig(member *model.Member) (string, error) {
 	}
 	return string(bytes), nil
 }
-

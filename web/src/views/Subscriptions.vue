@@ -921,6 +921,9 @@
               <span style="font-size: 1.05rem; font-weight: 600; color: #f8fafc;">
                 🖥️ {{ group.node_name }}
               </span>
+              <span v-if="group.sub_prefix" class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 0.72rem;">
+                🏷️ 前缀: {{ group.sub_prefix }}
+              </span>
 
               <!-- 主控 / 被纳管节点标签 -->
               <span v-if="group.is_master" class="badge badge-primary" style="font-size: 0.7rem;">
@@ -1774,6 +1777,7 @@ interface NodeInventoryItem {
 interface NodeInventoryGroup {
   node_id: number
   node_name: string
+  sub_prefix?: string
   host: string
   is_master: boolean
   status: string

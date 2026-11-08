@@ -136,6 +136,33 @@ func TestNodeHandlers(t *testing.T) {
 		}
 	}
 
+	// 3b. Test UpdateNode (customize name and sub_prefix)
+	{
+		r := gin.New()
+		r.PUT("/api/nodes/:id", UpdateNode)
+
+		payload := []byte(`{"name":"🇭🇰 香港BGP专线","sub_prefix":"🇭🇰 香港01"}`)
+		req, _ := http.NewRequest(http.MethodPut, "/api/nodes/2", bytes.NewReader(payload))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected 200 when updating node, got %d: %s", w.Code, w.Body.String())
+		}
+
+		updated, err := model.GetNode(2)
+		if err != nil {
+			t.Fatalf("Failed to fetch node 2: %v", err)
+		}
+		if updated.Name != "🇭🇰 香港BGP专线" {
+			t.Fatalf("Expected updated name '🇭🇰 香港BGP专线', got '%s'", updated.Name)
+		}
+		if updated.SubPrefix != "🇭🇰 香港01" {
+			t.Fatalf("Expected updated sub_prefix '🇭🇰 香港01', got '%s'", updated.SubPrefix)
+		}
+	}
+
 	// 4. Test DeleteNode for master node (ID=1) -> 403 Forbidden
 	{
 		r := gin.New()

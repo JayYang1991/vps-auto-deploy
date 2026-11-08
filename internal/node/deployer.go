@@ -25,6 +25,7 @@ import (
 // DeploySSHRequest SSH 远程部署请求参数
 type DeploySSHRequest struct {
 	Name          string `json:"name"`
+	SubPrefix     string `json:"sub_prefix"` // 订阅节点名称前缀 (如 "🇭🇰 香港主控", "🇯🇵 日本东京")
 	Host          string `json:"host"`
 	SSHPort       int    `json:"ssh_port"`
 	SSHUser       string `json:"ssh_user"`
@@ -516,8 +517,14 @@ WantedBy=multi-user.target
 		return
 	}
 
+	subPrefix := strings.TrimSpace(req.SubPrefix)
+	if subPrefix == "" {
+		subPrefix = strings.TrimSpace(req.Name)
+	}
+
 	newNode := &model.Node{
 		Name:              req.Name,
+		SubPrefix:         subPrefix,
 		Host:              req.Host,
 		SSHPort:           req.SSHPort,
 		PanelPort:         req.PanelPort,

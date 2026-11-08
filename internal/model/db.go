@@ -103,6 +103,7 @@ func migrate() error {
 	CREATE TABLE IF NOT EXISTS nodes (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		name TEXT NOT NULL,
+		sub_prefix TEXT NOT NULL DEFAULT '',
 		host TEXT NOT NULL,
 		ssh_port INTEGER NOT NULL DEFAULT 22,
 		panel_port INTEGER NOT NULL DEFAULT 20888,
@@ -144,7 +145,8 @@ func migrate() error {
 		return err
 	}
 
-	// 增量字段平滑迁移 (防御 MITM 指纹字段与云主机元数据)
+	// 增量字段平滑迁移 (防御 MITM 指纹字段与云主机元数据、节点前缀)
+	_, _ = DB.Exec("ALTER TABLE nodes ADD COLUMN sub_prefix TEXT NOT NULL DEFAULT ''")
 	_, _ = DB.Exec("ALTER TABLE nodes ADD COLUMN use_tls INTEGER NOT NULL DEFAULT 0")
 	_, _ = DB.Exec("ALTER TABLE nodes ADD COLUMN cert_fingerprint TEXT NOT NULL DEFAULT ''")
 	_, _ = DB.Exec("ALTER TABLE nodes ADD COLUMN ssh_host_key TEXT NOT NULL DEFAULT ''")
@@ -221,7 +223,7 @@ func initDefaults() error {
 		secretPath, _ := GetSetting("secret_path")
 		now := time.Now()
 		_, _ = DB.Exec(
-			"INSERT INTO nodes (id, name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, status, os_info, latency_ms, created_at, updated_at) VALUES (1, ?, '127.0.0.1', 22, 20888, ?, 'admin', '', '', 1, 'online', ?, 0, ?, ?)",
+			"INSERT INTO nodes (id, name, sub_prefix, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, status, os_info, latency_ms, created_at, updated_at) VALUES (1, ?, '🇭🇰 本地主控', '127.0.0.1', 22, 20888, ?, 'admin', '', '', 1, 'online', ?, 0, ?, ?)",
 			"🏠 本机 (Master)",
 			secretPath,
 			runtime.GOOS+"/"+runtime.GOARCH,
@@ -237,13 +239,13 @@ func initDefaults() error {
 // GetNode 获取单个节点信息
 func GetNode(id int64) (*Node, error) {
 	row := DB.QueryRow(
-		"SELECT id, name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, cloud_provider, cloud_instance_id, region, plan, status, os_info, latency_ms, created_at, updated_at FROM nodes WHERE id = ?",
+		"SELECT id, name, sub_prefix, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, cloud_provider, cloud_instance_id, region, plan, status, os_info, latency_ms, created_at, updated_at FROM nodes WHERE id = ?",
 		id,
 	)
 	var n Node
 	var isMasterInt, useTLSInt int
 	err := row.Scan(
-		&n.ID, &n.Name, &n.Host, &n.SSHPort, &n.PanelPort, &n.SecretPath,
+		&n.ID, &n.Name, &n.SubPrefix, &n.Host, &n.SSHPort, &n.PanelPort, &n.SecretPath,
 		&n.Username, &n.PasswordEncrypted, &n.APIToken, &isMasterInt,
 		&useTLSInt, &n.CertFingerprint, &n.SSHHostKey,
 		&n.CloudProvider, &n.CloudInstanceID, &n.Region, &n.Plan,
@@ -260,7 +262,7 @@ func GetNode(id int64) (*Node, error) {
 // ListNodes 列出所有节点（主控本机始终排在首位）
 func ListNodes() ([]Node, error) {
 	rows, err := DB.Query(
-		"SELECT id, name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, cloud_provider, cloud_instance_id, region, plan, status, os_info, latency_ms, created_at, updated_at FROM nodes ORDER BY is_master DESC, id ASC",
+		"SELECT id, name, sub_prefix, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, cloud_provider, cloud_instance_id, region, plan, status, os_info, latency_ms, created_at, updated_at FROM nodes ORDER BY is_master DESC, id ASC",
 	)
 	if err != nil {
 		return nil, err
@@ -272,7 +274,7 @@ func ListNodes() ([]Node, error) {
 		var n Node
 		var isMasterInt, useTLSInt int
 		if err := rows.Scan(
-			&n.ID, &n.Name, &n.Host, &n.SSHPort, &n.PanelPort, &n.SecretPath,
+			&n.ID, &n.Name, &n.SubPrefix, &n.Host, &n.SSHPort, &n.PanelPort, &n.SecretPath,
 			&n.Username, &n.PasswordEncrypted, &n.APIToken, &isMasterInt,
 			&useTLSInt, &n.CertFingerprint, &n.SSHHostKey,
 			&n.CloudProvider, &n.CloudInstanceID, &n.Region, &n.Plan,
@@ -301,8 +303,8 @@ func CreateNode(n *Node) (int64, error) {
 		useTLSInt = 1
 	}
 	res, err := DB.Exec(
-		"INSERT INTO nodes (name, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, cloud_provider, cloud_instance_id, region, plan, status, os_info, latency_ms, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-		n.Name, n.Host, n.SSHPort, n.PanelPort, n.SecretPath, n.Username, n.PasswordEncrypted, n.APIToken, isMasterInt, useTLSInt, n.CertFingerprint, n.SSHHostKey, n.CloudProvider, n.CloudInstanceID, n.Region, n.Plan, n.Status, n.OSInfo, n.LatencyMs, n.CreatedAt, n.UpdatedAt,
+		"INSERT INTO nodes (name, sub_prefix, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, cloud_provider, cloud_instance_id, region, plan, status, os_info, latency_ms, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		n.Name, n.SubPrefix, n.Host, n.SSHPort, n.PanelPort, n.SecretPath, n.Username, n.PasswordEncrypted, n.APIToken, isMasterInt, useTLSInt, n.CertFingerprint, n.SSHHostKey, n.CloudProvider, n.CloudInstanceID, n.Region, n.Plan, n.Status, n.OSInfo, n.LatencyMs, n.CreatedAt, n.UpdatedAt,
 	)
 	if err != nil {
 		return 0, err
@@ -324,9 +326,15 @@ func UpdateNode(n *Node) error {
 		useTLSInt = 1
 	}
 	_, err := DB.Exec(
-		"UPDATE nodes SET name = ?, host = ?, ssh_port = ?, panel_port = ?, secret_path = ?, username = ?, password_encrypted = ?, api_token = ?, use_tls = ?, cert_fingerprint = ?, ssh_host_key = ?, cloud_provider = ?, cloud_instance_id = ?, region = ?, plan = ?, status = ?, os_info = ?, latency_ms = ?, updated_at = ? WHERE id = ?",
-		n.Name, n.Host, n.SSHPort, n.PanelPort, n.SecretPath, n.Username, n.PasswordEncrypted, n.APIToken, useTLSInt, n.CertFingerprint, n.SSHHostKey, n.CloudProvider, n.CloudInstanceID, n.Region, n.Plan, n.Status, n.OSInfo, n.LatencyMs, n.UpdatedAt, n.ID,
+		"UPDATE nodes SET name = ?, sub_prefix = ?, host = ?, ssh_port = ?, panel_port = ?, secret_path = ?, username = ?, password_encrypted = ?, api_token = ?, use_tls = ?, cert_fingerprint = ?, ssh_host_key = ?, cloud_provider = ?, cloud_instance_id = ?, region = ?, plan = ?, status = ?, os_info = ?, latency_ms = ?, updated_at = ? WHERE id = ?",
+		n.Name, n.SubPrefix, n.Host, n.SSHPort, n.PanelPort, n.SecretPath, n.Username, n.PasswordEncrypted, n.APIToken, useTLSInt, n.CertFingerprint, n.SSHHostKey, n.CloudProvider, n.CloudInstanceID, n.Region, n.Plan, n.Status, n.OSInfo, n.LatencyMs, n.UpdatedAt, n.ID,
 	)
+	return err
+}
+
+// UpdateNodePrefix 专门更新节点名称与订阅前缀
+func UpdateNodePrefix(id int64, name, subPrefix string) error {
+	_, err := DB.Exec("UPDATE nodes SET name = ?, sub_prefix = ?, updated_at = ? WHERE id = ?", name, subPrefix, time.Now(), id)
 	return err
 }
 

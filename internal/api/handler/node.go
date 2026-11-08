@@ -113,6 +113,7 @@ func StreamDeployLogs(c *gin.Context) {
 func ImportNode(c *gin.Context) {
 	var req struct {
 		Name            string `json:"name"`
+		SubPrefix       string `json:"sub_prefix"`
 		Host            string `json:"host"`
 		PanelPort       int    `json:"panel_port"`
 		SecretPath      string `json:"secret_path"`
@@ -153,8 +154,14 @@ func ImportNode(c *gin.Context) {
 		return
 	}
 
+	subPrefix := strings.TrimSpace(req.SubPrefix)
+	if subPrefix == "" {
+		subPrefix = req.Name
+	}
+
 	newNode := &model.Node{
 		Name:              req.Name,
+		SubPrefix:         subPrefix,
 		Host:              req.Host,
 		SSHPort:           22,
 		PanelPort:         req.PanelPort,
@@ -210,6 +217,49 @@ func PingNode(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"status":     "online",
 		"latency_ms": latency,
+	})
+}
+
+// UpdateNode 更新节点基础信息（如展示名称与订阅节点前缀）
+func UpdateNode(c *gin.Context) {
+	idStr := c.Param("id")
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的节点 ID"})
+		return
+	}
+
+	target, err := model.GetNode(id)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "目标节点不存在"})
+		return
+	}
+
+	var req struct {
+		Name      string `json:"name"`
+		SubPrefix string `json:"sub_prefix"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name != "" {
+		target.Name = name
+	}
+	target.SubPrefix = strings.TrimSpace(req.SubPrefix)
+
+	if err := model.UpdateNodePrefix(target.ID, target.Name, target.SubPrefix); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "更新节点失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":    "节点信息更新成功",
+		"id":         target.ID,
+		"name":       target.Name,
+		"sub_prefix": target.SubPrefix,
 	})
 }
 

@@ -5,9 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"vps-auto-deploy/internal/model"
-	"vps-auto-deploy/internal/pkg/netutil"
 	"gopkg.in/yaml.v3"
+	"vps-auto-deploy/internal/model"
 )
 
 type ClashConfig struct {
@@ -24,31 +23,21 @@ type ClashConfig struct {
 	Rules              []string                 `yaml:"rules"`
 }
 
-// GenerateClashMetaConfig 为指定成员生成 Clash Meta (Mihomo) YAML 配置
+// GenerateClashMetaConfig 为指定成员生成 Clash Meta (Mihomo) YAML 配置 (聚合全集群各节点并附带定制前缀)
 func GenerateClashMetaConfig(member *model.Member) (string, error) {
-	// 获取主机的公网 IP
-	serverIP, _ := model.GetSetting("public_ip")
-	if serverIP == "" {
-		serverIP = netutil.GetPublicIP()
-	}
-
-	// 查询所有启用的入站
-	rows, err := model.DB.Query("SELECT id, tag, protocol, listen, port, spec_json FROM inbounds WHERE enabled = 1")
+	clusterInbounds, err := FetchAllClusterInbounds()
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
 
 	var proxies []map[string]interface{}
 	var proxyNames []string
+	prefIPs, _ := model.ListCFPreferredIPs("")
 
-	for rows.Next() {
-		var ib model.Inbound
-		if err := rows.Scan(&ib.ID, &ib.Tag, &ib.Protocol, &ib.Listen, &ib.Port, &ib.SpecJSON); err != nil {
-			continue
-		}
-
-		name := fmt.Sprintf("%s-%d", ib.Tag, ib.Port)
+	for _, item := range clusterInbounds {
+		ib := item.Inbound
+		prefix := item.NodePrefix
+		serverHost := item.ServerHost
 
 		switch ib.Protocol {
 		case "vless-reality":
@@ -69,10 +58,12 @@ func GenerateClashMetaConfig(member *model.Member) (string, error) {
 				serverName = "dl.google.com"
 			}
 
+			name := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
+
 			proxy := map[string]interface{}{
 				"name":               name,
 				"type":               "vless",
-				"server":             serverIP,
+				"server":             serverHost,
 				"port":               ib.Port,
 				"uuid":               member.UUID,
 				"network":            "tcp",
@@ -93,13 +84,12 @@ func GenerateClashMetaConfig(member *model.Member) (string, error) {
 			var spec model.VLESSWSSpec
 			_ = json.Unmarshal([]byte(ib.SpecJSON), &spec)
 
-			groupDomain := ResolveWSGroupDomain(&spec, serverIP)
+			groupDomain := ResolveWSGroupDomain(&spec, serverHost, item.TunnelsMap)
 			path := spec.Path
 			if path == "" {
 				path = "/ws"
 			}
 
-			prefIPs, _ := model.ListCFPreferredIPs("")
 			if len(prefIPs) > 0 {
 				for _, p := range prefIPs {
 					targetPort := p.Port
@@ -111,7 +101,7 @@ func GenerateClashMetaConfig(member *model.Member) (string, error) {
 					if nodeName == "" {
 						nodeName = fmt.Sprintf("%s-%s", p.IP, p.Colo)
 					}
-					proxyName := fmt.Sprintf("%s-%s", ib.Tag, nodeName)
+					proxyName := fmt.Sprintf("%s | %s-%s", prefix, ib.Tag, nodeName)
 
 					proxy := map[string]interface{}{
 						"name":       proxyName,
@@ -134,6 +124,7 @@ func GenerateClashMetaConfig(member *model.Member) (string, error) {
 					proxyNames = append(proxyNames, proxyName)
 				}
 			} else {
+				name := fmt.Sprintf("%s | %s-Argo", prefix, ib.Tag)
 				proxy := map[string]interface{}{
 					"name":       name,
 					"type":       "vless",
@@ -163,6 +154,8 @@ func GenerateClashMetaConfig(member *model.Member) (string, error) {
 
 	// 组装 Proxy Groups
 	allGroupProxies := append([]string{"DIRECT"}, proxyNames...)
+	_ = allGroupProxies
+
 	proxyGroups := []map[string]interface{}{
 		{
 			"name":    "PROXY",
@@ -205,9 +198,6 @@ func GenerateClashMetaConfig(member *model.Member) (string, error) {
 		Rules:              rules,
 	}
 
-	// 补充全局通用组
-	_ = allGroupProxies
-
 	yamlBytes, err := yaml.Marshal(&cfg)
 	if err != nil {
 		return "", err
@@ -219,4 +209,3 @@ func GenerateClashMetaConfig(member *model.Member) (string, error) {
 
 	return header + string(yamlBytes), nil
 }
-
