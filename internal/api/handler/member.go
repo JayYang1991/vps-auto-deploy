@@ -70,7 +70,12 @@ func CreateMember(c *gin.Context) {
 	id, _ := res.LastInsertId()
 
 	// 重新生成 sing-box 配置
-	_ = configgen.ApplyAndReload(singbox.ConfigPath)
+	if err := configgen.ApplyAndReload(singbox.ConfigPath); err != nil {
+		_, _ = model.DB.Exec("DELETE FROM members WHERE id = ?", id)
+		_ = configgen.ApplyAndReload(singbox.ConfigPath)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "成员创建后配置生效失败，已自动回滚: " + err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"id":        id,
@@ -152,7 +157,15 @@ func UpdateMember(c *gin.Context) {
 	}
 
 	// 重新生成 sing-box 配置以更新 inbounds 中的 users[].name
-	_ = configgen.ApplyAndReload(singbox.ConfigPath)
+	if err := configgen.ApplyAndReload(singbox.ConfigPath); err != nil {
+		_, _ = model.DB.Exec(
+			"UPDATE members SET name = ?, uuid = ?, enabled = ?, updated_at = ? WHERE id = ?",
+			existing.Name, existing.UUID, existing.Enabled, existing.UpdatedAt, id,
+		)
+		_ = configgen.ApplyAndReload(singbox.ConfigPath)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "成员更新后配置生效失败，已自动回滚: " + err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "member updated successfully",
@@ -165,15 +178,35 @@ func UpdateMember(c *gin.Context) {
 
 func DeleteMember(c *gin.Context) {
 	idStr := c.Param("id")
-	id, _ := strconv.ParseInt(idStr, 10, 64)
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
 
-	_, err := model.DB.Exec("DELETE FROM members WHERE id = ?", id)
+	var oldM model.Member
+	err = model.DB.QueryRow("SELECT id, name, uuid, sub_token, enabled, created_at, updated_at FROM members WHERE id = ?", id).
+		Scan(&oldM.ID, &oldM.Name, &oldM.UUID, &oldM.SubToken, &oldM.Enabled, &oldM.CreatedAt, &oldM.UpdatedAt)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "member not found"})
+		return
+	}
+
+	_, err = model.DB.Exec("DELETE FROM members WHERE id = ?", id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	_ = configgen.ApplyAndReload(singbox.ConfigPath)
+	if err := configgen.ApplyAndReload(singbox.ConfigPath); err != nil {
+		_, _ = model.DB.Exec(
+			"INSERT INTO members (id, name, uuid, sub_token, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+			oldM.ID, oldM.Name, oldM.UUID, oldM.SubToken, oldM.Enabled, oldM.CreatedAt, oldM.UpdatedAt,
+		)
+		_ = configgen.ApplyAndReload(singbox.ConfigPath)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "成员删除后配置生效失败，已自动恢复: " + err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "member deleted"})
 }

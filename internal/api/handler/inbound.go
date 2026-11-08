@@ -80,7 +80,14 @@ func ToggleInbound(c *gin.Context) {
 		return
 	}
 
-	_ = configgen.ApplyAndReload(singbox.ConfigPath)
+	if err := configgen.ApplyAndReload(singbox.ConfigPath); err != nil {
+		// 回滚数据库记录并重刷配置
+		_, _ = model.DB.Exec("UPDATE inbounds SET enabled = ?, updated_at = ? WHERE id = ?", enabled, time.Now(), id)
+		_ = configgen.ApplyAndReload(singbox.ConfigPath)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "入站状态切换失败，已自动回滚: " + err.Error()})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"id": id, "enabled": newStatus, "message": "入站节点状态已切换"})
 }
 
@@ -125,8 +132,14 @@ func CreateInbound(c *gin.Context) {
 
 	id, _ := res.LastInsertId()
 
-	// 自动触发一次配置生成与热重载
-	_ = configgen.ApplyAndReload(singbox.ConfigPath)
+	// 自动触发一次配置生成与生效探活
+	if err := configgen.ApplyAndReload(singbox.ConfigPath); err != nil {
+		// 回滚入站记录
+		_, _ = model.DB.Exec("DELETE FROM inbounds WHERE id = ?", id)
+		_ = configgen.ApplyAndReload(singbox.ConfigPath)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "入站配置生效失败，已自动回滚: " + err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"id":      id,
@@ -145,6 +158,14 @@ func UpdateInbound(c *gin.Context) {
 	var req InboundCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	var oldIb model.Inbound
+	err = model.DB.QueryRow("SELECT id, tag, protocol, listen, port, spec_json, enabled, created_at, updated_at FROM inbounds WHERE id = ?", id).
+		Scan(&oldIb.ID, &oldIb.Tag, &oldIb.Protocol, &oldIb.Listen, &oldIb.Port, &oldIb.SpecJSON, &oldIb.Enabled, &oldIb.CreatedAt, &oldIb.UpdatedAt)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "inbound not found"})
 		return
 	}
 
@@ -167,22 +188,52 @@ func UpdateInbound(c *gin.Context) {
 		return
 	}
 
-	_ = configgen.ApplyAndReload(singbox.ConfigPath)
+	if err := configgen.ApplyAndReload(singbox.ConfigPath); err != nil {
+		// 回滚数据库记录
+		_, _ = model.DB.Exec(
+			"UPDATE inbounds SET tag = ?, protocol = ?, listen = ?, port = ?, spec_json = ?, enabled = ?, updated_at = ? WHERE id = ?",
+			oldIb.Tag, oldIb.Protocol, oldIb.Listen, oldIb.Port, oldIb.SpecJSON, oldIb.Enabled, oldIb.UpdatedAt, id,
+		)
+		_ = configgen.ApplyAndReload(singbox.ConfigPath)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "入站更新后配置生效失败，已自动回滚: " + err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "inbound updated"})
 }
 
 func DeleteInbound(c *gin.Context) {
 	idStr := c.Param("id")
-	id, _ := strconv.ParseInt(idStr, 10, 64)
+	id, err := strconv.ParseInt(idStr, 10, 64)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
 
-	_, err := model.DB.Exec("DELETE FROM inbounds WHERE id = ?", id)
+	var oldIb model.Inbound
+	err = model.DB.QueryRow("SELECT id, tag, protocol, listen, port, spec_json, enabled, created_at, updated_at FROM inbounds WHERE id = ?", id).
+		Scan(&oldIb.ID, &oldIb.Tag, &oldIb.Protocol, &oldIb.Listen, &oldIb.Port, &oldIb.SpecJSON, &oldIb.Enabled, &oldIb.CreatedAt, &oldIb.UpdatedAt)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "inbound not found"})
+		return
+	}
+
+	_, err = model.DB.Exec("DELETE FROM inbounds WHERE id = ?", id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	_ = configgen.ApplyAndReload(singbox.ConfigPath)
+	if err := configgen.ApplyAndReload(singbox.ConfigPath); err != nil {
+		// 回滚恢复被删除的记录
+		_, _ = model.DB.Exec(
+			"INSERT INTO inbounds (id, tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			oldIb.ID, oldIb.Tag, oldIb.Protocol, oldIb.Listen, oldIb.Port, oldIb.SpecJSON, oldIb.Enabled, oldIb.CreatedAt, oldIb.UpdatedAt,
+		)
+		_ = configgen.ApplyAndReload(singbox.ConfigPath)
+		c.JSON(http.StatusBadRequest, gin.H{"error": "入站删除后配置生效失败，已自动恢复: " + err.Error()})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "inbound deleted"})
 }
@@ -198,7 +249,7 @@ func PreviewSingboxConfig(c *gin.Context) {
 
 func ApplySingboxConfig(c *gin.Context) {
 	if err := configgen.ApplyAndReload(singbox.ConfigPath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sing-box 配置生效失败: " + err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "sing-box configuration verified and reloaded successfully"})

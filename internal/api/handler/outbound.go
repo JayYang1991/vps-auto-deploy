@@ -95,9 +95,11 @@ func CreateOutbound(c *gin.Context) {
 
 	// 重新生成并应用 sing-box 配置
 	if err := configgen.ApplyAndReload(singbox.GetConfigPath()); err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"id":      id,
-			"warning": "出站规则已落盘，但 sing-box 配置重载失败: " + err.Error(),
+		// 出站配置生效失败，回滚 DB 插入
+		_, _ = model.DB.Exec("DELETE FROM outbounds WHERE id = ?", id)
+		_ = configgen.ApplyAndReload(singbox.GetConfigPath())
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "出站规则生效失败，已自动回滚: " + err.Error(),
 		})
 		return
 	}
@@ -120,9 +122,10 @@ func UpdateOutbound(c *gin.Context) {
 		return
 	}
 
-	// 检查是否为系统预置出站
-	var isSystem bool
-	err = model.DB.QueryRow("SELECT is_system FROM outbounds WHERE id = ?", id).Scan(&isSystem)
+	// 检查并备份当前出站记录
+	var oldOb model.Outbound
+	err = model.DB.QueryRow("SELECT id, tag, type, server, server_port, spec_json, priority, enabled, is_system, created_at, updated_at FROM outbounds WHERE id = ?", id).
+		Scan(&oldOb.ID, &oldOb.Tag, &oldOb.Type, &oldOb.Server, &oldOb.ServerPort, &oldOb.SpecJSON, &oldOb.Priority, &oldOb.Enabled, &oldOb.IsSystem, &oldOb.CreatedAt, &oldOb.UpdatedAt)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "outbound not found"})
 		return
@@ -140,7 +143,7 @@ func UpdateOutbound(c *gin.Context) {
 
 	now := time.Now()
 	// 若是系统预置规则，禁止篡改核心 type
-	if isSystem {
+	if oldOb.IsSystem {
 		_, err = model.DB.Exec(
 			"UPDATE outbounds SET priority = ?, enabled = ?, updated_at = ? WHERE id = ?",
 			priority, req.Enabled, now, id,
@@ -158,8 +161,14 @@ func UpdateOutbound(c *gin.Context) {
 	}
 
 	if err := configgen.ApplyAndReload(singbox.GetConfigPath()); err != nil {
-		c.JSON(http.StatusOK, gin.H{
-			"message": "出站规则已更新，但 sing-box 重载警告: " + err.Error(),
+		// 回滚出站数据库记录
+		_, _ = model.DB.Exec(
+			"UPDATE outbounds SET tag = ?, type = ?, server = ?, server_port = ?, spec_json = ?, priority = ?, enabled = ?, updated_at = ? WHERE id = ?",
+			oldOb.Tag, oldOb.Type, oldOb.Server, oldOb.ServerPort, oldOb.SpecJSON, oldOb.Priority, oldOb.Enabled, oldOb.UpdatedAt, id,
+		)
+		_ = configgen.ApplyAndReload(singbox.GetConfigPath())
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": "出站规则更新后生效失败，已自动回滚: " + err.Error(),
 		})
 		return
 	}
@@ -176,14 +185,29 @@ func ToggleOutbound(c *gin.Context) {
 		return
 	}
 
+	var oldEnabled bool
+	err = model.DB.QueryRow("SELECT enabled FROM outbounds WHERE id = ?", id).Scan(&oldEnabled)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "outbound not found"})
+		return
+	}
+
 	now := time.Now()
-	_, err = model.DB.Exec("UPDATE outbounds SET enabled = CASE WHEN enabled = 1 THEN 0 ELSE 1 END, updated_at = ? WHERE id = ?", now, id)
+	newEnabled := !oldEnabled
+	_, err = model.DB.Exec("UPDATE outbounds SET enabled = ?, updated_at = ? WHERE id = ?", newEnabled, now, id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	_ = configgen.ApplyAndReload(singbox.GetConfigPath())
+	if err := configgen.ApplyAndReload(singbox.GetConfigPath()); err != nil {
+		// 回滚状态
+		_, _ = model.DB.Exec("UPDATE outbounds SET enabled = ?, updated_at = ? WHERE id = ?", oldEnabled, now, id)
+		_ = configgen.ApplyAndReload(singbox.GetConfigPath())
+		c.JSON(http.StatusBadRequest, gin.H{"error": "出站状态切换后生效失败，已自动回滚: " + err.Error()})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "出站状态已更新"})
 }
 
@@ -196,13 +220,14 @@ func DeleteOutbound(c *gin.Context) {
 		return
 	}
 
-	var isSystem bool
-	err = model.DB.QueryRow("SELECT is_system FROM outbounds WHERE id = ?", id).Scan(&isSystem)
+	var oldOb model.Outbound
+	err = model.DB.QueryRow("SELECT id, tag, type, server, server_port, spec_json, priority, enabled, is_system, created_at, updated_at FROM outbounds WHERE id = ?", id).
+		Scan(&oldOb.ID, &oldOb.Tag, &oldOb.Type, &oldOb.Server, &oldOb.ServerPort, &oldOb.SpecJSON, &oldOb.Priority, &oldOb.Enabled, &oldOb.IsSystem, &oldOb.CreatedAt, &oldOb.UpdatedAt)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "outbound not found"})
 		return
 	}
-	if isSystem {
+	if oldOb.IsSystem {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "系统核心预置出站规则不允许删除"})
 		return
 	}
@@ -213,7 +238,17 @@ func DeleteOutbound(c *gin.Context) {
 		return
 	}
 
-	_ = configgen.ApplyAndReload(singbox.GetConfigPath())
+	if err := configgen.ApplyAndReload(singbox.GetConfigPath()); err != nil {
+		// 恢复被删除的出站规则
+		_, _ = model.DB.Exec(
+			"INSERT INTO outbounds (id, tag, type, server, server_port, spec_json, priority, enabled, is_system, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			oldOb.ID, oldOb.Tag, oldOb.Type, oldOb.Server, oldOb.ServerPort, oldOb.SpecJSON, oldOb.Priority, oldOb.Enabled, oldOb.IsSystem, oldOb.CreatedAt, oldOb.UpdatedAt,
+		)
+		_ = configgen.ApplyAndReload(singbox.GetConfigPath())
+		c.JSON(http.StatusBadRequest, gin.H{"error": "出站删除后配置生效失败，已自动恢复: " + err.Error()})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{"message": "出站规则已成功删除"})
 }
 
@@ -264,7 +299,7 @@ func GetSingboxFullConfig(c *gin.Context) {
 // ReloadSingboxService 强制重新应用并重启/重载 sing-box
 func ReloadSingboxService(c *gin.Context) {
 	if err := configgen.ApplyAndReload(singbox.GetConfigPath()); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "重载失败: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "重载失败: " + err.Error()})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "sing-box 服务已成功重新加载最新配置！"})

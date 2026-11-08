@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -136,7 +137,16 @@ func GetSubconverterConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, resp)
 }
 
-// SaveSubconverterConfig 保存 pref.ini 并按需重启服务
+func rollbackSubconverter(configPath string, oldConfig []byte, drv *subconverter.Driver) {
+	if len(oldConfig) > 0 {
+		_ = os.WriteFile(configPath, oldConfig, 0644)
+	} else {
+		_ = os.Remove(configPath)
+	}
+	_ = drv.Restart()
+}
+
+// SaveSubconverterConfig 保存 pref.ini 并进行合法性校验、探活与自动回滚
 func SaveSubconverterConfig(c *gin.Context) {
 	var req SaveSubconverterConfigRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -144,8 +154,42 @@ func SaveSubconverterConfig(c *gin.Context) {
 		return
 	}
 
+	// 1. 语法与参数合法性预检
+	listen := strings.TrimSpace(req.Listen)
+	if listen != "" && listen != "0.0.0.0" && listen != "127.0.0.1" && listen != "::" && listen != "::1" {
+		if net.ParseIP(listen) == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "绑定监听地址格式不合法: " + listen})
+			return
+		}
+	}
+	if req.Port < 0 || req.Port > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "监听端口必须在 1 ~ 65535 之间"})
+		return
+	}
+
+	if strings.TrimSpace(req.RawContent) != "" {
+		parsed := parseIniKeyValues(req.RawContent)
+		if pStr, ok := parsed["port"]; ok {
+			pVal, err := strconv.Atoi(strings.TrimSpace(pStr))
+			if err != nil || pVal < 1 || pVal > 65535 {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "pref.ini 中的 port 必须在 1 ~ 65535 之间"})
+				return
+			}
+		}
+		if lStr, ok := parsed["listen"]; ok {
+			lStr = strings.TrimSpace(lStr)
+			if lStr != "" && lStr != "0.0.0.0" && lStr != "127.0.0.1" && lStr != "::" && lStr != "::1" && net.ParseIP(lStr) == nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "pref.ini 中的 listen 格式不合法: " + lStr})
+				return
+			}
+		}
+	}
+
 	configPath := subconverter.GetConfigPath()
 	_ = os.MkdirAll(filepath.Dir(configPath), 0755)
+
+	// 2. 备份原配置
+	oldConfig, _ := os.ReadFile(configPath)
 
 	contentToWrite := req.RawContent
 	if strings.TrimSpace(contentToWrite) == "" {
@@ -161,22 +205,63 @@ func SaveSubconverterConfig(c *gin.Context) {
 		})
 	}
 
+	// 3. 写入新配置
 	if err := os.WriteFile(configPath, []byte(contentToWrite), 0644); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "写入配置文件失败: " + err.Error()})
 		return
 	}
 
-	// 若服务当前处于活跃状态，自动执行重载/重启
+	// 4. 计算目标探活端口
+	targetPort := req.Port
+	if targetPort <= 0 {
+		s := parseIniKeyValues(contentToWrite)
+		if pVal, err := strconv.Atoi(strings.TrimSpace(s["port"])); err == nil && pVal > 0 {
+			targetPort = pVal
+		}
+	}
+	if targetPort <= 0 {
+		targetPort = subconverter.DefaultPort
+	}
+
+	// 5. 若服务已安装且运行中，重启并执行健康探活
 	drv := subconverter.NewDriver()
 	st, _ := drv.Status()
 	restarted := false
-	if st.Active {
-		_ = drv.Restart()
+	if st.Installed && st.Active {
+		if err := drv.Restart(); err != nil {
+			rollbackSubconverter(configPath, oldConfig, drv)
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Subconverter 服务重启失败，已自动回滚原配置: " + err.Error()})
+			return
+		}
 		restarted = true
+
+		// 启动探活检测 (最多等待 3 秒)
+		client := &http.Client{Timeout: 500 * time.Millisecond}
+		probeURL := fmt.Sprintf("http://127.0.0.1:%d/version", targetPort)
+		healthy := false
+		for i := 0; i < 10; i++ {
+			time.Sleep(300 * time.Millisecond)
+			resp, err := client.Get(probeURL)
+			if err == nil {
+				resp.Body.Close()
+				if resp.StatusCode == http.StatusOK {
+					healthy = true
+					break
+				}
+			}
+		}
+
+		if !healthy {
+			rollbackSubconverter(configPath, oldConfig, drv)
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("Subconverter 启动后健康探活失败 (端口 %d 无响应)，已自动回滚原配置", targetPort),
+			})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":   "Subconverter 配置已成功保存！",
+		"message":   "Subconverter 配置已成功保存并通过健康检查！",
 		"restarted": restarted,
 	})
 }

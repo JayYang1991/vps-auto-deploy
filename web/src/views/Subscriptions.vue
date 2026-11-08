@@ -1372,6 +1372,8 @@ async function savePreferences() {
     await fetchSubStatus()
   } catch (err: any) {
     toast.error('保存失败: ' + (err.response?.data?.error || err.message))
+    await fetchSubConfig()
+    await fetchSubStatus()
   } finally {
     savingConfig.value = false
   }

@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"vps-auto-deploy/internal/component"
 	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/model"
 )
@@ -246,44 +248,92 @@ func GenerateServerConfig() (*SingboxConfig, error) {
 	return cfg, nil
 }
 
+func probeSingboxHealth(driver *singbox.Driver) error {
+	// 启动后探活检查：多次检测服务是否异常退出或进入 crash loop
+	for i := 0; i < 6; i++ {
+		time.Sleep(250 * time.Millisecond)
+		st, err := driver.Status()
+		if err != nil {
+			continue
+		}
+		if st.RunningStatus == "failed" {
+			return fmt.Errorf("服务进入失败状态 (failed)")
+		}
+		if !st.Active && !component.IsProcessRunning(singbox.DriverName) {
+			return fmt.Errorf("服务进程未保持运行")
+		}
+	}
+	return nil
+}
+
+func rollbackSingbox(destPath string, oldConfig []byte, driver *singbox.Driver, wasActive bool) {
+	if len(oldConfig) > 0 {
+		_ = os.WriteFile(destPath, oldConfig, 0644)
+	} else {
+		_ = os.Remove(destPath)
+	}
+	if wasActive {
+		_ = driver.ReloadOrRestart()
+	}
+}
+
 // ApplyAndReload 将生成的配置写入并重启/重载 sing-box 服务
+// 若配置语法校验不通过或启动探活失败，自动回滚至上一次的配置并恢复服务
 func ApplyAndReload(destPath string) error {
 	cfg, err := GenerateServerConfig()
 	if err != nil {
-		return err
+		return fmt.Errorf("生成服务端配置失败: %w", err)
 	}
 
 	rawJSON, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
-		return err
+		return fmt.Errorf("序列化配置失败: %w", err)
 	}
 
 	_ = os.MkdirAll(filepath.Dir(destPath), 0755)
 
-	// 先写到临时文件以便校验
-	tmpPath := destPath + ".tmp"
-	if err := os.WriteFile(tmpPath, rawJSON, 0644); err != nil {
-		return fmt.Errorf("write temp config error: %w", err)
-	}
-	defer os.Remove(tmpPath)
-
-	// 调用 sing-box check -c 预检验（若已安装）
 	driver := singbox.NewDriver()
 	installedVer, _ := driver.GetInstalledVersion()
+
+	// 1. 若已安装 sing-box，先写临时文件进行语法与语义合法性预检
 	if installedVer != "" {
+		tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("sb_chk_%d.json", time.Now().UnixNano()))
+		if err := os.WriteFile(tmpPath, rawJSON, 0644); err != nil {
+			return fmt.Errorf("写入临时校验文件失败: %w", err)
+		}
+		defer os.Remove(tmpPath)
+
 		if err := singbox.CheckConfig(tmpPath); err != nil {
-			return fmt.Errorf("sing-box check failed: %w", err)
+			return fmt.Errorf("sing-box 配置语法预检失败: %w", err)
 		}
 	}
 
-	// 校验通过，原子覆盖
+	// 2. 备份原配置与活跃状态
+	oldConfig, _ := os.ReadFile(destPath)
+	prevStatus, _ := driver.Status()
+	wasActive := prevStatus.Active || component.IsProcessRunning(singbox.DriverName)
+
+	// 3. 校验通过，写入目标配置文件
 	if err := os.WriteFile(destPath, rawJSON, 0644); err != nil {
-		return fmt.Errorf("write final config error: %w", err)
+		return fmt.Errorf("写入配置文件失败: %w", err)
 	}
 
+	// 4. 重载服务并探活
 	if installedVer != "" {
-		return driver.ReloadOrRestart()
+		if err := driver.ReloadOrRestart(); err != nil {
+			rollbackSingbox(destPath, oldConfig, driver, wasActive)
+			return fmt.Errorf("sing-box 重启/重载失败，已自动回滚原配置: %w", err)
+		}
+
+		// 若原先或当前期望活跃，执行健康探活
+		if wasActive {
+			if err := probeSingboxHealth(driver); err != nil {
+				rollbackSingbox(destPath, oldConfig, driver, wasActive)
+				return fmt.Errorf("sing-box 启动探活失败 (%s)，已自动回滚原配置", err.Error())
+			}
+		}
 	}
+
 	return nil
 }
 
