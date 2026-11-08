@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/pkg/netutil"
 	"vps-auto-deploy/internal/subgen"
 )
 
@@ -60,7 +61,13 @@ func ServeSubscription(c *gin.Context) {
 	// 3. 优先使用 Subconverter 引擎生成最终客户端配置文件
 	// 获取配置模板：优先请求参数，次选配置中心设置的自定义模板，最后使用 ACL4SSR 在线精炼模板
 	configTemplate := strings.TrimSpace(config)
-	if configTemplate == "" {
+	if configTemplate != "" {
+		// 安全防护：校验外部传入的 config 模板 URL，拦截私网/内网/元数据等 SSRF 敏感地址
+		if err := netutil.ValidatePublicURL(configTemplate); err != nil {
+			c.String(http.StatusBadRequest, "Invalid config template: %v", err)
+			return
+		}
+	} else {
 		if customTpl, _ := model.GetSetting("subconverter_pref_custom_url"); strings.TrimSpace(customTpl) != "" {
 			configTemplate = strings.TrimSpace(customTpl)
 		} else if defaultExt, _ := model.GetSetting("subconverter_default_external_config"); strings.TrimSpace(defaultExt) != "" {

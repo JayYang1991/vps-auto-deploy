@@ -157,13 +157,14 @@ func CreatePinnedTLSConfig(pinnedFingerprint string) *tls.Config {
 			peerCert := cs.PeerCertificates[0]
 			currentFP := FingerprintSHA256(peerCert.Raw)
 
-			if pinnedFingerprint != "" {
-				// 格式规范化比较
-				cleanExpected := strings.ToLower(strings.ReplaceAll(pinnedFingerprint, ":", ""))
-				cleanCurrent := strings.ToLower(strings.ReplaceAll(currentFP, ":", ""))
-				if cleanExpected != cleanCurrent {
-					return fmt.Errorf("【安全拦截】检测到中间人攻击风险！远端证书指纹不匹配 (预期: %s, 实际: %s)", pinnedFingerprint, currentFP)
-				}
+			cleanExpected := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(pinnedFingerprint), ":", ""))
+			if cleanExpected == "" {
+				return errors.New("【安全拦截】TLS 证书指纹未配置或为空，拒绝未经验证的自签连接 (防中间人劫持)")
+			}
+
+			cleanCurrent := strings.ToLower(strings.ReplaceAll(currentFP, ":", ""))
+			if cleanExpected != cleanCurrent {
+				return fmt.Errorf("【安全拦截】检测到中间人攻击风险！远端证书指纹不匹配 (预期: %s, 实际: %s)", pinnedFingerprint, currentFP)
 			}
 			return nil
 		},

@@ -29,8 +29,8 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 	secGroup := r.Group("/:secret")
 	secGroup.Use(middleware.SecretPathMiddleware())
 	{
-		// 登录接口
-		secGroup.POST("/api/auth/login", handler.Login)
+		// 登录接口 (挂载防暴力破解限流中间件)
+		secGroup.POST("/api/auth/login", middleware.LoginRateLimitMiddleware(), handler.Login)
 
 		// 需登录的 API 接口
 		api := secGroup.Group("/api")

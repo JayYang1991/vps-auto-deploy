@@ -20,13 +20,20 @@ import (
 // InitDB 初始化 SQLite 数据库与数据迁移
 func InitDB(dbPath string) (*sql.DB, error) {
 	dir := filepath.Dir(dbPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	// 强化配置目录权限 (0700: 仅所有者可读写访问)
+	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("create db dir error: %w", err)
 	}
+	_ = os.Chmod(dir, 0700)
 
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite db error: %w", err)
+	}
+
+	// 强化数据库文件权限 (0600: 仅所有者读写，严防本地低权限越权脱库)
+	if fi, err := os.Stat(dbPath); err == nil && fi.Mode().Perm() != 0600 {
+		_ = os.Chmod(dbPath, 0600)
 	}
 
 	DB = db

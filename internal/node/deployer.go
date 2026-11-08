@@ -226,12 +226,20 @@ func RunDeploySSH(task *DeployTask, req DeploySSHRequest) {
 		authMethods = append(authMethods, ssh.Password(req.SSHPassword))
 	}
 
+	// 检查数据库中是否已存在该 Host 的历史指纹（防御二次连接遭遇中间人冒充或劫持）
+	var existingSSHHostKey string
+	_ = model.DB.QueryRow("SELECT ssh_host_key FROM nodes WHERE host = ? AND ssh_host_key != '' LIMIT 1", req.Host).Scan(&existingSSHHostKey)
+
 	var remoteSSHHostKey string
 	sshConfig := &ssh.ClientConfig{
 		User: req.SSHUser,
 		Auth: authMethods,
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-			remoteSSHHostKey = ssh.FingerprintSHA256(key)
+			currentFP := ssh.FingerprintSHA256(key)
+			if existingSSHHostKey != "" && currentFP != existingSSHHostKey {
+				return fmt.Errorf("【安全拦截】SSH 主机指纹不匹配！已记录指纹: %s, 实际指纹: %s (防中间人冒充)", existingSSHHostKey, currentFP)
+			}
+			remoteSSHHostKey = currentFP
 			return nil
 		},
 		Timeout: 15 * time.Second,
@@ -286,6 +294,7 @@ func RunDeploySSH(task *DeployTask, req DeploySSHRequest) {
 	}
 
 	unameM, _ := runSSHCmd("uname -m")
+	unameM = strings.TrimSpace(unameM)
 	var targetArch string
 	switch unameM {
 	case "x86_64", "amd64":
@@ -295,6 +304,15 @@ func RunDeploySSH(task *DeployTask, req DeploySSHRequest) {
 	case "armv7l", "arm":
 		targetArch = "arm"
 	default:
+		// 严防 shell 元字符注入，仅允许英文字母、数字和横线
+		for _, r := range unameM {
+			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
+				task.Status = "failed"
+				task.Error = fmt.Sprintf("异常的远程系统架构标识: %q", unameM)
+				task.AddLog("[ERROR] " + task.Error)
+				return
+			}
+		}
 		targetArch = unameM
 	}
 	task.AddLog(fmt.Sprintf("远程系统环境识别: Linux (%s), 目标架构: %s", unameM, targetArch))

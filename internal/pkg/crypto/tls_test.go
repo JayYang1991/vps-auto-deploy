@@ -74,5 +74,15 @@ func TestTLSGenerationAndPinning(t *testing.T) {
 	if !strings.Contains(err.Error(), "安全拦截") && !strings.Contains(err.Error(), "中间人") {
 		t.Fatalf("Expected MITM security intercept message, got: %v", err)
 	}
+
+	// 6. 使用空指纹请求 -> 必须被安全拦截，严防无验证放行
+	emptyClient := CreatePinnedHTTPClient("", 5*time.Second)
+	_, err = emptyClient.Get(server.URL)
+	if err == nil {
+		t.Fatalf("Expected error with empty pinned fingerprint, got nil!")
+	}
+	if !strings.Contains(err.Error(), "安全拦截") && !strings.Contains(err.Error(), "指纹未配置") {
+		t.Fatalf("Expected empty fingerprint security error, got: %v", err)
+	}
 }
 

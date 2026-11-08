@@ -139,13 +139,28 @@ func main() {
 		protocol = "https"
 	}
 
+	// 检查当前管理员密码是否仍为初始弱密码 (admin888)
+	hashedPass, _ := model.GetSetting("admin_password_hash")
+	adminUser, _ := model.GetSetting("admin_username")
+	if adminUser == "" {
+		adminUser = "admin"
+	}
+	isDefaultPass := false
+	if hashedPass != "" && bcrypt.CompareHashAndPassword([]byte(hashedPass), []byte("admin888")) == nil {
+		isDefaultPass = true
+	}
+
 	fmt.Println("==================================================================")
 	fmt.Println("           VPS Auto Deploy Server (Control Plane)                 ")
 	fmt.Println("==================================================================")
 	fmt.Printf(" [!] Access URL:   %s://%s:%d/%s/\n", protocol, publicIP, *portFlag, secretPath)
 	fmt.Printf(" [!] Local URL:    %s://127.0.0.1:%d/%s/\n", protocol, *portFlag, secretPath)
-	fmt.Printf(" [!] Default User: admin\n")
-	fmt.Printf(" [!] Default Pass: admin888 (Please change after initial login!)\n")
+	fmt.Printf(" [!] Admin User:   %s\n", adminUser)
+	if isDefaultPass {
+		fmt.Printf(" [!] [ALERT] 当前仍在使用默认弱密码: admin888 (请立即在后台修改!)\n")
+	} else {
+		fmt.Printf(" [!] Admin Pass:   [CONFIGURED & PROTECTED]\n")
+	}
 	if *tlsFlag {
 		fmt.Printf(" [!] TLS Security: ENABLED (MITM Protection)\n")
 		fmt.Printf(" [!] Pinned FP:    %s\n", certFingerprint)

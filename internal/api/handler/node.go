@@ -138,6 +138,11 @@ func ImportNode(c *gin.Context) {
 		req.Name = req.Host
 	}
 
+	if req.UseTLS && strings.TrimSpace(req.CertFingerprint) == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "启用 HTTPS 自签加密通信时，必须提供节点的 TLS 证书指纹 (防中间人劫持)"})
+		return
+	}
+
 	// 远程验证账号密码并获取通信 Token (支持 TLS 指纹校验防 MITM)
 	token, err := node.LoginNode(req.Host, req.PanelPort, req.SecretPath, req.Username, req.Password, req.UseTLS, req.CertFingerprint)
 	if err != nil {

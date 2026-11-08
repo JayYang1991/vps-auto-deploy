@@ -43,34 +43,13 @@ func GetEffectiveConfig() (subURL, host, uuidStr, path string) {
 		path = "/singbox-ws-path"
 	}
 
-	// 自动探测缺省的 host 与 uuid
+	// 缺省的 host 与 uuid：严防将真实的成员 UUID 与私有域名泄露给外部第三方测速源
 	if host == "" {
-		// 1. 尝试从 tunnels 表获取有效域名
-		var tunnelDomain string
-		_ = model.DB.QueryRow("SELECT domain FROM tunnels WHERE domain != '' AND enabled = 1 LIMIT 1").Scan(&tunnelDomain)
-		if tunnelDomain != "" {
-			host = tunnelDomain
-		} else {
-			// 2. 尝试从 inbounds 表获取 sni 伪装域名
-			var specJson string
-			_ = model.DB.QueryRow("SELECT spec_json FROM inbounds WHERE enabled = 1 LIMIT 1").Scan(&specJson)
-			if specJson != "" && strings.Contains(specJson, "dl.google.com") {
-				host = "dl.google.com"
-			} else {
-				host = "dl.google.com"
-			}
-		}
+		host = "cloudflare.com"
 	}
 
 	if uuidStr == "" {
-		// 尝试从 members 表获取第一个成员的 uuid
-		var memberUUID string
-		_ = model.DB.QueryRow("SELECT uuid FROM members WHERE enabled = 1 LIMIT 1").Scan(&memberUUID)
-		if memberUUID != "" {
-			uuidStr = memberUUID
-		} else {
-			uuidStr = "c3a6027a-7d96-4018-a5d9-34c2e0fbee37"
-		}
+		uuidStr = "00000000-0000-0000-0000-000000000000"
 	}
 
 	return subURL, host, uuidStr, path

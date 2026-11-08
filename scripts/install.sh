@@ -58,6 +58,7 @@ case "$ARCH" in
 esac
 
 mkdir -p "$CONFIG_DIR"
+chmod 700 "$CONFIG_DIR" 2>/dev/null || true
 mkdir -p "$INSTALL_DIR"
 mkdir -p "$SYSTEMD_DIR"
 

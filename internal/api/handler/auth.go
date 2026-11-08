@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"crypto/subtle"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -34,15 +35,20 @@ func Login(c *gin.Context) {
 	actualUser, _ := model.GetSetting("admin_username")
 	hashedPass, _ := model.GetSetting("admin_password_hash")
 
-	if req.Username != actualUser {
+	// 常数时间比对用户名，消除用户名枚举时序侧信道
+	userMatches := subtle.ConstantTimeCompare([]byte(req.Username), []byte(actualUser)) == 1
+
+	// 无论用户名是否匹配，均计算一次 bcrypt，确保响应耗时恒定（~100ms）
+	passErr := bcrypt.CompareHashAndPassword([]byte(hashedPass), []byte(req.Password))
+
+	if !userMatches || passErr != nil {
+		middleware.RecordFailedLogin(c.ClientIP())
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "incorrect username or password"})
 		return
 	}
 
-	if err := bcrypt.CompareHashAndPassword([]byte(hashedPass), []byte(req.Password)); err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"error": "incorrect username or password"})
-		return
-	}
+	// 认证通过，重置该 IP 失败尝试记录
+	middleware.ResetLoginAttempts(c.ClientIP())
 
 	token, err := middleware.GenerateJWT(req.Username)
 	if err != nil {
