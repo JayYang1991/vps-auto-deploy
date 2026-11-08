@@ -35,3 +35,4 @@ func TestValidatePublicURL(t *testing.T) {
 		}
 	}
 }
+

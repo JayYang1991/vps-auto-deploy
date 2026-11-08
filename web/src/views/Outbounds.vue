@@ -123,10 +123,82 @@
 
     <!-- 新建/编辑出站规则弹窗 -->
     <div v-if="modal.show" class="modal-overlay" @click.self="modal.show = false">
-      <div class="modal-content" style="max-width: 600px;">
+      <div class="modal-content" style="max-width: 620px;">
         <h3 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 1.25rem; color: #f8fafc;">
           {{ modal.isEdit ? '编辑出站规则' : '新建出站规则' }}
         </h3>
+
+        <!-- 模式切换：仅在新建出站时提供一键中转选项 -->
+        <div v-if="!modal.isEdit" style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem; background: #0f172a; padding: 0.25rem; border-radius: 0.5rem;">
+          <button
+            type="button"
+            :class="['btn', createMode === 'relay' ? 'btn-primary' : 'btn-secondary']"
+            style="flex: 1; font-size: 0.825rem; padding: 0.45rem; justify-content: center;"
+            @click="switchCreateMode('relay')"
+          >
+            ⚡ 从集群节点快速创建中转 (推荐)
+          </button>
+          <button
+            type="button"
+            :class="['btn', createMode === 'manual' ? 'btn-primary' : 'btn-secondary']"
+            style="flex: 1; font-size: 0.825rem; padding: 0.45rem; justify-content: center;"
+            @click="switchCreateMode('manual')"
+          >
+            🛠️ 手动输入模式
+          </button>
+        </div>
+
+        <!-- 节点中转级联选择器工作区 -->
+        <div v-if="!modal.isEdit && createMode === 'relay'" style="background: rgba(30, 41, 59, 0.7); border: 1px solid #334155; border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem; display: flex; flex-direction: column; gap: 0.85rem;">
+          <div style="font-size: 0.85rem; font-weight: 600; color: #38bdf8; display: flex; align-items: center; gap: 0.4rem;">
+            <span>🌐</span> 目标落地节点与入站协议选择 (自动排除本节点防环路)
+          </div>
+
+          <div v-if="loadingRelayCandidates" style="font-size: 0.8rem; color: #94a3b8; padding: 0.5rem 0;">
+            ⏳ 正在探测全集群可用节点入站...
+          </div>
+          <div v-else-if="relayCandidates.length === 0" style="font-size: 0.8rem; color: #f59e0b; background: rgba(245, 158, 11, 0.1); padding: 0.75rem; border-radius: 0.35rem;">
+            ⚠️ 当前集群中没有其他在线节点或未配置启用中的入站协议，请先在其他节点添加入站或切换至手动输入模式。
+          </div>
+          <div v-else style="display: flex; flex-direction: column; gap: 0.75rem;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">1. 目标落地节点</label>
+                <select v-model="selectedRelayNodeId" class="input" @change="onRelayNodeChange">
+                  <option v-for="node in relayCandidates" :key="node.node_id" :value="node.node_id">
+                    {{ node.node_name }} ({{ node.host }})
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">2. 目标入站协议</label>
+                <select v-model="selectedRelayInboundId" class="input" @change="fetchAndApplyRelayOutbound">
+                  <option v-for="ib in currentRelayInbounds" :key="ib.id" :value="ib.id">
+                    {{ ib.summary }}
+                  </option>
+                </select>
+              </div>
+            </div>
+
+            <!-- 地址偏好：若关联了 Cloudflare 穿透隧道，允许二选一 -->
+            <div v-if="selectedInboundHasTunnel" style="font-size: 0.8rem; color: #cbd5e1; display: flex; gap: 1.25rem; align-items: center; margin-top: 0.25rem;">
+              <span style="color: #94a3b8;">连接偏好:</span>
+              <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer;">
+                <input type="radio" v-model="selectedRelayAddrType" value="ip" @change="fetchAndApplyRelayOutbound" />
+                公网直连 IP ({{ currentRelayNode?.host }})
+              </label>
+              <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer;">
+                <input type="radio" v-model="selectedRelayAddrType" value="tunnel" @change="fetchAndApplyRelayOutbound" />
+                🚇 Cloudflare 穿透域名 ({{ selectedInbound?.tunnel_domain }})
+              </label>
+            </div>
+
+            <div v-if="relayGeneratedSummary" style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 0.35rem; padding: 0.6rem 0.85rem; font-size: 0.8rem; color: #34d399;">
+              ✅ {{ relayGeneratedSummary }} (已自动计算并注入加密密钥，可在下方查看参数或微调后保存)
+            </div>
+          </div>
+        </div>
 
         <form @submit.prevent="submitOutbound" style="display: flex; flex-direction: column; gap: 1rem;">
           <div>
@@ -327,7 +399,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import api from '../api'
 import { useToast } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
@@ -344,12 +416,54 @@ interface OutboundItem {
   is_system: boolean
 }
 
+interface RelayInbound {
+  id: number
+  tag: string
+  protocol: string
+  port: number
+  spec_json: string
+  tunnel_domain?: string
+  summary: string
+}
+
+interface RelayNode {
+  node_id: number
+  node_name: string
+  host: string
+  inbounds: RelayInbound[]
+}
+
 const { toast } = useToast()
 const { showConfirm } = useConfirm()
 
 const outbounds = ref<OutboundItem[]>([])
 const loading = ref(true)
 const singboxInstalled = ref(true)
+
+const createMode = ref<'relay' | 'manual'>('relay')
+const relayCandidates = ref<RelayNode[]>([])
+const loadingRelayCandidates = ref(false)
+const selectedRelayNodeId = ref<number | null>(null)
+const selectedRelayInboundId = ref<number | null>(null)
+const selectedRelayAddrType = ref<'ip' | 'tunnel'>('ip')
+const relayGeneratedSummary = ref('')
+const relayGeneratedSpec = ref<any>(null)
+
+const currentRelayNode = computed(() => {
+  return relayCandidates.value.find(n => n.node_id === selectedRelayNodeId.value)
+})
+
+const currentRelayInbounds = computed(() => {
+  return currentRelayNode.value ? currentRelayNode.value.inbounds : []
+})
+
+const selectedInbound = computed(() => {
+  return currentRelayInbounds.value.find(ib => ib.id === selectedRelayInboundId.value)
+})
+
+const selectedInboundHasTunnel = computed(() => {
+  return !!(selectedInbound.value && selectedInbound.value.tunnel_domain)
+})
 
 const modal = reactive({
   show: false,
@@ -428,16 +542,104 @@ function onTypeChange() {
   }
 }
 
+async function loadRelayCandidates() {
+  loadingRelayCandidates.value = true
+  try {
+    const res = await api.get('/cluster/relay-candidates')
+    relayCandidates.value = res.data || []
+    if (relayCandidates.value.length > 0) {
+      selectedRelayNodeId.value = relayCandidates.value[0].node_id
+      if (relayCandidates.value[0].inbounds && relayCandidates.value[0].inbounds.length > 0) {
+        selectedRelayInboundId.value = relayCandidates.value[0].inbounds[0].id
+        await fetchAndApplyRelayOutbound()
+      }
+    } else {
+      createMode.value = 'manual'
+    }
+  } catch (err: any) {
+    createMode.value = 'manual'
+  } finally {
+    loadingRelayCandidates.value = false
+  }
+}
+
+function onRelayNodeChange() {
+  if (currentRelayInbounds.value.length > 0) {
+    selectedRelayInboundId.value = currentRelayInbounds.value[0].id
+    fetchAndApplyRelayOutbound()
+  } else {
+    selectedRelayInboundId.value = null
+    relayGeneratedSummary.value = ''
+    relayGeneratedSpec.value = null
+  }
+}
+
+async function fetchAndApplyRelayOutbound() {
+  if (!selectedRelayNodeId.value || !selectedRelayInboundId.value) return
+  try {
+    const res = await api.post('/cluster/build-relay-outbound', {
+      target_node_id: selectedRelayNodeId.value,
+      inbound_id: selectedRelayInboundId.value,
+      addr_type: selectedRelayAddrType.value,
+    })
+    const generated = res.data
+    form.tag = generated.tag
+    form.type = generated.type
+    form.server = generated.server
+    form.server_port = generated.server_port
+    form.priority = 10
+
+    try {
+      const parsed = JSON.parse(generated.spec_json || '{}')
+      relayGeneratedSpec.value = parsed
+      customSpecJSON.value = JSON.stringify(parsed, null, 2)
+      if (parsed.uuid) vlessSpec.uuid = parsed.uuid
+      if (parsed.password) {
+        extraSpec.password = parsed.password
+        ssSpec.password = parsed.password
+      }
+      if (parsed.method) ssSpec.method = parsed.method
+      if (parsed.tls?.server_name) extraSpec.server_name = parsed.tls.server_name
+    } catch {
+      relayGeneratedSpec.value = null
+    }
+
+    const nodeName = currentRelayNode.value ? currentRelayNode.value.node_name : '目标节点'
+    relayGeneratedSummary.value = `已自动从【${nodeName}】解析并注入 ${form.type.toUpperCase()} 中转协议与加密参数`
+  } catch (err: any) {
+    toast.error('解析中转配置失败: ' + (err.response?.data?.error || err.message))
+  }
+}
+
+function switchCreateMode(mode: 'relay' | 'manual') {
+  createMode.value = mode
+  if (mode === 'relay') {
+    if (relayCandidates.value.length === 0) {
+      loadRelayCandidates()
+    } else if (selectedRelayNodeId.value && selectedRelayInboundId.value) {
+      fetchAndApplyRelayOutbound()
+    }
+  } else {
+    relayGeneratedSummary.value = ''
+    relayGeneratedSpec.value = null
+  }
+}
+
 function openCreateModal() {
   modal.isEdit = false
   modal.isSystem = false
   modal.id = 0
   modal.show = true
 
-  form.tag = 'socks-warp'
-  form.type = 'socks'
-  form.server = '127.0.0.1'
-  form.server_port = 40000
+  createMode.value = 'relay'
+  relayGeneratedSummary.value = ''
+  relayGeneratedSpec.value = null
+  selectedRelayAddrType.value = 'ip'
+
+  form.tag = ''
+  form.type = 'vless'
+  form.server = ''
+  form.server_port = 443
   form.priority = 10
   form.enabled = true
 
@@ -449,6 +651,8 @@ function openCreateModal() {
   extraSpec.password = ''
   extraSpec.server_name = ''
   customSpecJSON.value = ''
+
+  loadRelayCandidates()
 }
 
 function openEditModal(ob: OutboundItem) {
@@ -496,7 +700,19 @@ function openEditModal(ob: OutboundItem) {
 
 async function submitOutbound() {
   let specObj: any = {}
-  if (form.type === 'socks' || form.type === 'http') {
+  if (!modal.isEdit && createMode.value === 'relay' && relayGeneratedSpec.value && Object.keys(relayGeneratedSpec.value).length > 0) {
+    // 采用中转助手自动解析生成的完备参数
+    specObj = { ...relayGeneratedSpec.value }
+    if (form.type === 'vless' && vlessSpec.uuid) specObj.uuid = vlessSpec.uuid
+    if (form.type === 'shadowsocks') {
+      if (ssSpec.password) specObj.password = ssSpec.password
+      if (ssSpec.method) specObj.method = ssSpec.method
+    }
+    if (form.type === 'trojan' || form.type === 'hysteria2') {
+      if (extraSpec.password) specObj.password = extraSpec.password
+      if (extraSpec.server_name && specObj.tls) specObj.tls.server_name = extraSpec.server_name
+    }
+  } else if (form.type === 'socks' || form.type === 'http') {
     if (proxySpec.username) specObj.username = proxySpec.username
     if (proxySpec.password) specObj.password = proxySpec.password
   } else if (form.type === 'shadowsocks') {

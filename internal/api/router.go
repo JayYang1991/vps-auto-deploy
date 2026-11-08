@@ -93,6 +93,8 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.PUT("/outbounds/:id", handler.UpdateOutbound)
 			api.POST("/outbounds/:id/toggle", handler.ToggleOutbound)
 			api.DELETE("/outbounds/:id", handler.DeleteOutbound)
+			api.GET("/cluster/relay-candidates", handler.GetRelayCandidates)
+			api.POST("/cluster/build-relay-outbound", handler.BuildRelayOutbound)
 
 			// sing-box 完整配置透视与重载
 			api.GET("/singbox/config", handler.GetSingboxFullConfig)
