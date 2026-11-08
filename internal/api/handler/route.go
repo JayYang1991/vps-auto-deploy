@@ -283,3 +283,4 @@ func ReorderRoutes(c *gin.Context) {
 	rules, _ := model.ListRouteRules()
 	c.JSON(http.StatusOK, rules)
 }
+
