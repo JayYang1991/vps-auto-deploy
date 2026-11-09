@@ -477,69 +477,13 @@
             </div>
           </div>
 
-          <!-- 在线转换预览输出结果 (防卡顿安全窗口截断模式) -->
+          <!-- 在线转换预览输出结果 (定高视口虚拟滚动，任意大文件 60 FPS 且可看全) -->
           <div v-if="previewResult" style="margin-top: 1rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
-              <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-                <span style="font-size: 0.8rem; color: #34d399; font-weight: 600;">
-                  ✓ 转换成功 (HTTP 200 &middot; 共 {{ previewLines }} 行 &middot; {{ previewSizeKB }} KB)
-                </span>
-                <span v-if="isPreviewTruncated" class="badge badge-warning" style="font-size: 0.68rem; padding: 0.1rem 0.4rem;">
-                  ⚡ 防卡顿安全模式：当前仅渲染前 {{ MAX_PREVIEW_LINES }} 行
-                </span>
-              </div>
-              <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
-                <button
-                  @click="downloadPreviewFile"
-                  class="btn btn-secondary"
-                  style="font-size: 0.725rem; padding: 0.15rem 0.5rem;"
-                  title="直接下载为本地客户端配置文件"
-                >
-                  📥 下载配置
-                </button>
-                <button
-                  @click="copyPreviewOutput"
-                  class="btn btn-secondary"
-                  style="font-size: 0.725rem; padding: 0.15rem 0.5rem;"
-                  title="复制全量完整配置文本到剪贴板"
-                >
-                  📋 复制全量内容
-                </button>
-              </div>
-            </div>
-
-            <pre class="code-preview" style="max-height: 280px;">{{ displayedPreview }}</pre>
-
-            <!-- 超大文件截断提示与展开按钮 -->
-            <div
-              v-if="isPreviewTruncated"
-              style="margin-top: 0.4rem; padding: 0.5rem 0.75rem; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 0.35rem; font-size: 0.75rem; color: #fbbf24; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;"
-            >
-              <span>
-                ⚠️ 该订阅文件较大（共 {{ previewLines }} 行），已启用防卡顿截断预览。完整内容请点击上方「复制全量内容」或「下载配置」。
-              </span>
-              <button
-                type="button"
-                @click="showFullPreview = true"
-                class="btn btn-secondary"
-                style="font-size: 0.7rem; padding: 0.15rem 0.5rem; color: #f59e0b; border-color: rgba(245, 158, 11, 0.4);"
-              >
-                展开全部 {{ previewLines }} 行 (可能引起页面轻微卡顿)
-              </button>
-            </div>
-            <div
-              v-else-if="showFullPreview && previewLines > MAX_PREVIEW_LINES"
-              style="margin-top: 0.4rem; text-align: right;"
-            >
-              <button
-                type="button"
-                @click="showFullPreview = false"
-                class="btn btn-secondary"
-                style="font-size: 0.7rem; padding: 0.15rem 0.5rem; color: #94a3b8;"
-              >
-                收起超长预览 (恢复防卡顿模式)
-              </button>
-            </div>
+            <VirtualCodePreview
+              :content="previewResult"
+              :target="tester.target"
+              maxHeight="340px"
+            />
           </div>
         </div>
 
@@ -1357,6 +1301,7 @@ import QrcodeVue from 'qrcode.vue'
 import api from '../api'
 import { useToast, copyToClipboard } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
+import VirtualCodePreview from '../components/VirtualCodePreview.vue'
 
 const route = useRoute()
 const { toast } = useToast()
@@ -1421,52 +1366,8 @@ const tester = reactive({
   scv: true,
 })
 
-// 防卡顿超大文本安全渲染机制
+// 在线转换预览输出结果 (由 VirtualCodePreview 虚拟滚动视口承载，采用 shallowRef 阻断深度依赖)
 const previewResult = shallowRef('')
-const showFullPreview = ref(false)
-const MAX_PREVIEW_LINES = 600
-
-const previewLines = computed(() => {
-  if (!previewResult.value) return 0
-  let count = 1
-  const len = previewResult.value.length
-  for (let i = 0; i < len; i++) {
-    if (previewResult.value.charCodeAt(i) === 10) count++
-  }
-  return count
-})
-
-const previewSizeKB = computed(() => {
-  if (!previewResult.value) return '0.0'
-  return (previewResult.value.length / 1024).toFixed(1)
-})
-
-const isPreviewTruncated = computed(() => {
-  return !showFullPreview.value && previewLines.value > MAX_PREVIEW_LINES
-})
-
-const displayedPreview = computed(() => {
-  if (!previewResult.value) return ''
-  if (!isPreviewTruncated.value) return previewResult.value
-
-  let lineCount = 0
-  let cutIndex = 0
-  const len = previewResult.value.length
-  for (let i = 0; i < len; i++) {
-    if (previewResult.value.charCodeAt(i) === 10) {
-      lineCount++
-      if (lineCount >= MAX_PREVIEW_LINES) {
-        cutIndex = i
-        break
-      }
-    }
-  }
-  if (cutIndex > 0) {
-    return previewResult.value.slice(0, cutIndex)
-  }
-  return previewResult.value
-})
-
 const testingPreview = ref(false)
 
 const modal = reactive({
@@ -1657,7 +1558,6 @@ async function toggleSubconverterService(action: string) {
 async function runLiveTest() {
   testingPreview.value = true
   previewResult.value = ''
-  showFullPreview.value = false
   try {
     const res = await fetch(currentTesterSubURL.value)
     if (!res.ok) {
@@ -1682,36 +1582,6 @@ function openTesterQR() {
   qrModal.title = `Subconverter - ${tester.target.toUpperCase()} 订阅二维码`
   qrModal.url = currentTesterSubURL.value
   qrModal.show = true
-}
-
-function copyPreviewOutput() {
-  copyToClipboard(previewResult.value, '转换结果完整配置')
-}
-
-function downloadPreviewFile() {
-  if (!previewResult.value) {
-    toast.warning('暂无预览内容可供下载')
-    return
-  }
-  const extMap: Record<string, string> = {
-    clash: 'yaml',
-    singbox: 'json',
-    surge: 'conf',
-    quantumultx: 'conf',
-    loon: 'conf',
-    shadowrocket: 'txt',
-  }
-  const ext = extMap[tester.target] || 'txt'
-  const blob = new Blob([previewResult.value], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `subscription-${tester.target}-${new Date().toISOString().slice(0, 10)}.${ext}`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
-  toast.success(`已开始下载 ${a.download}`)
 }
 
 async function loadMembers() {
