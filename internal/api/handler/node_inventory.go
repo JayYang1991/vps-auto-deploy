@@ -161,6 +161,13 @@ func GetNodeInventory(c *gin.Context) {
 		if prefix == "" {
 			prefix = strings.TrimSpace(n.Name)
 		}
+		if prefix == "" {
+			if n.IsMaster {
+				prefix = "🇭🇰 本地主控"
+			} else {
+				prefix = "节点"
+			}
+		}
 
 		for _, ib := range inbounds {
 			item := buildInventoryItem(ib, prefix, serverHost, &member, tunnelsMap)
@@ -198,7 +205,7 @@ func buildInventoryItem(ib model.Inbound, nodeName, serverHost string, member *m
 		ServerHost: serverHost,
 	}
 
-	displayName := fmt.Sprintf("%s-%s-%d", nodeName, ib.Tag, ib.Port)
+	displayName := fmt.Sprintf("%s | %s-%d", nodeName, ib.Tag, ib.Port)
 	uuid := member.UUID
 	if uuid == "" {
 		uuid = "c3a6027a-7d96-4018-a5d9-34c2e0fbee37"
@@ -267,8 +274,10 @@ func buildInventoryItem(ib model.Inbound, nodeName, serverHost string, member *m
 		}
 		item.Path = path
 
-		groupDomain := subgen.ResolveWSGroupDomain(&spec, serverHost)
+		groupDomain := subgen.ResolveWSGroupDomain(&spec, serverHost, tunnelsMap)
 		item.TunnelDomain = groupDomain
+
+		wsDisplayName := fmt.Sprintf("%s | %s-Argo", nodeName, ib.Tag)
 
 		// 生成 vless:// 链接
 		q := url.Values{}
@@ -279,7 +288,7 @@ func buildInventoryItem(ib model.Inbound, nodeName, serverHost string, member *m
 		q.Set("host", groupDomain)
 		q.Set("path", path)
 
-		item.Link = fmt.Sprintf("vless://%s@%s:443?%s#%s", uuid, groupDomain, q.Encode(), url.QueryEscape(displayName))
+		item.Link = fmt.Sprintf("vless://%s@%s:443?%s#%s", uuid, groupDomain, q.Encode(), url.QueryEscape(wsDisplayName))
 
 		// 生成 Clash Meta YAML 片段
 		item.ClashSnippet = fmt.Sprintf(`- name: "%s"
@@ -294,7 +303,7 @@ func buildInventoryItem(ib model.Inbound, nodeName, serverHost string, member *m
   ws-opts:
     path: "%s"
     headers:
-      Host: "%s"`, displayName, groupDomain, uuid, groupDomain, path, groupDomain)
+      Host: "%s"`, wsDisplayName, groupDomain, uuid, groupDomain, path, groupDomain)
 
 	case "hysteria2":
 		item.ProtocolLabel = "Hysteria 2"

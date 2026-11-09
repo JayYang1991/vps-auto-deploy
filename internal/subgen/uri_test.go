@@ -165,6 +165,19 @@ func TestClusterPrefixSubgen(t *testing.T) {
 			t.Errorf("expected %s in Clash config: %s", typeStr, extClash)
 		}
 	}
+	// Verify that prefix is applied to all extended protocols in Clash config
+	for _, expectedNodeName := range []string{
+		"香港主控 | ss-node-8388",
+		"香港主控 | trojan-node-4433",
+		"香港主控 | hy2-node-8443",
+		"香港主控 | vmess-node-10087",
+		"香港主控 | tuic-node-8444",
+		"香港主控 | socks-local-1080",
+	} {
+		if !strings.Contains(extClash, expectedNodeName) {
+			t.Errorf("expected node name '%s' with prefix in Clash config, got:\n%s", expectedNodeName, extClash)
+		}
+	}
 
 	extSingbox, err := GenerateSingboxClientConfig(member)
 	if err != nil {
@@ -173,6 +186,19 @@ func TestClusterPrefixSubgen(t *testing.T) {
 	for _, typeStr := range []string{`"type": "shadowsocks"`, `"type": "trojan"`, `"type": "hysteria2"`, `"type": "vmess"`, `"type": "tuic"`} {
 		if !strings.Contains(extSingbox, typeStr) {
 			t.Errorf("expected %s in Singbox config: %s", typeStr, extSingbox)
+		}
+	}
+	// Verify that prefix is applied to all extended protocols in Singbox config
+	for _, expectedNodeTag := range []string{
+		"🇭🇰 香港主控 | ss-node-8388",
+		"🇭🇰 香港主控 | trojan-node-4433",
+		"🇭🇰 香港主控 | hy2-node-8443",
+		"🇭🇰 香港主控 | vmess-node-10087",
+		"🇭🇰 香港主控 | tuic-node-8444",
+		"🇭🇰 香港主控 | socks-local-1080",
+	} {
+		if !strings.Contains(extSingbox, expectedNodeTag) {
+			t.Errorf("expected node tag '%s' with prefix in Singbox config, got:\n%s", expectedNodeTag, extSingbox)
 		}
 	}
 

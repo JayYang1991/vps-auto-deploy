@@ -213,8 +213,8 @@
             </div>
 
             <div class="form-group">
-              <label>订阅节点前缀 (可选)</label>
-              <input v-model="deployReq.sub_prefix" type="text" placeholder="例如：🇭🇰 香港01 (留空默认使用名称)" />
+              <label>订阅节点前缀 (可选，全协议生效)</label>
+              <input v-model="deployReq.sub_prefix" type="text" placeholder="例如：🇭🇰 香港01 (留空默认使用名称，全协议生效)" />
             </div>
 
             <div class="form-group">
@@ -375,8 +375,8 @@
             </div>
 
             <div class="form-group">
-              <label>订阅节点前缀 (可选)</label>
-              <input v-model="importReq.sub_prefix" type="text" placeholder="例如：🇺🇸 美西02 (留空默认使用名称)" />
+              <label>订阅节点前缀 (可选，全协议生效)</label>
+              <input v-model="importReq.sub_prefix" type="text" placeholder="例如：🇺🇸 美西02 (留空默认使用名称，全协议生效)" />
             </div>
 
             <div class="form-group">
@@ -605,7 +605,7 @@
             <span class="reveal-icon">✏️</span>
             <div>
               <h4 class="reveal-title">定制订阅节点前缀</h4>
-              <p class="reveal-desc">设置该 VPS 在导出 Clash / Sing-box / Subconverter 时的名称与分流前缀</p>
+              <p class="reveal-desc">设置该 VPS 在导出 Clash / Sing-box / Subconverter 时的名称与分流前缀 (全协议统一生效)</p>
             </div>
           </div>
           <button class="close-btn" @click="closePrefixModal" type="button">✕</button>
@@ -615,8 +615,8 @@
           <div class="form-alert-info" style="margin-bottom: 1rem;">
             <span>💡</span>
             <div>
-              <strong>智能分流策略组匹配：</strong>
-              包含国家/地区旗帜与中文地名（如 <code>🇭🇰 香港</code>、<code>🇯🇵 日本</code>、<code>🇺🇸 美国</code>），Subconverter 与客户端可自动归类至对应国家的代理分流组中。
+              <strong>全协议前缀统一生效：</strong>
+              此前缀对该节点下的所有协议（VLESS-Reality、Hysteria 2、Shadowsocks、Trojan、TUIC、VMess、SOCKS5、VLESS-WS）完全生效，包含地区旗帜与地名（如 <code>🇭🇰 香港</code>、<code>🇯🇵 日本</code>、<code>🇺🇸 美国</code>），便于 Subconverter 与客户端自动归类至国家分流组。
             </div>
           </div>
 
@@ -630,7 +630,7 @@
           </div>
 
           <div class="form-group" style="margin-bottom: 0.85rem;">
-            <label>订阅节点前缀 (Sub Prefix)</label>
+            <label>订阅节点前缀 (Sub Prefix) - <span style="color: #34d399; font-weight: normal;">全协议统一生效</span></label>
             <input
               v-model="editingNodePrefix"
               type="text"
@@ -654,18 +654,17 @@
             </div>
           </div>
 
-          <!-- 实时效果预览 -->
+          <!-- 实时效果预览 (全协议统一) -->
           <div class="preview-box">
-            <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.5rem; font-weight: 600;">
-              🔍 客户端订阅节点名称效果预览：
+            <div style="font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.5rem; font-weight: 600; display: flex; justify-content: space-between; align-items: center;">
+              <span>🔍 客户端订阅节点名称效果预览 (全协议统一生效)：</span>
+              <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 0.68rem; padding: 0.15rem 0.45rem;">8 大协议统一支持</span>
             </div>
-            <div class="preview-item">
-              <span class="preview-label">Reality 节点:</span>
-              <span class="preview-code mono">{{ previewRealityName }}</span>
-            </div>
-            <div class="preview-item">
-              <span class="preview-label">WS 优选节点:</span>
-              <span class="preview-code mono">{{ previewWSName }}</span>
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 0.4rem; max-height: 200px; overflow-y: auto;">
+              <div v-for="p in protocolPreviews" :key="p.label" class="preview-item">
+                <span class="preview-label" style="min-width: 6.8rem;">{{ p.label }}:</span>
+                <span class="preview-code mono">{{ p.name }}</span>
+              </div>
             </div>
           </div>
 
@@ -1435,6 +1434,20 @@ const currentEffectivePrefix = computed(() => {
   const n = editingNodeName.value.trim()
   if (n) return n
   return '节点'
+})
+
+const protocolPreviews = computed(() => {
+  const p = currentEffectivePrefix.value
+  return [
+    { label: 'Reality 节点', name: `${p} | vless-reality-443` },
+    { label: 'Hysteria 2 极速', name: `${p} | hy2-in-8443` },
+    { label: 'Shadowsocks', name: `${p} | ss-in-8388` },
+    { label: 'Trojan 节点', name: `${p} | trojan-in-443` },
+    { label: 'TUIC v5 节点', name: `${p} | tuic-in-8443` },
+    { label: 'VMess 节点', name: `${p} | vmess-ws-8080` },
+    { label: 'SOCKS5 / Mixed', name: `${p} | socks-in-1080` },
+    { label: 'WS 优选 (Argo)', name: `${p} | vless-ws-Cloudflare优选` },
+  ]
 })
 
 const previewRealityName = computed(() => {

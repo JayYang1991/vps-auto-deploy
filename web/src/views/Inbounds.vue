@@ -488,9 +488,11 @@ import QrcodeVue from 'qrcode.vue'
 import api from '../api'
 import { useToast, copyToClipboard } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
+import { useNodeContext } from '../composables/useNodeContext'
 
 const { toast } = useToast()
 const { showConfirm } = useConfirm()
+const { activeNode } = useNodeContext()
 
 const inbounds = ref<any[]>([])
 const loading = ref(true)
@@ -953,14 +955,20 @@ async function showShareModal(ib: any) {
     const ip = sysRes.data.public_ip || '127.0.0.1'
     const spec = parseSpec(ib.spec_json)
 
+    // 计算当前受管节点定制前缀 (全协议统一生效)
+    const prefix = (activeNode.value?.sub_prefix?.trim()) || (activeNode.value?.name?.trim()) || '节点'
+    const remark = (ib.protocol === 'vless-ws' && spec.group_domain)
+      ? `${prefix} | ${ib.tag}-Argo`
+      : `${prefix} | ${ib.tag}-${ib.port}`
+
     if (ib.protocol === 'socks' || ib.protocol === 'mixed' || ib.protocol === 'http') {
       const auth = (spec.username && spec.password)
         ? `${encodeURIComponent(spec.username)}:${encodeURIComponent(spec.password)}@`
         : ''
       const host = (ib.listen === '::' || ib.listen === '0.0.0.0') ? ip : (ib.listen || '127.0.0.1')
       const scheme = ib.protocol === 'http' ? 'http' : 'socks5'
-      const uri = `${scheme}://${auth}${host}:${ib.port}#${encodeURIComponent(ib.tag)}`
-      shareModal.title = `${ib.tag} (${scheme.toUpperCase()})`
+      const uri = `${scheme}://${auth}${host}:${ib.port}#${encodeURIComponent(remark)}`
+      shareModal.title = `${remark} (${scheme.toUpperCase()})`
       shareModal.uri = uri
       shareModal.show = true
       return
@@ -971,8 +979,8 @@ async function showShareModal(ib: any) {
       const pwd = spec.password || ''
       const userPart = btoa(`${method}:${pwd}`)
       const host = (ib.listen === '::' || ib.listen === '0.0.0.0') ? ip : (ib.listen || '127.0.0.1')
-      const uri = `ss://${userPart}@${host}:${ib.port}#${encodeURIComponent(ib.tag)}`
-      shareModal.title = `${ib.tag} (Shadowsocks)`
+      const uri = `ss://${userPart}@${host}:${ib.port}#${encodeURIComponent(remark)}`
+      shareModal.title = `${remark} (Shadowsocks)`
       shareModal.uri = uri
       shareModal.show = true
       return
@@ -990,8 +998,8 @@ async function showShareModal(ib: any) {
       if (spec.obfs_password) {
         obfsPart = `&obfs=salamander&obfs-password=${encodeURIComponent(spec.obfs_password)}`
       }
-      const uri = `hysteria2://${encodeURIComponent(pwd)}@${ip}:${ib.port}?sni=${encodeURIComponent(sni)}&insecure=1${obfsPart}#${encodeURIComponent(ib.tag)}`
-      shareModal.title = `${ib.tag} (Hysteria 2)`
+      const uri = `hysteria2://${encodeURIComponent(pwd)}@${ip}:${ib.port}?sni=${encodeURIComponent(sni)}&insecure=1${obfsPart}#${encodeURIComponent(remark)}`
+      shareModal.title = `${remark} (Hysteria 2)`
       shareModal.uri = uri
       shareModal.show = true
       return
@@ -1000,8 +1008,8 @@ async function showShareModal(ib: any) {
     if (ib.protocol === 'trojan') {
       const pwd = spec.password || m.uuid
       const sni = spec.server_name || ip
-      const uri = `trojan://${encodeURIComponent(pwd)}@${ip}:${ib.port}?sni=${encodeURIComponent(sni)}&security=tls#${encodeURIComponent(ib.tag)}`
-      shareModal.title = `${ib.tag} (Trojan)`
+      const uri = `trojan://${encodeURIComponent(pwd)}@${ip}:${ib.port}?sni=${encodeURIComponent(sni)}&security=tls#${encodeURIComponent(remark)}`
+      shareModal.title = `${remark} (Trojan)`
       shareModal.uri = uri
       shareModal.show = true
       return
@@ -1011,8 +1019,8 @@ async function showShareModal(ib: any) {
       const pwd = spec.password || 'tuic-password'
       const cc = spec.congestion_control || 'bbr'
       const sni = spec.server_name || ip
-      const uri = `tuic://${m.uuid}:${encodeURIComponent(pwd)}@${ip}:${ib.port}?congestion_control=${cc}&sni=${encodeURIComponent(sni)}&allow_insecure=1#${encodeURIComponent(ib.tag)}`
-      shareModal.title = `${ib.tag} (TUIC v5)`
+      const uri = `tuic://${m.uuid}:${encodeURIComponent(pwd)}@${ip}:${ib.port}?congestion_control=${cc}&sni=${encodeURIComponent(sni)}&allow_insecure=1#${encodeURIComponent(remark)}`
+      shareModal.title = `${remark} (TUIC v5)`
       shareModal.uri = uri
       shareModal.show = true
       return
@@ -1024,7 +1032,7 @@ async function showShareModal(ib: any) {
       const host = spec.group_domain || ''
       const vmessObj = {
         v: '2',
-        ps: ib.tag,
+        ps: remark,
         add: ip,
         port: ib.port,
         id: m.uuid,
@@ -1037,7 +1045,7 @@ async function showShareModal(ib: any) {
         tls: '',
       }
       const uri = 'vmess://' + btoa(JSON.stringify(vmessObj))
-      shareModal.title = `${ib.tag} (VMess)`
+      shareModal.title = `${remark} (VMess)`
       shareModal.uri = uri
       shareModal.show = true
       return
@@ -1054,8 +1062,8 @@ async function showShareModal(ib: any) {
         host: host,
         path: path,
       })
-      const uri = `vless://${m.uuid}@${host}:443?${q.toString()}#${encodeURIComponent(ib.tag)}`
-      shareModal.title = `${ib.tag} (VLESS-WS 默认用户: ${m.name})`
+      const uri = `vless://${m.uuid}@${host}:443?${q.toString()}#${encodeURIComponent(remark)}`
+      shareModal.title = `${remark} (VLESS-WS 默认用户: ${m.name})`
       shareModal.uri = uri
       shareModal.show = true
       return
@@ -1072,8 +1080,8 @@ async function showShareModal(ib: any) {
       type: 'tcp',
     })
 
-    const uri = `vless://${m.uuid}@${ip}:${ib.port}?${q.toString()}#${encodeURIComponent(ib.tag)}`
-    shareModal.title = `${ib.tag} (默认用户: ${m.name})`
+    const uri = `vless://${m.uuid}@${ip}:${ib.port}?${q.toString()}#${encodeURIComponent(remark)}`
+    shareModal.title = `${remark} (默认用户: ${m.name})`
     shareModal.uri = uri
     shareModal.show = true
   } catch (err: any) {
