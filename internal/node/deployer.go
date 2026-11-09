@@ -3,6 +3,7 @@ package node
 import (
 	"bytes"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -48,6 +49,22 @@ type UpgradeSSHRequest struct {
 	AuthType      string `json:"auth_type"` // "password" | "key"
 	SSHPassword   string `json:"ssh_password"`
 	SSHPrivateKey string `json:"ssh_private_key"`
+	Force         bool   `json:"force"` // 是否强制覆盖已一致的二进制
+}
+
+// computeFileSHA256 计算本地指定文件的 SHA-256 十六进制哈希串
+func computeFileSHA256(filePath string) (string, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // GenerateRandomPassword 生成高强度随机密码
@@ -712,8 +729,7 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 	}
 	task.AddLog(fmt.Sprintf("目标主机架构: %s (主控当前架构: %s)", targetArch, runtime.GOARCH))
 
-	// 4. 推流传输新版 vps-panel 二进制
-	task.AddLog("开始向远程主机推流传输最新版 vps-panel 二进制文件...")
+	// 4. 比对版本指纹与推流传输新版 vps-panel 二进制
 	exePath, exeErr := os.Executable()
 	useStream := false
 	if exeErr == nil && runtime.GOARCH == targetArch {
@@ -722,62 +738,98 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 		}
 	}
 
+	needRestart := true
 	if useStream {
-		task.AddLog("目标架构与主控一致，采用内网直接推流部署 (Zero-External-Download)...")
-		session, err := client.NewSession()
-		if err != nil {
-			task.Status = "failed"
-			task.Error = fmt.Sprintf("创建 SSH 文件传输会话失败: %v", err)
-			task.AddLog("[ERROR] " + task.Error)
-			return
+		task.AddLog("目标架构与主控一致，正在比对本地与远端程序版本指纹...")
+		localHash, hashErr := computeFileSHA256(exePath)
+		var remoteHash string
+		if hashErr == nil {
+			remoteSumOut, remoteErr := runSSHCmd("sha256sum /usr/local/bin/vps-panel 2>/dev/null || shasum -a 256 /usr/local/bin/vps-panel 2>/dev/null")
+			if remoteErr == nil {
+				fields := strings.Fields(remoteSumOut)
+				if len(fields) > 0 {
+					remoteHash = strings.ToLower(fields[0])
+				}
+			}
 		}
 
-		stdin, err := session.StdinPipe()
-		if err != nil {
-			session.Close()
-			task.Status = "failed"
-			task.Error = fmt.Sprintf("获取 SSH 标准输入流失败: %v", err)
-			task.AddLog("[ERROR] " + task.Error)
-			return
+		if hashErr == nil && remoteHash != "" && strings.EqualFold(localHash, remoteHash) {
+			prefixLen := 12
+			if len(localHash) < 12 {
+				prefixLen = len(localHash)
+			}
+			if !req.Force {
+				task.AddLog(fmt.Sprintf("✓ 远端节点程序指纹与主控完全一致 (SHA-256: %s...): 已是最新版本！", localHash[:prefixLen]))
+				task.AddLog("已自动跳过重复推流传输与服务重启，直接进入服务状态校验与全网凭据同步...")
+				needRestart = false
+			} else {
+				task.AddLog(fmt.Sprintf("远端节点程序指纹已是一致 (SHA-256: %s...)，但已指定 [强制覆盖]，继续推流写入...", localHash[:prefixLen]))
+			}
+		} else {
+			if remoteHash != "" && len(remoteHash) >= 12 && len(localHash) >= 12 {
+				task.AddLog(fmt.Sprintf("检测到版本更新 (远端: %s... -> 主控: %s...)，开始向远程主机推流传输最新版 vps-panel 二进制文件...", remoteHash[:12], localHash[:12]))
+			} else {
+				task.AddLog("开始向远程主机推流传输最新版 vps-panel 二进制文件...")
+			}
+			task.AddLog("采用内网直接推流部署 (Zero-External-Download)...")
 		}
 
-		file, err := os.Open(exePath)
-		if err != nil {
-			session.Close()
-			task.Status = "failed"
-			task.Error = fmt.Sprintf("读取本地二进制失败: %v", err)
-			task.AddLog("[ERROR] " + task.Error)
-			return
-		}
+		if needRestart {
+			session, err := client.NewSession()
+			if err != nil {
+				task.Status = "failed"
+				task.Error = fmt.Sprintf("创建 SSH 文件传输会话失败: %v", err)
+				task.AddLog("[ERROR] " + task.Error)
+				return
+			}
 
-		cmd := "cat > /usr/local/bin/vps-panel.tmp && mv /usr/local/bin/vps-panel.tmp /usr/local/bin/vps-panel && chmod +x /usr/local/bin/vps-panel"
-		if err := session.Start(cmd); err != nil {
+			stdin, err := session.StdinPipe()
+			if err != nil {
+				session.Close()
+				task.Status = "failed"
+				task.Error = fmt.Sprintf("获取 SSH 标准输入流失败: %v", err)
+				task.AddLog("[ERROR] " + task.Error)
+				return
+			}
+
+			file, err := os.Open(exePath)
+			if err != nil {
+				session.Close()
+				task.Status = "failed"
+				task.Error = fmt.Sprintf("读取本地二进制失败: %v", err)
+				task.AddLog("[ERROR] " + task.Error)
+				return
+			}
+
+			cmd := "cat > /usr/local/bin/vps-panel.tmp && mv /usr/local/bin/vps-panel.tmp /usr/local/bin/vps-panel && chmod +x /usr/local/bin/vps-panel"
+			if err := session.Start(cmd); err != nil {
+				file.Close()
+				session.Close()
+				task.Status = "failed"
+				task.Error = fmt.Sprintf("启动远端写入命令失败: %v", err)
+				task.AddLog("[ERROR] " + task.Error)
+				return
+			}
+
+			_, copyErr := io.Copy(stdin, file)
 			file.Close()
-			session.Close()
-			task.Status = "failed"
-			task.Error = fmt.Sprintf("启动远端写入命令失败: %v", err)
-			task.AddLog("[ERROR] " + task.Error)
-			return
-		}
+			stdin.Close()
+			if copyErr != nil {
+				session.Close()
+				task.Status = "failed"
+				task.Error = fmt.Sprintf("推流写入失败: %v", copyErr)
+				task.AddLog("[ERROR] " + task.Error)
+				return
+			}
 
-		_, copyErr := io.Copy(stdin, file)
-		file.Close()
-		stdin.Close()
-		if copyErr != nil {
-			session.Close()
-			task.Status = "failed"
-			task.Error = fmt.Sprintf("推流写入失败: %v", copyErr)
-			task.AddLog("[ERROR] " + task.Error)
-			return
+			if err := session.Wait(); err != nil {
+				task.Status = "failed"
+				task.Error = fmt.Sprintf("设置远端二进制权限失败: %v", err)
+				task.AddLog("[ERROR] " + task.Error)
+				return
+			}
+			task.AddLog("最新二进制文件写入并授权完成 (/usr/local/bin/vps-panel)")
 		}
-
-		if err := session.Wait(); err != nil {
-			task.Status = "failed"
-			task.Error = fmt.Sprintf("设置远端二进制权限失败: %v", err)
-			task.AddLog("[ERROR] " + task.Error)
-			return
-		}
-		task.AddLog("最新二进制文件写入并授权完成 (/usr/local/bin/vps-panel)")
 	} else {
 		task.AddLog(fmt.Sprintf("跨架构升级 (%s -> %s)，从 GitHub Release 自动下载...", runtime.GOARCH, targetArch))
 		downloadCmd := fmt.Sprintf(
@@ -794,15 +846,21 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 	}
 
 	// 5. 重启远端守护进程
-	task.AddLog("重启远程 vps-panel.service 守护进程...")
-	restartCmd := "systemctl daemon-reload && systemctl restart vps-panel"
-	if out, err := runSSHCmd(restartCmd); err != nil {
-		task.Status = "failed"
-		task.Error = fmt.Sprintf("重启远端守护进程失败: %v (%s)", err, out)
-		task.AddLog("[ERROR] " + task.Error)
-		return
+	if needRestart {
+		task.AddLog("重启远程 vps-panel.service 守护进程...")
+		restartCmd := "systemctl daemon-reload && systemctl restart vps-panel"
+		if out, err := runSSHCmd(restartCmd); err != nil {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("重启远端守护进程失败: %v (%s)", err, out)
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
+		task.AddLog("守护进程重启指令已下发，正在验证服务在线状态...")
+		time.Sleep(2 * time.Second)
+	} else {
+		task.AddLog("守护进程运行正常，保持在线状态...")
+		time.Sleep(500 * time.Millisecond)
 	}
-	task.AddLog("守护进程重启指令已下发，正在验证服务在线状态...")
 
 	// 6. 服务健康探活
 	time.Sleep(2 * time.Second)
@@ -825,6 +883,10 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 	}
 
 	task.Status = "success"
-	task.AddLog("[SUCCESS] 节点软件升级完成！所有最新功能 (路由分流、全网凭据同步、Sing-box 1.14) 已就绪！")
+	if needRestart {
+		task.AddLog("[SUCCESS] 节点软件升级完成！所有最新功能 (路由分流、全网凭据同步、Sing-box 1.14) 已就绪！")
+	} else {
+		task.AddLog("[SUCCESS] 节点已处于最新版本，全量成员凭据与连接状态已校准同步！")
+	}
 }
 

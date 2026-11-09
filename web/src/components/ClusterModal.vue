@@ -744,6 +744,13 @@
                 placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----"
               ></textarea>
             </div>
+
+            <div class="form-group full-width" style="margin-top: 0.25rem;">
+              <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: #94a3b8; font-size: 0.8125rem;">
+                <input type="checkbox" v-model="upgradeReq.force" style="accent-color: #6366f1; width: 1rem; height: 1rem;" />
+                <span>强制重新推流覆盖 (默认通过 SHA-256 指纹比对：若远端版本已与主控一致则秒级跳过传输与重启，勾选后强制重新覆写并重启服务)</span>
+              </label>
+            </div>
           </div>
 
           <div class="reveal-footer" style="margin-top: 1.25rem;">
@@ -1408,6 +1415,7 @@ const upgradeReq = reactive({
   auth_type: 'password' as 'password' | 'key',
   ssh_password: '',
   ssh_private_key: '',
+  force: false,
 })
 
 function openUpgradeModal(item: NodeItem) {
@@ -1419,6 +1427,7 @@ function openUpgradeModal(item: NodeItem) {
   upgradeReq.auth_type = 'password'
   upgradeReq.ssh_password = ''
   upgradeReq.ssh_private_key = ''
+  upgradeReq.force = false
   upgradeStep.value = 'form'
   upgradeLogs.value = []
   upgradeTaskStatus.value = 'running'
