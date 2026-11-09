@@ -37,7 +37,8 @@ func TestLoadSingboxFromDiskAndFullConfigSync(t *testing.T) {
     "servers": [
       {
         "tag": "google",
-        "address": "tls://8.8.8.8"
+        "type": "tls",
+        "server": "8.8.8.8"
       }
     ]
   },

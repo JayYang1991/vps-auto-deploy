@@ -1030,11 +1030,12 @@ async function showShareModal(ib: any) {
       const net = spec.network || 'ws'
       const path = spec.path || '/vmess'
       const host = spec.group_domain || ''
+      const isDomain = net === 'ws' && !!host
       const vmessObj = {
         v: '2',
         ps: remark,
-        add: ip,
-        port: ib.port,
+        add: isDomain ? host : ip,
+        port: isDomain ? 443 : ib.port,
         id: m.uuid,
         aid: 0,
         scy: 'auto',
@@ -1042,7 +1043,8 @@ async function showShareModal(ib: any) {
         type: 'none',
         host: host,
         path: net === 'ws' ? path : '',
-        tls: '',
+        tls: isDomain ? 'tls' : '',
+        sni: isDomain ? host : '',
       }
       const uri = 'vmess://' + btoa(JSON.stringify(vmessObj))
       shareModal.title = `${remark} (VMess)`
@@ -1052,17 +1054,19 @@ async function showShareModal(ib: any) {
     }
 
     if (ib.protocol === 'vless-ws') {
+      const isDomain = !!(spec.group_domain || spec.host)
       const host = spec.group_domain || spec.host || ip
+      const port = isDomain ? 443 : ib.port
       const path = spec.path || '/ws'
       const q = new URLSearchParams({
         encryption: 'none',
-        security: 'tls',
+        security: isDomain ? 'tls' : 'none',
         sni: host,
         type: 'ws',
         host: host,
         path: path,
       })
-      const uri = `vless://${m.uuid}@${host}:443?${q.toString()}#${encodeURIComponent(remark)}`
+      const uri = `vless://${m.uuid}@${host}:${port}?${q.toString()}#${encodeURIComponent(remark)}`
       shareModal.title = `${remark} (VLESS-WS 默认用户: ${m.name})`
       shareModal.uri = uri
       shareModal.show = true

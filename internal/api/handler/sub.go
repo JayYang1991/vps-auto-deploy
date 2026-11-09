@@ -85,18 +85,34 @@ func ServeSubscription(c *gin.Context) {
 	// 获取配置模板：优先请求参数，次选配置中心设置的自定义模板，最后使用 ACL4SSR 在线精炼模板
 	configTemplate := strings.TrimSpace(config)
 	if configTemplate != "" {
-		// 安全防护：校验外部传入的 config 模板 URL，拦截私网/内网/元数据等 SSRF 敏感地址
-		if err := netutil.ValidatePublicURL(configTemplate); err != nil {
-			c.String(http.StatusBadRequest, "Invalid config template: %v", err)
+		if strings.HasPrefix(configTemplate, "http://") || strings.HasPrefix(configTemplate, "https://") {
+			// 安全防护：校验外部传入的 config 模板 URL，拦截私网/内网/元数据等 SSRF 敏感地址
+			if err := netutil.ValidatePublicURL(configTemplate); err != nil {
+				c.String(http.StatusBadRequest, "Invalid config template: %v", err)
+				return
+			}
+		} else if IsSafeLocalTemplate(configTemplate) {
+			// 本地受管安全模板校验通过
+		} else {
+			c.String(http.StatusBadRequest, "Invalid config template: 仅支持公网 HTTP/HTTPS 远程链接或受管本地分流规则模板 (如 config/custom_rules.ini)")
 			return
 		}
 	} else {
-		if customTpl, _ := model.GetSetting("subconverter_pref_custom_url"); strings.TrimSpace(customTpl) != "" {
-			configTemplate = strings.TrimSpace(customTpl)
+		prefTpl, _ := model.GetSetting("subconverter_pref_template")
+		prefTpl = strings.TrimSpace(prefTpl)
+		if prefTpl == "custom" {
+			if customURL, _ := model.GetSetting("subconverter_pref_custom_url"); strings.TrimSpace(customURL) != "" {
+				configTemplate = strings.TrimSpace(customURL)
+			}
+		} else if prefTpl != "" && (strings.HasPrefix(prefTpl, "http://") || strings.HasPrefix(prefTpl, "https://") || IsSafeLocalTemplate(prefTpl)) {
+			configTemplate = prefTpl
 		} else if defaultExt, _ := model.GetSetting("subconverter_default_external_config"); strings.TrimSpace(defaultExt) != "" {
 			configTemplate = strings.TrimSpace(defaultExt)
 		} else {
 			configTemplate = "https://raw.githubusercontent.com/JayYang1991/ACL4SSR/refs/heads/main/Clash/config/ACL4SSR_Online_Bespoke.ini"
+		}
+		if configTemplate == "config/custom_rules.ini" {
+			_ = EnsureCustomRulesFile()
 		}
 	}
 

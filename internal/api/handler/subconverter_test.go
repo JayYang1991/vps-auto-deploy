@@ -225,3 +225,75 @@ func TestSaveAndGetSubconverterConfigPersistence(t *testing.T) {
 		t.Fatalf("expected recreated pref.ini on disk with exclude_remarks, got: %s (err: %v)", string(recreatedData), err)
 	}
 }
+
+func TestIsSafeLocalTemplate(t *testing.T) {
+	// 确保 custom_rules.ini 存在
+	if err := EnsureCustomRulesFile(); err != nil {
+		t.Fatalf("ensure custom rules file: %v", err)
+	}
+
+	// 合法模板
+	if !IsSafeLocalTemplate("config/custom_rules.ini") {
+		t.Errorf("expected config/custom_rules.ini to be safe")
+	}
+
+	// 非法穿越路径
+	unsafePaths := []string{
+		"../etc/passwd",
+		"../../secret.key",
+		"/etc/shadow",
+		"config/../../etc/passwd",
+		"http://evil.com",
+		"https://evil.com",
+		"config/not_exist_file_9999.ini",
+		"config/illegal.sh",
+		"",
+	}
+	for _, p := range unsafePaths {
+		if IsSafeLocalTemplate(p) {
+			t.Errorf("expected path '%s' to be unsafe", p)
+		}
+	}
+}
+
+func TestPatchSingboxTLSAndTransportSNI(t *testing.T) {
+	rawJSON := []byte(`{
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "test-vless",
+      "server": "45.76.207.88",
+      "server_port": 443,
+      "sni": "argo.example.com",
+      "tls": {
+        "enabled": true
+      },
+      "transport": {
+        "type": "ws",
+        "path": "/ws",
+        "headers": {}
+      }
+    }
+  ]
+}`)
+
+	patched := PatchSingboxTLSAndTransportSNI(rawJSON)
+
+	var root map[string]interface{}
+	if err := json.Unmarshal(patched, &root); err != nil {
+		t.Fatalf("unmarshal patched failed: %v", err)
+	}
+
+	outbounds := root["outbounds"].([]interface{})
+	ob := outbounds[0].(map[string]interface{})
+	tls := ob["tls"].(map[string]interface{})
+	if tls["server_name"] != "argo.example.com" {
+		t.Errorf("expected tls.server_name == 'argo.example.com', got '%v'", tls["server_name"])
+	}
+
+	transport := ob["transport"].(map[string]interface{})
+	headers := transport["headers"].(map[string]interface{})
+	if headers["Host"] != "argo.example.com" {
+		t.Errorf("expected transport.headers.Host == 'argo.example.com', got '%v'", headers["Host"])
+	}
+}

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bufio"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net"
@@ -610,12 +611,87 @@ func ProxySubconverterConvert(target, sourceSubURL, configTemplate string, extra
 		return nil, "", fmt.Errorf("subconverter returned HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
+	if target == "singbox" && len(body) > 0 {
+		body = PatchSingboxTLSAndTransportSNI(body)
+	}
+
 	contentType := resp.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "text/plain; charset=utf-8"
 	}
 
 	return body, contentType, nil
+}
+
+// PatchSingboxTLSAndTransportSNI 补全 Subconverter 生成的 sing-box 客户端配置缺失的 tls.server_name 与 transport Host
+func PatchSingboxTLSAndTransportSNI(rawJSON []byte) []byte {
+	var root map[string]interface{}
+	if err := json.Unmarshal(rawJSON, &root); err != nil {
+		return rawJSON
+	}
+
+	outbounds, ok := root["outbounds"].([]interface{})
+	if !ok || len(outbounds) == 0 {
+		return rawJSON
+	}
+
+	modified := false
+	for _, obRaw := range outbounds {
+		ob, ok := obRaw.(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		// 提取根级别或已有的 sni
+		sni, _ := ob["sni"].(string)
+		sni = strings.TrimSpace(sni)
+
+		// 检查 tls 结构体
+		if tlsRaw, ok := ob["tls"].(map[string]interface{}); ok {
+			serverName, _ := tlsRaw["server_name"].(string)
+			serverName = strings.TrimSpace(serverName)
+			if serverName == "" && sni != "" {
+				tlsRaw["server_name"] = sni
+				modified = true
+			}
+		} else if sni != "" {
+			// 若 tls 块不存在但有 tls 相关配置
+			if obType, _ := ob["type"].(string); obType == "vless" || obType == "vmess" || obType == "trojan" {
+				ob["tls"] = map[string]interface{}{
+					"enabled":     true,
+					"server_name": sni,
+				}
+				modified = true
+			}
+		}
+
+		// 检查 transport (ws / grpc / httpupgrade) headers.Host
+		if transRaw, ok := ob["transport"].(map[string]interface{}); ok {
+			transType, _ := transRaw["type"].(string)
+			if transType == "ws" || transType == "http" || transType == "httpupgrade" {
+				headers, _ := transRaw["headers"].(map[string]interface{})
+				if headers == nil {
+					headers = make(map[string]interface{})
+					transRaw["headers"] = headers
+				}
+				hostVal, _ := headers["Host"].(string)
+				if strings.TrimSpace(hostVal) == "" && sni != "" {
+					headers["Host"] = sni
+					modified = true
+				}
+			}
+		}
+	}
+
+	if !modified {
+		return rawJSON
+	}
+
+	patched, err := json.MarshalIndent(root, "", "  ")
+	if err != nil {
+		return rawJSON
+	}
+	return patched
 }
 
 // DefaultCustomRulesContent 预置的标准自定义规则模板范例
@@ -625,15 +701,19 @@ const DefaultCustomRulesContent = `[custom]
 ; 本文件供 Clash / Surge / Loon / Quantumult X 等客户端一键应用自定义策略组与分流规则
 ; ==============================================================================
 
+; 启用规则生成器并覆盖默认策略
+enable_rule_generator=true
+overwrite_original_rules=true
+
 ; --- 1. 策略组定义 (Proxy Groups) ---
-; 语法: custom_group=策略组名称` + "`" + `select|url-test|fallback` + "`" + `规则1` + "`" + `规则2` + "`" + `...` + "`" + `节点正则
-custom_group=🚀 节点选择` + "`" + `select` + "`" + `[]♻️ 自动选择` + "`" + `[]🎯 全球直连` + "`" + `.*
-custom_group=♻️ 自动选择` + "`" + `url-test` + "`" + `.*` + "`" + `http://www.gstatic.com/generate_204` + "`" + `300,,50
-custom_group=🎬 国外流媒体` + "`" + `select` + "`" + `[]🚀 节点选择` + "`" + `[]♻️ 自动选择` + "`" + `[]🎯 全球直连` + "`" + `.*
-custom_group=🤖 人工智能` + "`" + `select` + "`" + `[]🚀 节点选择` + "`" + `[]♻️ 自动选择` + "`" + `.*
-custom_group=🛑 广告拦截` + "`" + `select` + "`" + `[]🍃 全球拦截` + "`" + `[]🎯 全球直连
-custom_group=🎯 全球直连` + "`" + `select` + "`" + `[]DIRECT
-custom_group=🍃 全球拦截` + "`" + `select` + "`" + `[]REJECT
+; 语法: custom_proxy_group=策略组名称` + "`" + `select|url-test|fallback` + "`" + `规则1` + "`" + `规则2` + "`" + `...` + "`" + `节点正则
+custom_proxy_group=🚀 节点选择` + "`" + `select` + "`" + `[]♻️ 自动选择` + "`" + `[]🎯 全球直连` + "`" + `.*
+custom_proxy_group=♻️ 自动选择` + "`" + `url-test` + "`" + `.*` + "`" + `http://www.gstatic.com/generate_204` + "`" + `300,,50
+custom_proxy_group=🎬 国外流媒体` + "`" + `select` + "`" + `[]🚀 节点选择` + "`" + `[]♻️ 自动选择` + "`" + `[]🎯 全球直连` + "`" + `.*
+custom_proxy_group=🤖 人工智能` + "`" + `select` + "`" + `[]🚀 节点选择` + "`" + `[]♻️ 自动选择` + "`" + `.*
+custom_proxy_group=🛑 广告拦截` + "`" + `select` + "`" + `[]🍃 全球拦截` + "`" + `[]🎯 全球直连
+custom_proxy_group=🎯 全球直连` + "`" + `select` + "`" + `[]DIRECT
+custom_proxy_group=🍃 全球拦截` + "`" + `select` + "`" + `[]REJECT
 
 ; --- 2. 外部规则集引用 (Rulesets) ---
 ; 语法: ruleset=策略组名称,规则集URL或本地路径
@@ -646,6 +726,68 @@ ruleset=🎯 全球直连,https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/mast
 ruleset=🎯 全球直连,[]GEOIP,CN
 ruleset=🚀 节点选择,[]FINAL
 `
+
+// EnsureCustomRulesFile 确保本地 custom_rules.ini 存在，若不存在则从数据库或默认范例落地到磁盘
+func EnsureCustomRulesFile() error {
+	compDir := subconverter.GetComponentDir()
+	rulesPath := filepath.Join(compDir, "config", "custom_rules.ini")
+	if _, err := os.Stat(rulesPath); err == nil {
+		return nil
+	}
+	content := DefaultCustomRulesContent
+	if model.DB != nil {
+		if dbRules, _ := model.GetSetting("subconverter_custom_rules"); strings.TrimSpace(dbRules) != "" {
+			content = dbRules
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(rulesPath), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(rulesPath, []byte(content), 0644)
+}
+
+// IsSafeLocalTemplate 检查指定的模板路径是否为安全合法的本地相对模板文件 (防目录穿越 LFI 攻击)
+func IsSafeLocalTemplate(tpl string) bool {
+	clean := filepath.Clean(strings.TrimSpace(tpl))
+	if clean == "" || filepath.IsAbs(clean) || strings.HasPrefix(clean, "/") || strings.HasPrefix(clean, "\\") {
+		return false
+	}
+	if strings.Contains(clean, "..") || strings.HasPrefix(clean, ".") {
+		return false
+	}
+
+	// 必须限定在受管组件专属子目录下
+	if !strings.HasPrefix(clean, "config/") && !strings.HasPrefix(clean, "base/") && !strings.HasPrefix(clean, "snippets/") {
+		return false
+	}
+
+	// 限制文件扩展名
+	ext := strings.ToLower(filepath.Ext(clean))
+	switch ext {
+	case ".ini", ".toml", ".yml", ".yaml", ".conf", ".tpl", ".txt", ".list":
+		// 允许的格式
+	default:
+		return false
+	}
+
+	compDir := subconverter.GetComponentDir()
+	fullPath := filepath.Join(compDir, clean)
+	// 二次防穿越校验：确保绝对路径依然在 compDir 内
+	if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(compDir)) {
+		return false
+	}
+
+	// 如果请求的是 custom_rules.ini，确保其落地存在
+	if clean == "config/custom_rules.ini" {
+		_ = EnsureCustomRulesFile()
+	}
+
+	fi, err := os.Stat(fullPath)
+	if err != nil || fi.IsDir() {
+		return false
+	}
+	return true
+}
 
 // GetSubconverterCustomRules 获取本地自定义规则 custom_rules.ini 内容
 func GetSubconverterCustomRules(c *gin.Context) {
