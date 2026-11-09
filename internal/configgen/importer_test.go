@@ -240,3 +240,80 @@ func TestForceSyncSingboxConfig(t *testing.T) {
 	}
 }
 
+func TestForceSyncSingboxConfigWithRouteRules(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_routes.db")
+	db, err := model.InitDB(dbPath)
+	if err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+	defer db.Close()
+
+	diskJSON := `{
+  "inbounds": [
+    {
+      "tag": "vless-in",
+      "type": "vless",
+      "listen": "::",
+      "listen_port": 443
+    }
+  ],
+  "outbounds": [
+    {
+      "tag": "warp-out",
+      "type": "socks",
+      "server": "127.0.0.1",
+      "server_port": 40000
+    }
+  ],
+  "route": {
+    "rules": [
+      {
+        "inbound": ["vless-in"],
+        "outbound": "warp-out"
+      },
+      {
+        "domain_suffix": [".google.com", ".youtube.com"],
+        "outbound": "warp-out"
+      }
+    ]
+  }
+}`
+	cfgFile := filepath.Join(t.TempDir(), "route_config.json")
+	if err := os.WriteFile(cfgFile, []byte(diskJSON), 0644); err != nil {
+		t.Fatalf("failed to write disk config: %v", err)
+	}
+
+	stats, err := ForceSyncSingboxConfig(cfgFile)
+	if err != nil {
+		t.Fatalf("ForceSyncSingboxConfig failed: %v", err)
+	}
+
+	if stats.RoutesCreated != 2 {
+		t.Errorf("expected 2 routes created, got %d", stats.RoutesCreated)
+	}
+
+	routes, err := model.ListRouteRules()
+	if err != nil {
+		t.Fatalf("ListRouteRules failed: %v", err)
+	}
+	if len(routes) != 2 {
+		t.Fatalf("expected 2 routes in database, got %d", len(routes))
+	}
+
+	// 验证第一条：inbound 直通 outbound
+	r0 := routes[0]
+	if r0.InboundTags != "vless-in" || r0.OutboundTag != "warp-out" {
+		t.Errorf("expected inbound=vless-in -> warp-out, got inbound=%s, outbound=%s", r0.InboundTags, r0.OutboundTag)
+	}
+	if !strings.Contains(r0.Name, "vless-in") {
+		t.Errorf("expected route name containing vless-in, got %s", r0.Name)
+	}
+
+	// 验证第二条：domain_suffix
+	r1 := routes[1]
+	if !strings.Contains(r1.DomainSuffix, ".google.com") || r1.OutboundTag != "warp-out" {
+		t.Errorf("expected domain_suffix containing .google.com -> warp-out, got suffix=%s, outbound=%s", r1.DomainSuffix, r1.OutboundTag)
+	}
+}
+
+

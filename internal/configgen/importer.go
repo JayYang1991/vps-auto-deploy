@@ -17,6 +17,7 @@ type ImportStats struct {
 	InboundsImported  int      `json:"inbounds_imported"`
 	MembersImported   int      `json:"members_imported"`
 	OutboundsImported int      `json:"outbounds_imported"`
+	RoutesImported    int      `json:"routes_imported"`
 	InboundTags       []string `json:"inbound_tags"`
 	ConfigPath        string   `json:"config_path"`
 }
@@ -28,6 +29,7 @@ type SyncStats struct {
 	OutboundsUpdated  int      `json:"outbounds_updated"`
 	OutboundsCreated  int      `json:"outbounds_created"`
 	OutboundsDeleted  int      `json:"outbounds_deleted"`
+	RoutesCreated     int      `json:"routes_created"`
 	MembersImported   int      `json:"members_imported"`
 	InboundTags       []string `json:"inbound_tags"`
 	OutboundTags      []string `json:"outbound_tags"`
@@ -37,6 +39,11 @@ type SyncStats struct {
 type RawSingboxFile struct {
 	Inbounds  []map[string]interface{} `json:"inbounds"`
 	Outbounds []map[string]interface{} `json:"outbounds"`
+	Route     *RawSingboxRoute          `json:"route"`
+}
+
+type RawSingboxRoute struct {
+	Rules []map[string]interface{} `json:"rules"`
 }
 
 // ParseInboundMap 解析 sing-box 原始 inbound map 为面板数据结构
@@ -261,6 +268,138 @@ func ParseOutboundMap(ob map[string]interface{}) (tag, obType, server string, se
 	return tag, obType, server, serverPort, string(specBytes), true
 }
 
+// ParseRouteRuleMap 解析 sing-box 原始 route.rule map 为面板 RouteRule 数据结构
+func ParseRouteRuleMap(rule map[string]interface{}, idx int) (*model.RouteRule, bool) {
+	if rule == nil {
+		return nil, false
+	}
+
+	outboundTag, _ := rule["outbound"].(string)
+	outboundTag = strings.TrimSpace(outboundTag)
+
+	action, _ := rule["action"].(string)
+	action = strings.TrimSpace(action)
+	if action == "" {
+		action = "route"
+	}
+	if outboundTag == "block" || action == "reject" {
+		action = "reject"
+		if outboundTag == "" {
+			outboundTag = "block"
+		}
+	} else if action == "direct" {
+		outboundTag = "direct"
+	}
+
+	if outboundTag == "" && action != "reject" {
+		return nil, false
+	}
+
+	extractStringList := func(key string) string {
+		v, exists := rule[key]
+		if !exists || v == nil {
+			return ""
+		}
+		switch val := v.(type) {
+		case string:
+			return strings.TrimSpace(val)
+		case []interface{}:
+			var list []string
+			for _, item := range val {
+				if s, ok := item.(string); ok && strings.TrimSpace(s) != "" {
+					list = append(list, strings.TrimSpace(s))
+				}
+			}
+			return strings.Join(list, ", ")
+		case []string:
+			return strings.Join(val, ", ")
+		default:
+			return ""
+		}
+	}
+
+	extractPorts := func() (string, string) {
+		var ports []string
+		if pVal, exists := rule["port"]; exists && pVal != nil {
+			switch p := pVal.(type) {
+			case float64:
+				ports = append(ports, fmt.Sprintf("%d", int(p)))
+			case string:
+				ports = append(ports, strings.TrimSpace(p))
+			case []interface{}:
+				for _, item := range p {
+					if num, ok := item.(float64); ok {
+						ports = append(ports, fmt.Sprintf("%d", int(num)))
+					} else if str, ok := item.(string); ok {
+						ports = append(ports, strings.TrimSpace(str))
+					}
+				}
+			}
+		}
+		portStr := strings.Join(ports, ", ")
+		portRangeStr := extractStringList("port_range")
+		return portStr, portRangeStr
+	}
+
+	inboundTags := extractStringList("inbound")
+	domains := extractStringList("domain")
+	domainSuffix := extractStringList("domain_suffix")
+	domainKeyword := extractStringList("domain_keyword")
+	ipCIDR := extractStringList("ip_cidr")
+	protocol := extractStringList("protocol")
+	ruleSet := extractStringList("rule_set")
+	portStr, portRangeStr := extractPorts()
+
+	ipIsPrivate := false
+	if privVal, exists := rule["ip_is_private"]; exists {
+		if b, ok := privVal.(bool); ok {
+			ipIsPrivate = b
+		}
+	}
+
+	invert := false
+	if invVal, exists := rule["invert"]; exists {
+		if b, ok := invVal.(bool); ok {
+			invert = b
+		}
+	}
+
+	name := ""
+	if nVal, exists := rule["name"].(string); exists && strings.TrimSpace(nVal) != "" {
+		name = strings.TrimSpace(nVal)
+	} else if inboundTags != "" && outboundTag != "" {
+		name = fmt.Sprintf("入站直通: %s -> %s", inboundTags, outboundTag)
+	} else if domainSuffix != "" {
+		name = fmt.Sprintf("域名分流: %s -> %s", domainSuffix, outboundTag)
+	} else if ruleSet != "" {
+		name = fmt.Sprintf("规则集分流: %s -> %s", ruleSet, outboundTag)
+	} else if ipIsPrivate {
+		name = fmt.Sprintf("局域网私有IP -> %s", outboundTag)
+	} else {
+		name = fmt.Sprintf("路由分流规则 %d -> %s", idx+1, outboundTag)
+	}
+
+	r := &model.RouteRule{
+		Name:          name,
+		Action:        action,
+		OutboundTag:   outboundTag,
+		InboundTags:   inboundTags,
+		Domains:       domains,
+		DomainSuffix:  domainSuffix,
+		DomainKeyword: domainKeyword,
+		IPCIDR:        ipCIDR,
+		IPIsPrivate:   ipIsPrivate,
+		Port:          portStr,
+		PortRange:     portRangeStr,
+		Protocol:      protocol,
+		RuleSet:       ruleSet,
+		Invert:        invert,
+		Priority:      (idx + 1) * 10,
+		Enabled:       true,
+	}
+	return r, true
+}
+
 // ImportExistingSingboxConfig 增量导入（不覆盖已有 Tag）
 func ImportExistingSingboxConfig(cfgPath string) (*ImportStats, error) {
 	data, err := os.ReadFile(cfgPath)
@@ -316,6 +455,41 @@ func ImportExistingSingboxConfig(cfgPath string) (*ImportStats, error) {
 			)
 			if err == nil {
 				stats.OutboundsImported++
+			}
+		}
+	}
+
+	// 4. 增量导入路由分流规则 (当数据库仅有默认规则或无规则时)
+	if raw.Route != nil && len(raw.Route.Rules) > 0 {
+		var routeCount int
+		_ = model.DB.QueryRow("SELECT COUNT(*) FROM routes").Scan(&routeCount)
+		if routeCount <= 2 {
+			_, _ = model.DB.Exec("DELETE FROM routes")
+			for idx, rMap := range raw.Route.Rules {
+				r, ok := ParseRouteRuleMap(rMap, idx)
+				if !ok {
+					continue
+				}
+				ipPrivInt := 0
+				if r.IPIsPrivate {
+					ipPrivInt = 1
+				}
+				invInt := 0
+				if r.Invert {
+					invInt = 1
+				}
+				_, err := model.DB.Exec(`
+					INSERT INTO routes (
+						name, action, outbound_tag, inbound_tags, domains, domain_suffix, domain_keyword,
+						ip_cidr, ip_is_private, port, port_range, protocol, rule_set, rule_set_urls,
+						invert, priority, enabled, created_at, updated_at
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, 1, ?, ?)
+				`, r.Name, r.Action, r.OutboundTag, r.InboundTags, r.Domains, r.DomainSuffix, r.DomainKeyword,
+					r.IPCIDR, ipPrivInt, r.Port, r.PortRange, r.Protocol, r.RuleSet,
+					invInt, r.Priority, now, now)
+				if err == nil {
+					stats.RoutesImported++
+				}
 			}
 		}
 	}
@@ -524,6 +698,37 @@ func ForceSyncSingboxConfig(cfgPath string) (*SyncStats, error) {
 				"INSERT INTO outbounds (tag, type, server, server_port, spec_json, priority, enabled, is_system, created_at, updated_at) VALUES (?, ?, '', 0, '{}', ?, 1, 1, ?, ?)",
 				sysTag, sysTag, prio, now, now,
 			)
+		}
+	}
+
+	// 4. 强制覆盖路由分流规则 (routes)
+	if raw.Route != nil && len(raw.Route.Rules) > 0 {
+		_, _ = tx.Exec("DELETE FROM routes")
+		for idx, rMap := range raw.Route.Rules {
+			r, ok := ParseRouteRuleMap(rMap, idx)
+			if !ok {
+				continue
+			}
+			ipPrivInt := 0
+			if r.IPIsPrivate {
+				ipPrivInt = 1
+			}
+			invInt := 0
+			if r.Invert {
+				invInt = 1
+			}
+			_, err := tx.Exec(`
+				INSERT INTO routes (
+					name, action, outbound_tag, inbound_tags, domains, domain_suffix, domain_keyword,
+					ip_cidr, ip_is_private, port, port_range, protocol, rule_set, rule_set_urls,
+					invert, priority, enabled, created_at, updated_at
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, 1, ?, ?)
+			`, r.Name, r.Action, r.OutboundTag, r.InboundTags, r.Domains, r.DomainSuffix, r.DomainKeyword,
+				r.IPCIDR, ipPrivInt, r.Port, r.PortRange, r.Protocol, r.RuleSet,
+				invInt, r.Priority, now, now)
+			if err == nil {
+				stats.RoutesCreated++
+			}
 		}
 	}
 

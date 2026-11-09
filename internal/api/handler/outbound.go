@@ -341,13 +341,18 @@ func LoadSingboxFromDisk(c *gin.Context) {
 		return
 	}
 
+	msg := fmt.Sprintf(
+		"成功从磁盘加载并覆盖数据库！已同步 %d 个入站节点（新增 %d/更新 %d/清理 %d）、%d 个出站规则（新增 %d/更新 %d/清理 %d）",
+		len(stats.InboundTags), stats.InboundsCreated, stats.InboundsUpdated, stats.InboundsDeleted,
+		len(stats.OutboundTags), stats.OutboundsCreated, stats.OutboundsUpdated, stats.OutboundsDeleted,
+	)
+	if stats.RoutesCreated > 0 {
+		msg += fmt.Sprintf("、%d 条路由分流规则", stats.RoutesCreated)
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"message": fmt.Sprintf(
-			"成功从磁盘加载并覆盖数据库！已同步 %d 个入站节点（新增 %d/更新 %d/清理 %d）、%d 个出站规则（新增 %d/更新 %d/清理 %d）",
-			len(stats.InboundTags), stats.InboundsCreated, stats.InboundsUpdated, stats.InboundsDeleted,
-			len(stats.OutboundTags), stats.OutboundsCreated, stats.OutboundsUpdated, stats.OutboundsDeleted,
-		),
-		"stats": stats,
+		"message": msg,
+		"stats":   stats,
 	})
 }
 
