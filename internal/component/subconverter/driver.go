@@ -201,9 +201,15 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 		if _, err := os.Stat(prefExample); err == nil {
 			logFn("初始化默认配置文件 pref.ini...")
 			if content, err := os.ReadFile(prefExample); err == nil {
-				// 替换默认监听地址为 127.0.0.1，并开启缓存保障分流规则集高性能解析
+				// 替换默认监听地址为 127.0.0.1，并开启缓存与容灾跳过错误链接 (skip_failed_links)
 				modified := strings.Replace(string(content), "listen=0.0.0.0", "listen=127.0.0.1", 1)
 				modified = strings.Replace(modified, "enable_cache=false", "enable_cache=true", 1)
+				modified = strings.Replace(modified, "skip_failed_links=false", "skip_failed_links=true", -1)
+				if !strings.Contains(modified, "skip_failed_links=true") {
+					if strings.Contains(modified, "[common]") {
+						modified = strings.Replace(modified, "[common]", "[common]\nskip_failed_links=true", 1)
+					}
+				}
 				_ = os.WriteFile(prefPath, []byte(modified), 0644)
 			}
 		} else {
@@ -216,13 +222,18 @@ enable_cache=true
 cache_subscription=60
 cache_config=300
 cache_ruleset=21600
+skip_failed_links=true
 listen=127.0.0.1
 port=%d
+
+[advanced]
+skip_failed_links=true
 `, DefaultPort)
 			_ = os.WriteFile(prefPath, []byte(defaultIni), 0644)
 		}
 	} else {
-		logFn("保留现有用户自定义 pref.ini 配置文件。")
+		logFn("保留现有用户自定义 pref.ini 配置文件，并同步高可用防护配置。")
+		EnsurePrefDefaults()
 	}
 
 	// 在用户全局 BIN 目录建立符号链接或拷贝，方便 CLI 探测与调用
@@ -336,6 +347,7 @@ func (d *Driver) Status() (component.ServiceStatus, error) {
 }
 
 func (d *Driver) Start() error {
+	EnsurePrefDefaults()
 	return d.systemd.Start()
 }
 
@@ -344,7 +356,36 @@ func (d *Driver) Stop() error {
 }
 
 func (d *Driver) Restart() error {
+	EnsurePrefDefaults()
 	return d.systemd.Restart()
+}
+
+// EnsurePrefDefaults 确保 pref.ini 存在并注入推荐的高可用容灾选项 (如 skip_failed_links=true)
+func EnsurePrefDefaults() {
+	prefPath := GetConfigPath()
+	data, err := os.ReadFile(prefPath)
+	if err != nil {
+		return
+	}
+	content := string(data)
+	modified := false
+
+	// 1. 确保开启 skip_failed_links 容灾（避免单节点异常导致整组成员订阅崩溃）
+	if strings.Contains(content, "skip_failed_links=false") {
+		content = strings.Replace(content, "skip_failed_links=false", "skip_failed_links=true", -1)
+		modified = true
+	} else if !strings.Contains(content, "skip_failed_links") {
+		if strings.Contains(content, "[common]") {
+			content = strings.Replace(content, "[common]", "[common]\nskip_failed_links=true", 1)
+		} else {
+			content += "\n[common]\nskip_failed_links=true\n"
+		}
+		modified = true
+	}
+
+	if modified {
+		_ = os.WriteFile(prefPath, []byte(content), 0644)
+	}
 }
 
 // extractTarGzToDir 将 tar.gz 解包并剥离最外层的 subconverter/ 根目录

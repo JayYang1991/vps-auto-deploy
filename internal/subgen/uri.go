@@ -386,3 +386,91 @@ func GenerateBase64Sub(member *model.Member) (string, error) {
 	joined := strings.Join(uris, "\n")
 	return base64.StdEncoding.EncodeToString([]byte(joined)), nil
 }
+
+// AdaptSingleURIForSubconverter 将单个节点链接转换为 Subconverter 能严格识别的规范格式
+// 特别说明：
+// Subconverter 原生解析器不支持 socks5:// 或 socks:// 伪 Scheme，但原生支持 Telegram 代理规范：
+//   tg://socks?server=HOST&port=PORT[&user=USER&pass=PASS]&remark=REMARK
+// 以及 HTTP 代理规范：
+//   tg://http?server=HOST&port=PORT[&user=USER&pass=PASS]&remark=REMARK
+func AdaptSingleURIForSubconverter(rawURI string) string {
+	rawURI = strings.TrimSpace(rawURI)
+	if strings.HasPrefix(rawURI, "socks5://") || strings.HasPrefix(rawURI, "socks://") {
+		parsed, err := url.Parse(rawURI)
+		if err == nil && parsed.Hostname() != "" {
+			q := url.Values{}
+			q.Set("server", parsed.Hostname())
+			port := parsed.Port()
+			if port == "" {
+				port = "1080"
+			}
+			q.Set("port", port)
+			if parsed.User != nil {
+				if user := parsed.User.Username(); user != "" {
+					q.Set("user", user)
+				}
+				if pass, hasPass := parsed.User.Password(); hasPass && pass != "" {
+					q.Set("pass", pass)
+				}
+			}
+			remark := parsed.Fragment
+			if unescapedRemark, err := url.QueryUnescape(remark); err == nil && unescapedRemark != "" {
+				remark = unescapedRemark
+			}
+			if remark != "" {
+				q.Set("remark", remark)
+			}
+			return "tg://socks?" + q.Encode()
+		}
+	} else if strings.HasPrefix(rawURI, "http://") && strings.Contains(rawURI, "#") {
+		parsed, err := url.Parse(rawURI)
+		if err == nil && parsed.Hostname() != "" {
+			q := url.Values{}
+			q.Set("server", parsed.Hostname())
+			port := parsed.Port()
+			if port == "" {
+				port = "80"
+			}
+			q.Set("port", port)
+			if parsed.User != nil {
+				if user := parsed.User.Username(); user != "" {
+					q.Set("user", user)
+				}
+				if pass, hasPass := parsed.User.Password(); hasPass && pass != "" {
+					q.Set("pass", pass)
+				}
+			}
+			remark := parsed.Fragment
+			if unescapedRemark, err := url.QueryUnescape(remark); err == nil && unescapedRemark != "" {
+				remark = unescapedRemark
+			}
+			if remark != "" {
+				q.Set("remark", remark)
+			}
+			return "tg://http?" + q.Encode()
+		}
+	}
+	return rawURI
+}
+
+// AdaptURIsForSubconverter 批量转换节点链接列表供 Subconverter 消费
+func AdaptURIsForSubconverter(uris []string) []string {
+	adapted := make([]string, 0, len(uris))
+	for _, u := range uris {
+		adapted = append(adapted, AdaptSingleURIForSubconverter(u))
+	}
+	return adapted
+}
+
+// AdaptSourceURLsForSubconverter 将以 '|' 分隔的复合节点字符串转换为 Subconverter 规范的方言
+func AdaptSourceURLsForSubconverter(sourceURLs string) string {
+	if strings.TrimSpace(sourceURLs) == "" {
+		return ""
+	}
+	parts := strings.Split(sourceURLs, "|")
+	adapted := make([]string, len(parts))
+	for i, p := range parts {
+		adapted[i] = AdaptSingleURIForSubconverter(p)
+	}
+	return strings.Join(adapted, "|")
+}

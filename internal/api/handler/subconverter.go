@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"vps-auto-deploy/internal/component/subconverter"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/subgen"
 )
 
 type SubconverterConfigResponse struct {
@@ -512,9 +513,12 @@ func ProxySubconverterConvert(target, sourceSubURL, configTemplate string, extra
 		return nil, "", err
 	}
 
+	// 自动将源节点链接方言转换为 Subconverter 严格支持的格式 (如将 socks5:// 转为 tg://socks?...)
+	adaptedSource := subgen.AdaptSourceURLsForSubconverter(sourceSubURL)
+
 	q := u.Query()
 	q.Set("target", target)
-	q.Set("url", sourceSubURL)
+	q.Set("url", adaptedSource)
 	if configTemplate != "" {
 		q.Set("config", configTemplate)
 	}

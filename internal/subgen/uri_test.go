@@ -175,4 +175,42 @@ func TestClusterPrefixSubgen(t *testing.T) {
 			t.Errorf("expected %s in Singbox config: %s", typeStr, extSingbox)
 		}
 	}
+
+	// 6. Test Subconverter Adapter: SOCKS5 / HTTP URL transformation
+	rawSocksNoAuth := "socks5://1.2.3.4:10086#US+%E7%BE%8E%E5%9B%BD%E8%8A%82%E7%82%B9+%7C+socks-in-10086"
+	adaptedNoAuth := AdaptSingleURIForSubconverter(rawSocksNoAuth)
+	if !strings.HasPrefix(adaptedNoAuth, "tg://socks?") {
+		t.Fatalf("expected tg://socks? prefix, got: %s", adaptedNoAuth)
+	}
+	if !strings.Contains(adaptedNoAuth, "server=1.2.3.4") || !strings.Contains(adaptedNoAuth, "port=10086") || !strings.Contains(adaptedNoAuth, "remark=") {
+		t.Fatalf("expected server, port, and remark in adapted URL: %s", adaptedNoAuth)
+	}
+
+	rawSocksAuth := "socks5://myuser:mypassword@1.2.3.4:1080#my-node"
+	adaptedAuth := AdaptSingleURIForSubconverter(rawSocksAuth)
+	if !strings.HasPrefix(adaptedAuth, "tg://socks?") || !strings.Contains(adaptedAuth, "user=myuser") || !strings.Contains(adaptedAuth, "pass=mypassword") {
+		t.Fatalf("expected tg://socks with auth, got: %s", adaptedAuth)
+	}
+
+	rawHTTP := "http://admin:pwd@1.2.3.4:8080#http-node"
+	adaptedHTTP := AdaptSingleURIForSubconverter(rawHTTP)
+	if !strings.HasPrefix(adaptedHTTP, "tg://http?") || !strings.Contains(adaptedHTTP, "server=1.2.3.4") || !strings.Contains(adaptedHTTP, "port=8080") {
+		t.Fatalf("expected tg://http, got: %s", adaptedHTTP)
+	}
+
+	rawVless := "vless://uuid@1.2.3.4:443?security=reality#my-vless"
+	if AdaptSingleURIForSubconverter(rawVless) != rawVless {
+		t.Fatalf("vless URL should remain unchanged")
+	}
+
+	// Test multi-node joined string adaptation
+	multiRaw := rawSocksNoAuth + "|" + rawVless + "|" + rawSocksAuth
+	adaptedMulti := AdaptSourceURLsForSubconverter(multiRaw)
+	parts := strings.Split(adaptedMulti, "|")
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 parts, got: %d", len(parts))
+	}
+	if !strings.HasPrefix(parts[0], "tg://socks?") || parts[1] != rawVless || !strings.HasPrefix(parts[2], "tg://socks?") {
+		t.Fatalf("unexpected adapted multi string: %s", adaptedMulti)
+	}
 }

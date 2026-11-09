@@ -111,3 +111,4 @@ func TestLoadSingboxFromDiskAndFullConfigSync(t *testing.T) {
 		t.Errorf("expected dns section preserved in config, got nil")
 	}
 }
+

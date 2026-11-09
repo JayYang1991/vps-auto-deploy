@@ -96,7 +96,8 @@ func ServeSubscription(c *gin.Context) {
 		extraParams["scv"] = s
 	}
 
-	sourceNodes := strings.Join(uris, "|")
+	subconverterURIs := subgen.AdaptURIsForSubconverter(uris)
+	sourceNodes := strings.Join(subconverterURIs, "|")
 	body, contentType, convErr := ProxySubconverterConvert(clientTarget, sourceNodes, configTemplate, extraParams)
 	if convErr == nil && len(body) > 0 {
 		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"sub-%s-%s.txt\"", token[:8], clientTarget))
