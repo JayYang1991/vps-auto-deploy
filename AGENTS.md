@@ -89,6 +89,11 @@ type ServiceStatus struct {
      - **📤 出站规则 (Outbounds)**：完整支持增删改查、直连/拦截/代理出站（SOCKS/HTTP/Shadowsocks/VLESS/自定义 JSON）与优先级权重排序。
      - **🔀 路由分流 (Routes)**：支持 Sing-box 1.14 最新语法（`ip_is_private`、根级 `http_clients`、`route.rule_set` 远程二进制 SRS、`route.rules` 条件组合、优先级次序调整与常用工业级一键预设）。
      - **📜 完整配置透视与热重载**：提供 live 完整服务端 JSON 查看、落盘路径校验、`singbox check` 语法预检及 `[ ⚡ 强制热重载 ]` 触发。
+- **权责对齐与防冗余设计铁律 (Scope Alignment & Redundancy Prevention)**：
+  - **全局高危动作统一收敛**：面板遵循“数据库即单一真相源 (Database as Single Source of Truth)”。凡涉及“读取磁盘文件全量反向覆盖数据库”或“将数据库全量渲染写入磁盘并重启内核”等跨实体的全局性、破坏性操作，**必须统一收敛在组件顶层工作区操作栏 (`Services.vue`) 或配置透视对比弹窗 (`ConfigViewer`) 中**。
+  - **严禁在子实体视图下钻散落全局按钮**：严禁在具体子列表（如 `Inbounds.vue` 入站列表、`Outbounds.vue` 出站列表、`Routes.vue` 分流列表）顶部重复放置“从磁盘覆盖数据库”等全局高危按钮。
+    > **违背理由**：严重违反最小惊讶原则（Principle of Least Astonishment）。用户在“出站规则”页点击覆盖，后端却同时覆盖了入站与成员，极易造成权责认知错位与误操作。子视图顶部必须保持干净聚焦，**仅允许放置该子实体的核心增删改查动作**（如 `[ + 新增节点 ]`、`[ + 新增出站规则 ]`）。
+  - **冲突决策渐进呈现与对称闭环**：“以磁盘为准导入面板”与“以面板为准写入磁盘”属于不可逆决策，**最佳交互路径是在 `[ 🔍 配置透视与对比 ]` 弹窗检测到冲突时以对称按钮呈现**（`[ 📥 以磁盘为准导入面板 ]` vs `[ ⚡ 以面板为准写入磁盘 ]`），让管理员看清差异后再行决策，严禁在子页面散落盲测式覆盖按钮。
 - **状态持久化与平滑切换**：
   - 子视图之间切换使用 `<keep-alive>`，确保在配置入站或出站表单时临时切换 Tab 不会丢失表单输入状态。
   - 路由兼容历史与快捷直达：`/services?tab=singbox&sub=inbounds`、`/services?tab=singbox&sub=outbounds`、`/services?tab=singbox&sub=routes`、`/services?tab=cloudflared`，历史路由 `?tab=inbounds`、`?tab=outbounds`、`?tab=routes`、`?tab=tunnels` 自动平滑重定向。
