@@ -56,16 +56,26 @@ func StartUpgradeNode(c *gin.Context) {
 		return
 	}
 
+	taskName := ""
+	if req.NodeID > 0 {
+		if n, err := model.GetNode(req.NodeID); err == nil && n != nil {
+			taskName = "升级节点: " + n.Name
+			if strings.TrimSpace(req.Host) == "" {
+				req.Host = n.Host
+			}
+			if req.SSHPort <= 0 && n.SSHPort > 0 {
+				req.SSHPort = n.SSHPort
+			}
+		}
+	}
+
 	if strings.TrimSpace(req.Host) == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "目标服务器地址 (Host) 不能为空"})
 		return
 	}
 
-	taskName := "升级节点: " + req.Host
-	if req.NodeID > 0 {
-		if n, err := model.GetNode(req.NodeID); err == nil {
-			taskName = "升级节点: " + n.Name
-		}
+	if taskName == "" {
+		taskName = "升级节点: " + req.Host
 	}
 
 	task := node.CreateDeployTask(taskName, req.Host)

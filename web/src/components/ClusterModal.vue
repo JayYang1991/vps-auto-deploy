@@ -1363,6 +1363,7 @@ let upgradeEventSource: EventSource | null = null
 
 const upgradeReq = reactive({
   node_id: 0,
+  host: '',
   ssh_port: 22,
   ssh_user: 'root',
   auth_type: 'password' as 'password' | 'key',
@@ -1373,7 +1374,8 @@ const upgradeReq = reactive({
 function openUpgradeModal(item: NodeItem) {
   targetUpgradeNode.value = item
   upgradeReq.node_id = item.id
-  upgradeReq.ssh_port = 22
+  upgradeReq.host = item.host || ''
+  upgradeReq.ssh_port = item.ssh_port || 22
   upgradeReq.ssh_user = 'root'
   upgradeReq.auth_type = 'password'
   upgradeReq.ssh_password = ''

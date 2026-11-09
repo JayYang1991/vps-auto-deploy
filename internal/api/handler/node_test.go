@@ -195,3 +195,62 @@ func TestNodeHandlers(t *testing.T) {
 	}
 }
 
+func TestStartUpgradeNode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupTestDB(t)
+
+	// 创建远程节点
+	nodeID, err := model.CreateNode(&model.Node{
+		Name:      "JP-Server-02",
+		Host:      "192.168.20.30",
+		SSHPort:   2222,
+		Status:    "online",
+		OSInfo:    "linux/amd64",
+	})
+	if err != nil {
+		t.Fatalf("CreateNode failed: %v", err)
+	}
+
+	r := gin.New()
+	r.POST("/api/nodes/upgrade", StartUpgradeNode)
+
+	// 1. 测试 host 为空，但提供了合法 node_id -> 应该自动从数据库解析 host，返回 200 并启动任务
+	{
+		body, _ := json.Marshal(map[string]interface{}{
+			"node_id":   nodeID,
+			"host":      "", // 空 host
+			"auth_type": "password",
+		})
+		req, _ := http.NewRequest(http.MethodPost, "/api/nodes/upgrade", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected 200 when node_id is provided even if host is empty, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]interface{}
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		if resp["task_id"] == nil || resp["task_id"] == "" {
+			t.Errorf("Expected valid task_id, got %v", resp["task_id"])
+		}
+	}
+
+	// 2. 测试 host 为空且 node_id 无效 -> 应该报错 400 Host 不能为空
+	{
+		body, _ := json.Marshal(map[string]interface{}{
+			"node_id":   99999,
+			"host":      "",
+			"auth_type": "password",
+		})
+		req, _ := http.NewRequest(http.MethodPost, "/api/nodes/upgrade", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("Expected 400 when host cannot be found, got %d", w.Code)
+		}
+	}
+}
+
