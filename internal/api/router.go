@@ -67,6 +67,12 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.POST("/system/bbr", handler.EnableBBR)
 			api.GET("/system/logs", handler.StreamLogs)
 
+			// 系统自升级与安装包管理
+			api.POST("/system/self-upgrade", handler.SelfUpgradeSystem)
+			api.POST("/system/upgrade/package", handler.UploadUpgradePackage)
+			api.GET("/system/upgrade/packages", handler.ListUpgradePackages)
+			api.POST("/system/upgrade/local", handler.ApplyLocalUpgrade)
+
 			// 组件管理
 			api.GET("/components", handler.ListComponents)
 			api.POST("/components/:name/install", handler.InstallComponent)

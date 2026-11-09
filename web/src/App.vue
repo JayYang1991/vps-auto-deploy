@@ -12,7 +12,7 @@
         <span style="font-size: 1.5rem;">🚀</span>
         <div>
           <span class="brand-title">VPS Auto Deploy</span>
-          <span class="brand-version">v1.2.0</span>
+          <span class="brand-version">{{ appVersion }}</span>
         </div>
 
         <!-- 节点上下文切换器与集群管理入口 -->
@@ -122,11 +122,14 @@ import NodeSwitcher from './components/NodeSwitcher.vue'
 import ClusterModal from './components/ClusterModal.vue'
 import { useConfirm } from './composables/useConfirm'
 import { useNodeContext } from './composables/useNodeContext'
+import api from './api'
 
 const route = useRoute()
 const router = useRouter()
 const { showConfirm } = useConfirm()
 const { activeNodeId } = useNodeContext()
+
+const appVersion = ref('v1.0.1')
 
 const isLoginRoute = computed(() => route.path === '/login')
 const currentRoute = computed(() => route.path)
@@ -159,6 +162,10 @@ function openClusterModal(tab: 'nodes' | 'cloud' | 'deploy' | 'import' = 'nodes'
 }
 
 onMounted(() => {
+  api.get('/system/overview').then(res => {
+    if (res.data?.version) appVersion.value = res.data.version
+  }).catch(() => {})
+
   window.addEventListener('open-cluster-modal', (e: any) => {
     openClusterModal(e.detail || 'nodes')
   })

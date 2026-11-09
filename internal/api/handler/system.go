@@ -16,6 +16,8 @@ import (
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/pkg/executil"
 	"vps-auto-deploy/internal/pkg/netutil"
+	"vps-auto-deploy/internal/pkg/upgrade"
+	"vps-auto-deploy/internal/version"
 )
 
 type SystemOverview struct {
@@ -26,6 +28,35 @@ type SystemOverview struct {
 	BBR        bool                      `json:"bbr"`
 	Components []component.ServiceStatus `json:"components"`
 	SecretPath string                    `json:"secret_path"`
+	Version    string                    `json:"version"`
+	SHA256     string                    `json:"sha256"`
+}
+
+var (
+	cachedSelfSHA256     string
+	cachedSelfSHA256Time time.Time
+)
+
+func getSelfSHA256() string {
+	if cachedSelfSHA256 != "" && time.Since(cachedSelfSHA256Time) < 5*time.Minute {
+		return cachedSelfSHA256
+	}
+	exe, err := os.Executable()
+	if err == nil {
+		h, err := upgrade.ComputeFileSHA256(exe)
+		if err == nil {
+			cachedSelfSHA256 = h
+			cachedSelfSHA256Time = time.Now()
+			return h
+		}
+	}
+	h, err := upgrade.ComputeFileSHA256("/usr/local/bin/vps-panel")
+	if err == nil {
+		cachedSelfSHA256 = h
+		cachedSelfSHA256Time = time.Now()
+		return h
+	}
+	return ""
 }
 
 func GetSystemOverview(c *gin.Context) {
@@ -61,6 +92,8 @@ func GetSystemOverview(c *gin.Context) {
 		BBR:        bbrEnabled,
 		Components: comps,
 		SecretPath: secretPath,
+		Version:    version.Version,
+		SHA256:     getSelfSHA256(),
 	})
 }
 
@@ -141,4 +174,131 @@ func StreamLogs(c *gin.Context) {
 		}
 	})
 }
+
+// UploadUpgradePackage 上传并校验新版安装包 (二进制或 tar.gz/zip)
+func UploadUpgradePackage(c *gin.Context) {
+	file, header, err := c.Request.FormFile("package")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请选择要上传的安装包文件: " + err.Error()})
+		return
+	}
+	defer file.Close()
+
+	tempFile, err := os.CreateTemp("", "vps-pkg-upload-*")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建临时上传文件失败: " + err.Error()})
+		return
+	}
+	defer os.Remove(tempFile.Name())
+
+	if _, err := io.Copy(tempFile, file); err != nil {
+		tempFile.Close()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "写入上传文件失败: " + err.Error()})
+		return
+	}
+	tempFile.Close()
+
+	info, err := upgrade.InspectAndSavePackage(tempFile.Name(), header.Filename)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "安装包校验失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, info)
+}
+
+// ListUpgradePackages 列出已导入的所有安装包
+func ListUpgradePackages(c *gin.Context) {
+	list, err := upgrade.ListPackages()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取安装包列表失败: " + err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, list)
+}
+
+// ApplyLocalUpgrade 将指定的已导入安装包应用至本机
+func ApplyLocalUpgrade(c *gin.Context) {
+	var req struct {
+		PackageID string `json:"package_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.PackageID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请提供有效的 package_id"})
+		return
+	}
+
+	binPath, err := upgrade.GetPackageBinaryPath(req.PackageID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := upgrade.ApplyLocalUpgrade(binPath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "应用升级失败: " + err.Error()})
+		return
+	}
+
+	upgrade.RestartServiceAsync(800 * time.Millisecond)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "本地节点升级包已部署生效，服务正在平滑重启...",
+	})
+}
+
+// SelfUpgradeSystem 供远程节点调用：接收二进制数据流并执行原子替换与自重启
+func SelfUpgradeSystem(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 100*1024*1024)
+
+	tempFile, err := os.CreateTemp("", "vps-self-upgrade-*")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建自升级临时文件失败: " + err.Error()})
+		return
+	}
+	defer os.Remove(tempFile.Name())
+
+	var srcReader io.Reader = c.Request.Body
+
+	// 若使用了 multipart/form-data 传输
+	if strings.Contains(c.GetHeader("Content-Type"), "multipart/form-data") {
+		f, _, formErr := c.Request.FormFile("binary")
+		if formErr == nil {
+			defer f.Close()
+			srcReader = f
+		}
+	}
+
+	if _, err := io.Copy(tempFile, srcReader); err != nil {
+		tempFile.Close()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "接收升级数据流失败: " + err.Error()})
+		return
+	}
+	tempFile.Close()
+
+	// 校验 ELF 架构
+	arch, err := upgrade.ParseELFArch(tempFile.Name())
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的可执行文件: " + err.Error()})
+		return
+	}
+	if arch != runtime.GOARCH {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("架构不兼容！升级包架构为 %s，本节点运行架构为 %s", arch, runtime.GOARCH)})
+		return
+	}
+
+	// 执行原子替换
+	if err := upgrade.ApplyLocalUpgrade(tempFile.Name()); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "执行升级替换失败: " + err.Error()})
+		return
+	}
+
+	// 异步延迟 800ms 重启服务
+	upgrade.RestartServiceAsync(800 * time.Millisecond)
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "升级文件已成功落盘并替换，服务正在平滑重启...",
+	})
+}
+
 

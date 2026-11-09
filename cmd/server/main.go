@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"runtime"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -21,6 +22,7 @@ import (
 	"vps-auto-deploy/internal/node"
 	"vps-auto-deploy/internal/pkg/crypto"
 	"vps-auto-deploy/internal/pkg/netutil"
+	"vps-auto-deploy/internal/version"
 )
 
 var (
@@ -33,6 +35,7 @@ var (
 	certFlag        = flag.String("cert", "/etc/vps-auto-deploy/cert.pem", "TLS certificate file path")
 	keyFlag         = flag.String("key", "/etc/vps-auto-deploy/key.pem", "TLS private key file path")
 	printFpFlag     = flag.Bool("print-fingerprint", false, "Print TLS certificate SHA-256 fingerprint and exit")
+	versionFlag     = flag.Bool("version", false, "Print vps-panel version and exit")
 )
 
 // webFS 允许外部通过 embed 方式注入静态资源
@@ -47,6 +50,11 @@ func init() {
 
 func main() {
 	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("vps-panel version %s (%s/%s)\n", version.Version, runtime.GOOS, runtime.GOARCH)
+		return
+	}
 
 	// 1. 初始化数据库
 	dbPath := *dbPathFlag

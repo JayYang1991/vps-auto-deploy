@@ -49,9 +49,9 @@ func StartDeployNode(c *gin.Context) {
 	})
 }
 
-// StartUpgradeNode 开启异步 SSH 软件推流升级任务 (升级已有受管节点的二进制)
+// StartUpgradeNode 开启异步节点软件推流升级任务 (支持 API 免密升级与 SSH 救援升级)
 func StartUpgradeNode(c *gin.Context) {
-	var req node.UpgradeSSHRequest
+	var req node.UpgradeRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
 		return
@@ -80,12 +80,23 @@ func StartUpgradeNode(c *gin.Context) {
 	}
 
 	task := node.CreateDeployTask(taskName, req.Host)
-	go node.RunUpgradeSSH(task, req)
+	task.NodeID = req.NodeID
 
-	c.JSON(http.StatusOK, gin.H{
-		"task_id": task.ID,
-		"message": "SSH 节点软件推流升级任务已启动",
-	})
+	// 模式判定：默认为 API 免密升级；若显式指定 mode == "ssh"，走 SSH 通道
+	if req.Mode == "ssh" {
+		go node.RunUpgradeSSH(task, req)
+		c.JSON(http.StatusOK, gin.H{
+			"task_id": task.ID,
+			"message": "SSH 节点软件推流升级任务已启动",
+		})
+	} else {
+		req.Mode = "api"
+		go node.RunUpgradeAPI(task, req)
+		c.JSON(http.StatusOK, gin.H{
+			"task_id": task.ID,
+			"message": "节点免密平滑升级任务已启动",
+		})
+	}
 }
 
 // GetDeployStatus 查询部署任务当前状态

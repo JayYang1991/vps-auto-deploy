@@ -693,56 +693,67 @@
           <button class="close-btn" @click="closeUpgradeModal" type="button" :disabled="isUpgrading && upgradeTaskStatus === 'running'">✕</button>
         </div>
 
-        <!-- 步骤 1：SSH 连接参数输入表单 -->
+        <!-- 步骤 1：升级配置选项 -->
         <div v-if="upgradeStep === 'form'" class="reveal-body">
-          <div class="form-alert-info" style="margin-bottom: 1rem;">
-            <span>ℹ️</span>
-            <div>
-              <strong>零外网依赖热升级：</strong>
-              主控端将直接通过 SSH 管道向该节点推流传输当前最新的 <code>vps-panel</code> 单一二进制文件并平滑重启服务。
-              <strong>节点所有数据库、TLS 证书、入站/出站及穿透业务配置均完好保留</strong>，升级完成后会自动完成全网成员凭据同步。
-            </div>
+          <!-- 升级模式切换 -->
+          <div style="display: flex; gap: 0.5rem; margin-bottom: 1rem; border-bottom: 1px solid #334155; padding-bottom: 0.75rem;">
+            <button
+              type="button"
+              class="btn-tab"
+              :class="{ 'btn-tab-active': upgradeReq.mode === 'api' }"
+              @click="upgradeReq.mode = 'api'"
+              style="padding: 0.4rem 0.85rem; font-size: 0.8125rem; border-radius: 0.375rem; border: 1px solid #475569; cursor: pointer;"
+            >
+              ⚡ 免密极速升级 (推荐)
+            </button>
+            <button
+              type="button"
+              class="btn-tab"
+              :class="{ 'btn-tab-active': upgradeReq.mode === 'ssh' }"
+              @click="upgradeReq.mode = 'ssh'"
+              style="padding: 0.4rem 0.85rem; font-size: 0.8125rem; border-radius: 0.375rem; border: 1px solid #475569; cursor: pointer;"
+            >
+              🛠️ SSH 救援升级
+            </button>
           </div>
 
-          <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 0.75rem;">
-            <div class="form-group">
-              <label>SSH 端口 <span class="req">*</span></label>
-              <input v-model.number="upgradeReq.ssh_port" type="number" placeholder="22" />
-            </div>
-
-            <div class="form-group">
-              <label>SSH 用户名 <span class="req">*</span></label>
-              <input v-model="upgradeReq.ssh_user" type="text" placeholder="root" />
-            </div>
-
-            <div class="form-group full-width">
-              <label>SSH 认证方式 <span class="req">*</span></label>
-              <div class="radio-group" style="display: flex; gap: 1rem; margin-top: 0.25rem;">
-                <label class="radio-label" style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: #cbd5e1; font-size: 0.8125rem;">
-                  <input type="radio" value="password" v-model="upgradeReq.auth_type" />
-                  <span>密码认证</span>
-                </label>
-                <label class="radio-label" style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: #cbd5e1; font-size: 0.8125rem;">
-                  <input type="radio" value="key" v-model="upgradeReq.auth_type" />
-                  <span>SSH 私钥认证</span>
-                </label>
+          <!-- 模式一：API 免密极速升级 (Zero-SSH) -->
+          <div v-if="upgradeReq.mode === 'api'">
+            <div class="form-alert-info" style="margin-bottom: 1rem;">
+              <span>⚡</span>
+              <div>
+                <strong>管理凭据免密极速升级 (Zero-SSH)：</strong>
+                主控端将直接通过内部加密通道（API Token + TLS 证书指纹锁定）向节点推送最新版程序并触发平滑热自启，<strong>无需输入任何 SSH 密码或私钥！</strong>
+                节点所有数据库、TLS 证书、入站/出站及穿透业务配置均完好保留，升级完成后全网凭据自动无缝重连。
               </div>
             </div>
 
-            <div v-if="upgradeReq.auth_type === 'password'" class="form-group full-width">
-              <label>SSH 登录密码 <span class="req">*</span></label>
-              <input v-model="upgradeReq.ssh_password" type="password" placeholder="输入远程主机 root 密码" @keyup.enter="startUpgrade" />
+            <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid #334155; border-radius: 0.5rem; padding: 0.85rem; margin-bottom: 1rem; font-size: 0.8125rem;">
+              <div style="display: flex; justify-content: space-between; margin-bottom: 0.4rem;">
+                <span style="color: #94a3b8;">目标系统架构:</span>
+                <span style="color: #38bdf8; font-weight: 600;">{{ targetUpgradeNode?.os_info || 'Linux (amd64)' }}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; margin-bottom: 0.4rem;">
+                <span style="color: #94a3b8;">管理通信安全:</span>
+                <span style="color: #10b981; font-weight: 600;">{{ targetUpgradeNode?.use_tls ? '🔒 HTTPS (Pinned TLS 指纹防护)' : '🌐 HTTP 直连' }}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between;">
+                <span style="color: #94a3b8;">当前在线状态:</span>
+                <span :style="{ color: targetUpgradeNode?.status === 'online' ? '#10b981' : '#f43f5e', fontWeight: '600' }">
+                  {{ targetUpgradeNode?.status === 'online' ? '● 在线就绪' : '● 离线 (若失联建议切换至 SSH 救援模式)' }}
+                </span>
+              </div>
             </div>
 
-            <div v-else class="form-group full-width">
-              <label>SSH 私钥内容 (PEM) <span class="req">*</span></label>
-              <textarea
-                v-model="upgradeReq.ssh_private_key"
-                rows="4"
-                class="mono"
-                style="width: 100%; box-sizing: border-box; background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; border-radius: 0.375rem; color: #f8fafc; padding: 0.5rem; font-size: 0.8125rem;"
-                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----"
-              ></textarea>
+            <!-- 可选选择导入的安装包 -->
+            <div v-if="availablePackages.length > 0" class="form-group full-width" style="margin-bottom: 0.75rem;">
+              <label>选择升级程序包</label>
+              <select v-model="upgradeReq.package_id" class="input" style="width: 100%; box-sizing: border-box; background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; border-radius: 0.375rem; color: #f8fafc; padding: 0.5rem; font-size: 0.8125rem;">
+                <option value="">(默认) 自动适配最佳程序包 / 当前运行版本</option>
+                <option v-for="pkg in availablePackages" :key="pkg.package_id" :value="pkg.package_id">
+                  {{ pkg.file_name }} ({{ pkg.arch }} - {{ pkg.version }}) - SHA: {{ pkg.sha256.substring(0, 8) }}
+                </option>
+              </select>
             </div>
 
             <div class="form-group full-width" style="margin-top: 0.25rem;">
@@ -753,10 +764,70 @@
             </div>
           </div>
 
+          <!-- 模式二：SSH 救援模式 -->
+          <div v-else>
+            <div class="form-alert-info" style="margin-bottom: 1rem; border-color: #f59e0b; background: rgba(245, 158, 11, 0.1);">
+              <span style="color: #f59e0b;">🚑</span>
+              <div>
+                <strong>SSH 底层救援重装升级：</strong>
+                仅在节点 Web API 彻底崩溃离线或无法连通时使用。主控将通过底层 SSH 管道强制连接宿主机执行二进制推流替换并重启 systemd 守护进程。
+              </div>
+            </div>
+
+            <div class="form-grid" style="grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+              <div class="form-group">
+                <label>SSH 端口 <span class="req">*</span></label>
+                <input v-model.number="upgradeReq.ssh_port" type="number" placeholder="22" />
+              </div>
+
+              <div class="form-group">
+                <label>SSH 用户名 <span class="req">*</span></label>
+                <input v-model="upgradeReq.ssh_user" type="text" placeholder="root" />
+              </div>
+
+              <div class="form-group full-width">
+                <label>SSH 认证方式 <span class="req">*</span></label>
+                <div class="radio-group" style="display: flex; gap: 1rem; margin-top: 0.25rem;">
+                  <label class="radio-label" style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: #cbd5e1; font-size: 0.8125rem;">
+                    <input type="radio" value="password" v-model="upgradeReq.auth_type" />
+                    <span>密码认证</span>
+                  </label>
+                  <label class="radio-label" style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: #cbd5e1; font-size: 0.8125rem;">
+                    <input type="radio" value="key" v-model="upgradeReq.auth_type" />
+                    <span>SSH 私钥认证</span>
+                  </label>
+                </div>
+              </div>
+
+              <div v-if="upgradeReq.auth_type === 'password'" class="form-group full-width">
+                <label>SSH 登录密码 <span class="req">*</span></label>
+                <input v-model="upgradeReq.ssh_password" type="password" placeholder="输入远程主机 root 密码" @keyup.enter="startUpgrade" />
+              </div>
+
+              <div v-else class="form-group full-width">
+                <label>SSH 私钥内容 (PEM) <span class="req">*</span></label>
+                <textarea
+                  v-model="upgradeReq.ssh_private_key"
+                  rows="4"
+                  class="mono"
+                  style="width: 100%; box-sizing: border-box; background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; border-radius: 0.375rem; color: #f8fafc; padding: 0.5rem; font-size: 0.8125rem;"
+                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----"
+                ></textarea>
+              </div>
+
+              <div class="form-group full-width" style="margin-top: 0.25rem;">
+                <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; color: #94a3b8; font-size: 0.8125rem;">
+                  <input type="checkbox" v-model="upgradeReq.force" style="accent-color: #6366f1; width: 1rem; height: 1rem;" />
+                  <span>强制重新推流覆盖</span>
+                </label>
+              </div>
+            </div>
+          </div>
+
           <div class="reveal-footer" style="margin-top: 1.25rem;">
             <button class="btn-secondary" @click="closeUpgradeModal" type="button">取消</button>
             <button class="btn-primary" @click="startUpgrade" :disabled="isUpgrading" type="button">
-              <span>{{ isUpgrading ? '⏳ 正在连接...' : '🚀 立即开始推流升级' }}</span>
+              <span>{{ isUpgrading ? '⏳ 正在升级...' : (upgradeReq.mode === 'api' ? '⚡ 立即开始免密平滑升级' : '🚑 立即开始 SSH 救援升级') }}</span>
             </button>
           </div>
         </div>
@@ -1405,10 +1476,13 @@ const isUpgrading = ref(false)
 const upgradeTaskStatus = ref<'running' | 'success' | 'failed'>('running')
 const upgradeLogs = ref<string[]>([])
 const upgradeTerminalBodyRef = ref<HTMLElement | null>(null)
+const availablePackages = ref<any[]>([])
 let upgradeEventSource: EventSource | null = null
 
 const upgradeReq = reactive({
   node_id: 0,
+  mode: 'api' as 'api' | 'ssh',
+  package_id: '',
   host: '',
   ssh_port: 22,
   ssh_user: 'root',
@@ -1418,9 +1492,11 @@ const upgradeReq = reactive({
   force: false,
 })
 
-function openUpgradeModal(item: NodeItem) {
+async function openUpgradeModal(item: NodeItem) {
   targetUpgradeNode.value = item
   upgradeReq.node_id = item.id
+  upgradeReq.mode = 'api'
+  upgradeReq.package_id = ''
   upgradeReq.host = item.host || ''
   upgradeReq.ssh_port = item.ssh_port || 22
   upgradeReq.ssh_user = 'root'
@@ -1432,6 +1508,13 @@ function openUpgradeModal(item: NodeItem) {
   upgradeLogs.value = []
   upgradeTaskStatus.value = 'running'
   upgradeModalVisible.value = true
+
+  try {
+    const res = await api.get('/system/upgrade/packages')
+    availablePackages.value = res.data || []
+  } catch {
+    availablePackages.value = []
+  }
 }
 
 function closeUpgradeModal() {
@@ -1456,13 +1539,15 @@ function scrollUpgradeToBottom() {
 }
 
 async function startUpgrade() {
-  if (upgradeReq.auth_type === 'password' && !upgradeReq.ssh_password) {
-    toast.warning('请输入 SSH 登录密码')
-    return
-  }
-  if (upgradeReq.auth_type === 'key' && !upgradeReq.ssh_private_key) {
-    toast.warning('请输入 SSH 私钥内容')
-    return
+  if (upgradeReq.mode === 'ssh') {
+    if (upgradeReq.auth_type === 'password' && !upgradeReq.ssh_password) {
+      toast.warning('请输入 SSH 登录密码')
+      return
+    }
+    if (upgradeReq.auth_type === 'key' && !upgradeReq.ssh_private_key) {
+      toast.warning('请输入 SSH 私钥内容')
+      return
+    }
   }
 
   isUpgrading.value = true

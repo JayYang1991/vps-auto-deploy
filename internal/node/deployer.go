@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/pkg/crypto"
+	"vps-auto-deploy/internal/pkg/upgrade"
 )
 
 // DeploySSHRequest SSH 远程部署请求参数
@@ -40,17 +42,22 @@ type DeploySSHRequest struct {
 	EnableTLS     *bool  `json:"enable_tls"` // 默认开启自签 TLS + 指纹绑定 (防中间人劫持)
 }
 
-// UpgradeSSHRequest 远程节点软件推流升级请求参数 (保留现有数据库与配置，仅更新二进制并重启)
-type UpgradeSSHRequest struct {
+// UpgradeRequest 远程节点软件推流升级请求参数 (支持 API 免密或 SSH 救援)
+type UpgradeRequest struct {
 	NodeID        int64  `json:"node_id"`
+	Mode          string `json:"mode"`       // "api" (默认，免密) | "ssh" (应急救援)
+	PackageID     string `json:"package_id"` // 可选：指定已导入的安装包 ID
+	Force         bool   `json:"force"`      // 是否强制覆盖已一致的二进制
 	Host          string `json:"host"`
 	SSHPort       int    `json:"ssh_port"`
 	SSHUser       string `json:"ssh_user"`
 	AuthType      string `json:"auth_type"` // "password" | "key"
 	SSHPassword   string `json:"ssh_password"`
 	SSHPrivateKey string `json:"ssh_private_key"`
-	Force         bool   `json:"force"` // 是否强制覆盖已一致的二进制
 }
+
+// UpgradeSSHRequest 兼容旧版命名
+type UpgradeSSHRequest = UpgradeRequest
 
 // computeFileSHA256 计算本地指定文件的 SHA-256 十六进制哈希串
 func computeFileSHA256(filePath string) (string, error) {
@@ -608,6 +615,230 @@ WantedBy=multi-user.target
 
 	task.Status = "success"
 	task.AddLog(fmt.Sprintf("[SUCCESS] 节点 %s (ID: %d) 成功加入集群并完成 TLS 指纹绑定！", req.Name, nodeID))
+}
+
+// RunUpgradeAPI 通过已有管理凭据 (API Token + Pinned TLS) 免密平滑升级纳管节点 (Zero-SSH)
+func RunUpgradeAPI(task *DeployTask, req UpgradeRequest) {
+	defer func() {
+		if r := recover(); r != nil {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("Panic during API upgrade: %v", r)
+			task.AddLog("[ERROR] " + task.Error)
+		}
+	}()
+
+	// 1. 获取目标节点元数据
+	var targetNode *model.Node
+	if req.NodeID > 0 {
+		targetNode, _ = model.GetNode(req.NodeID)
+	}
+	if targetNode == nil && req.Host != "" {
+		nodes, _ := model.ListNodes()
+		for _, n := range nodes {
+			if n.Host == req.Host {
+				cpy := n
+				targetNode = &cpy
+				break
+			}
+		}
+	}
+	if targetNode == nil {
+		task.Status = "failed"
+		task.Error = "未找到目标纳管节点记录"
+		task.AddLog("[ERROR] " + task.Error)
+		return
+	}
+
+	task.AddLog(fmt.Sprintf("🚀 开始通过管理凭据通道免密升级目标节点: %s (%s:%d)...", targetNode.Name, targetNode.Host, targetNode.PanelPort))
+
+	// 2. 识别目标节点系统架构
+	targetArch := "amd64"
+	osInfoLower := strings.ToLower(targetNode.OSInfo)
+	if strings.Contains(osInfoLower, "arm64") || strings.Contains(osInfoLower, "aarch64") {
+		targetArch = "arm64"
+	} else if strings.Contains(osInfoLower, "arm") {
+		targetArch = "arm"
+	} else if strings.Contains(osInfoLower, "386") {
+		targetArch = "386"
+	}
+
+	// 3. 准备待推送的二进制升级程序
+	var binPath string
+	var localHash string
+	if req.PackageID != "" {
+		task.AddLog(fmt.Sprintf("使用指定导入的升级安装包: %s", req.PackageID))
+		var err error
+		binPath, err = upgrade.GetPackageBinaryPath(req.PackageID)
+		if err != nil {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("读取指定安装包失败: %v", err)
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
+		localHash, _ = upgrade.ComputeFileSHA256(binPath)
+	} else {
+		task.AddLog(fmt.Sprintf("正在为目标架构 %s 匹配最佳升级包 (Zero-External-Download)...", targetArch))
+		var err error
+		binPath, localHash, err = upgrade.FindBestPackageForArch(targetArch)
+		if err != nil {
+			task.Status = "failed"
+			task.Error = err.Error()
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
+	}
+
+	prefixLen := 12
+	if len(localHash) < 12 {
+		prefixLen = len(localHash)
+	}
+	task.AddLog(fmt.Sprintf("升级包准备就绪: %s (架构: %s, 指纹: %s...)", filepath.Base(binPath), targetArch, localHash[:prefixLen]))
+
+	// 4. 构建 API 客户端与远端状态握手
+	scheme := "http"
+	if targetNode.UseTLS {
+		scheme = "https"
+	}
+	baseURL := fmt.Sprintf("%s://%s:%d/%s", scheme, targetNode.Host, targetNode.PanelPort, strings.Trim(targetNode.SecretPath, "/"))
+
+	var client *http.Client
+	if targetNode.UseTLS {
+		client = crypto.CreatePinnedHTTPClient(targetNode.CertFingerprint, 25*time.Second)
+	} else {
+		client = &http.Client{Timeout: 25 * time.Second}
+	}
+
+	task.AddLog(fmt.Sprintf("连接目标节点管理通道 %s (TLS 指纹锁定保护)...", baseURL))
+	needPush := true
+	overviewURL := baseURL + "/api/system/overview"
+	ovReq, _ := http.NewRequest(http.MethodGet, overviewURL, nil)
+	ovReq.Header.Set("Authorization", "Bearer "+targetNode.APIToken)
+
+	ovResp, ovErr := client.Do(ovReq)
+	if ovErr == nil {
+		if ovResp.StatusCode == http.StatusOK {
+			var ovData struct {
+				Version string `json:"version"`
+				SHA256  string `json:"sha256"`
+			}
+			_ = json.NewDecoder(ovResp.Body).Decode(&ovData)
+			ovResp.Body.Close()
+
+			if ovData.SHA256 != "" && strings.EqualFold(ovData.SHA256, localHash) {
+				if !req.Force {
+					task.AddLog(fmt.Sprintf("✓ 远端节点程序指纹与升级包完全一致 (SHA-256: %s...): 已是最新版本！", localHash[:prefixLen]))
+					task.AddLog("已自动跳过重复传输与重启，直接进入服务状态校验与全网凭据同步...")
+					needPush = false
+				} else {
+					task.AddLog(fmt.Sprintf("远端节点程序指纹已是一致 (SHA-256: %s...)，但已指定 [强制覆盖]，继续推流写入...", localHash[:prefixLen]))
+				}
+			}
+		} else if ovResp.StatusCode == http.StatusUnauthorized && targetNode.PasswordEncrypted != "" {
+			ovResp.Body.Close()
+			task.AddLog("目标节点 API Token 已过期，正在使用主控密钥解密凭据刷新 Token...")
+			jwtSecret, _ := model.GetSetting("jwt_secret")
+			rawPass, decErr := crypto.DecryptAESGCM(targetNode.PasswordEncrypted, crypto.DeriveKey(jwtSecret))
+			if decErr == nil && rawPass != "" {
+				newToken, logErr := LoginNode(targetNode.Host, targetNode.PanelPort, targetNode.SecretPath, targetNode.Username, rawPass, targetNode.UseTLS, targetNode.CertFingerprint)
+				if logErr == nil && newToken != "" {
+					targetNode.APIToken = newToken
+					_ = model.UpdateNodeToken(targetNode.ID, newToken)
+					task.AddLog("Token 自动刷新握手成功！")
+				}
+			}
+		} else {
+			ovResp.Body.Close()
+		}
+	}
+
+	// 5. 推送二进制升级包流
+	if needPush {
+		task.AddLog(fmt.Sprintf("开始向远端节点推流最新版可执行程序 (%s)...", filepath.Base(binPath)))
+		file, err := os.Open(binPath)
+		if err != nil {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("打开本地二进制失败: %v", err)
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
+		defer file.Close()
+
+		fi, _ := file.Stat()
+		task.AddLog(fmt.Sprintf("推流传输数据流大小: %.2f MB，免密写入远端...", float64(fi.Size())/1024/1024))
+
+		upgradeURL := baseURL + "/api/system/self-upgrade"
+		upReq, err := http.NewRequest(http.MethodPost, upgradeURL, file)
+		if err != nil {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("构建推送请求失败: %v", err)
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
+		upReq.Header.Set("Content-Type", "application/octet-stream")
+		upReq.Header.Set("Authorization", "Bearer "+targetNode.APIToken)
+		upReq.ContentLength = fi.Size()
+
+		var pushClient *http.Client
+		if targetNode.UseTLS {
+			pushClient = crypto.CreatePinnedHTTPClient(targetNode.CertFingerprint, 180*time.Second)
+		} else {
+			pushClient = &http.Client{Timeout: 180 * time.Second}
+		}
+
+		upResp, err := pushClient.Do(upReq)
+		if err != nil {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("推流传输网络请求失败: %v", err)
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
+		defer upResp.Body.Close()
+
+		respBody, _ := io.ReadAll(upResp.Body)
+		if upResp.StatusCode != http.StatusOK {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("远端节点拒绝升级 (HTTP %d): %s", upResp.StatusCode, string(respBody))
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
+
+		task.AddLog("✓ 远端节点已成功接收升级程序并完成原子替换！")
+		task.AddLog("远端守护进程正在平滑重启，正在持续探活等待节点恢复上线...")
+		time.Sleep(2 * time.Second)
+	} else {
+		task.AddLog("守护进程运行正常，保持在线状态...")
+		time.Sleep(500 * time.Millisecond)
+	}
+
+	// 6. 持续健康探活 (最长 25 秒)
+	task.AddLog("正在执行网络延迟测速与在线状态验证...")
+	time.Sleep(1 * time.Second)
+	online := false
+	var pingLat int64
+	for i := 0; i < 15; i++ {
+		time.Sleep(1500 * time.Millisecond)
+		lat, pingErr := PingNode(targetNode)
+		if pingErr == nil {
+			pingLat = lat
+			online = true
+			task.AddLog(fmt.Sprintf("✓ 远端节点健康探活成功！响应延迟: %d ms", pingLat))
+			break
+		}
+	}
+	if !online {
+		task.AddLog("[WARN] 节点重启探活超时，可能正在重新编译或网络有波动，继续进行全网凭据同步...")
+	}
+
+	// 7. 全网凭据自动同步
+	task.AddLog(fmt.Sprintf("正在向升级后的节点精准推送全量成员凭据 (目标: %s:%d)...", targetNode.Host, targetNode.PanelPort))
+	if syncErr := SyncMembersToNode(targetNode, nil); syncErr != nil {
+		task.AddLog(fmt.Sprintf("[WARN] 成员凭据自动同步提示: %v", syncErr))
+	} else {
+		task.AddLog("🎉 全网成员凭据自动同步成功！")
+	}
+
+	task.Status = "success"
+	task.AddLog(fmt.Sprintf("[SUCCESS] 节点 %s (ID: %d) 免密平滑升级完成！已处于最新状态！", targetNode.Name, targetNode.ID))
 }
 
 // RunUpgradeSSH 执行对已有受管节点的推流升级 (保留其现有数据库与配置，仅更新二进制并重启)

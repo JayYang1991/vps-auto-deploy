@@ -176,4 +176,19 @@ type ServiceStatus struct {
 - **TOFU 主机密钥记录**：首次 SSH 连接捕获目标机器 `ssh_host_key`（`ssh.FingerprintSHA256`），防止后续连接遭遇机器重装或 IP 冒充。
 - **反向代理强校验**：主控端 `NodeProxyMiddleware` 代理 HTTPS 请求时，设置 `tls.Config{InsecureSkipVerify: true, VerifyConnection: ...}`，严格比对远端证书 DER 数据的 SHA-256 指纹。若指纹不符直接拦截断开并返回 `502 Bad Gateway`。
 
+### 4. 免 SSH 管理凭据自升级体系与安装包导入规范 (Zero-SSH Self-Upgrade & Package Repository)
+- **管理凭据为主，SSH 为辅双轨制**：
+  - **首选主轨道 (Zero-SSH)**：纳管节点建立后，其日常升级**严禁强制要求用户再次输入 SSH 密码或私钥**。主控端直接通过已绑定的 `APIToken` + Pinned TLS 指纹安全通道，向目标节点 `POST /api/system/self-upgrade` 推送新版二进制。
+  - **备选次轨道 (SSH 救援模式)**：仅在目标节点服务彻底离线或 Web API 失联时，作为紧急修复手段由用户手动切换至 SSH 模式介入重装。
+- **Linux Inode 原子覆盖与延迟分离重启**：
+  - 节点接收新版本二进制时，先执行 ELF 魔数与架构比对（`debug/elf` 确保 x86_64 与 aarch64 不串刷），校验 SHA-256；
+  - 写入临时文件后执行原子替换：`mv /tmp/vps-panel.tmp /usr/local/bin/vps-panel`；
+  - 节点先向主控端正常返回 HTTP 200，随后启动孤儿协程延迟 800ms 执行 `systemctl restart vps-panel`，杜绝因服务自杀造成 HTTP 连接中断误报；
+  - 主控端接收 200 响应后轮询探活，节点恢复在线后自动执行 `SyncMembersToNode` 同步最新成员凭据。
+- **本地与集群安装包离线导入中心**：
+  - 在「设置」页面提供「面板版本与离线安装包升级」专区，支持拖拽上传单个 `vps-panel` 二进制或 `.tar.gz`/`.zip` 发布包；
+  - 仓库自动解析 ELF 架构并做持久化缓存；
+  - 提供 `[ ⚡ 升级本机节点 ]`（带全屏重连探活浮层）与 `[ 🚀 分发升级纳管集群节点 ]`（支持单个免密升级与全量勾选并发批量升级）。
+
+
 
