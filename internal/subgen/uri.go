@@ -418,6 +418,8 @@ func AdaptSingleURIForSubconverter(rawURI string) string {
 				remark = unescapedRemark
 			}
 			if remark != "" {
+				// Subconverter C++ 源码 (subparser.cpp) 严格读取 "remarks" (复数带 s)，未读到则兜底为 server:port
+				q.Set("remarks", remark)
 				q.Set("remark", remark)
 			}
 			return "tg://socks?" + q.Encode()
@@ -445,6 +447,8 @@ func AdaptSingleURIForSubconverter(rawURI string) string {
 				remark = unescapedRemark
 			}
 			if remark != "" {
+				// Subconverter C++ 源码 (subparser.cpp) 严格读取 "remarks"
+				q.Set("remarks", remark)
 				q.Set("remark", remark)
 			}
 			return "tg://http?" + q.Encode()

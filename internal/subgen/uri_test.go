@@ -208,8 +208,8 @@ func TestClusterPrefixSubgen(t *testing.T) {
 	if !strings.HasPrefix(adaptedNoAuth, "tg://socks?") {
 		t.Fatalf("expected tg://socks? prefix, got: %s", adaptedNoAuth)
 	}
-	if !strings.Contains(adaptedNoAuth, "server=1.2.3.4") || !strings.Contains(adaptedNoAuth, "port=10086") || !strings.Contains(adaptedNoAuth, "remark=") {
-		t.Fatalf("expected server, port, and remark in adapted URL: %s", adaptedNoAuth)
+	if !strings.Contains(adaptedNoAuth, "server=1.2.3.4") || !strings.Contains(adaptedNoAuth, "port=10086") || !strings.Contains(adaptedNoAuth, "remarks=") || !strings.Contains(adaptedNoAuth, "remark=") {
+		t.Fatalf("expected server, port, and remarks in adapted URL: %s", adaptedNoAuth)
 	}
 
 	rawSocksAuth := "socks5://myuser:mypassword@1.2.3.4:1080#my-node"
