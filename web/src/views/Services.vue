@@ -64,15 +64,15 @@
 
         <!-- Sing-box 专属操作：配置透视与热重载 -->
         <div style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;">
-          <button @click="openConfigViewer" class="btn btn-secondary" style="font-size: 0.825rem; padding: 0.4rem 0.8rem;" title="预览与语法预检当前 Sing-box 完整配置">
+          <button @click="openConfigViewer" class="btn btn-secondary" style="font-size: 0.825rem; padding: 0.4rem 0.8rem;" title="预览与语法预检当前 Sing-box 完整配置，支持查看磁盘与面板配置差异">
             <span>🔍</span>
-            <span>预览 JSON 配置</span>
+            <span>配置透视与对比</span>
           </button>
-          <button @click="loadFromDisk" class="btn btn-secondary" style="font-size: 0.825rem; padding: 0.4rem 0.8rem;" :disabled="syncingFromDisk" title="读取宿主机磁盘上的 /etc/sing-box/config.json 强制覆盖面板数据库">
+          <button @click="loadFromDisk" class="btn btn-secondary" style="font-size: 0.825rem; padding: 0.4rem 0.8rem;" :disabled="syncingFromDisk" title="读取宿主机磁盘上的 /etc/sing-box/config.json 反向同步覆盖面板数据库（包含入站与出站）">
             <span>📥</span>
-            <span>{{ syncingFromDisk ? '加载中...' : '从磁盘覆盖数据库' }}</span>
+            <span>{{ syncingFromDisk ? '同步中...' : '从磁盘同步到面板' }}</span>
           </button>
-          <button @click="reloadConfig" class="btn btn-secondary" style="font-size: 0.825rem; padding: 0.4rem 0.8rem;" :disabled="reloading" title="应用最新入站/出站规则并重载内核">
+          <button @click="reloadConfig" class="btn btn-secondary" style="font-size: 0.825rem; padding: 0.4rem 0.8rem;" :disabled="reloading" title="以面板数据库为准重新渲染配置落盘并热重载内核">
             <span>⚡</span>
             <span>{{ reloading ? '重载中...' : '强制热重载' }}</span>
           </button>
@@ -125,8 +125,8 @@
           </div>
 
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-            <button @click="loadFromDisk" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;" :disabled="syncingFromDisk" title="读取磁盘文件强制覆盖面板数据库">
-              📥 从磁盘覆盖数据库
+            <button @click="loadFromDisk" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;" :disabled="syncingFromDisk" title="读取磁盘文件反向同步覆盖面板数据库">
+              📥 从磁盘同步到面板
             </button>
             <button @click="copyConfig" class="btn btn-primary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">
               📋 复制当前配置
@@ -174,7 +174,7 @@
               :disabled="syncingFromDisk"
               type="button"
             >
-              📥 从磁盘加载覆盖数据库
+              📥 以磁盘为准导入面板
             </button>
             <button
               @click="reloadConfig"
@@ -317,9 +317,9 @@ async function reloadConfig() {
 
 async function loadFromDisk() {
   const ok = await showConfirm({
-    title: '确认从磁盘强制加载覆盖数据库？',
-    message: '此操作将读取当前宿主机磁盘上的配置文件 (/etc/sing-box/config.json)，并 100% 覆盖面板数据库中的入站节点与出站规则。磁盘中已被删除的规则将在数据库中同步移除。是否继续？',
-    confirmText: '确认强制覆盖数据库',
+    title: '确认从磁盘反向同步并覆盖面板数据库？',
+    message: '此操作将读取当前宿主机磁盘上的配置文件 (/etc/sing-box/config.json)，反向提取并 100% 覆盖面板数据库中的入站节点与出站规则。磁盘中已被移除的规则将在数据库中同步清理。是否继续？',
+    confirmText: '确认从磁盘同步',
     danger: true,
   })
   if (!ok) return
@@ -327,14 +327,14 @@ async function loadFromDisk() {
   syncingFromDisk.value = true
   try {
     const res = await api.post('/singbox/load-from-disk')
-    toast.success(res.data.message || '已成功从磁盘加载并覆盖数据库！')
+    toast.success(res.data.message || '已成功从磁盘加载并同步到面板数据库！')
     if (configViewer.show) {
       await openConfigViewer()
     }
     // 强制刷新子组件数据
     subKey.value++
   } catch (err: any) {
-    toast.error('从磁盘强制加载失败: ' + (err.response?.data?.error || err.message))
+    toast.error('从磁盘同步失败: ' + (err.response?.data?.error || err.message))
   } finally {
     syncingFromDisk.value = false
   }
