@@ -118,3 +118,4 @@ func TestInspectAndSavePackageWithTarGz(t *testing.T) {
 		t.Errorf("invalid best package: binPath=%s, sha=%s", binPath, sha)
 	}
 }
+

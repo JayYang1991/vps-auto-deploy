@@ -16,11 +16,15 @@ import (
 
 // SingboxConfig 代表完整的 sing-box 服务端配置 (符合 sing-box 1.14 最新语法)
 type SingboxConfig struct {
-	Log         *LogConfig               `json:"log,omitempty"`
-	HTTPClients []HTTPClientConfig       `json:"http_clients,omitempty"`
-	Inbounds    []InboundConfig          `json:"inbounds"`
-	Outbounds   []map[string]interface{} `json:"outbounds"`
-	Route       *RouteConfig             `json:"route,omitempty"`
+	Log          *LogConfig               `json:"log,omitempty"`
+	DNS          interface{}              `json:"dns,omitempty"`
+	NTP          interface{}              `json:"ntp,omitempty"`
+	Certificate  interface{}              `json:"certificate,omitempty"`
+	HTTPClients  []HTTPClientConfig       `json:"http_clients,omitempty"`
+	Inbounds     []InboundConfig          `json:"inbounds"`
+	Outbounds    []map[string]interface{} `json:"outbounds"`
+	Route        *RouteConfig             `json:"route,omitempty"`
+	Experimental interface{}              `json:"experimental,omitempty"`
 }
 
 type HTTPClientConfig struct {
@@ -671,6 +675,33 @@ func GenerateServerConfig() (*SingboxConfig, error) {
 		}
 
 		cfg.Route = routeCfg
+	}
+
+	// 5. 还原导入的非受管全局块 (如 dns, experimental, ntp, certificate，实现无损保留)
+	if unmanagedJSON, err := model.GetSetting("singbox_unmanaged_json"); err == nil && strings.TrimSpace(unmanagedJSON) != "" {
+		var unmanaged map[string]interface{}
+		if err := json.Unmarshal([]byte(unmanagedJSON), &unmanaged); err == nil {
+			if dnsRaw, exists := unmanaged["dns"]; exists && cfg.DNS == nil {
+				cfg.DNS = dnsRaw
+			}
+			if ntpRaw, exists := unmanaged["ntp"]; exists && cfg.NTP == nil {
+				cfg.NTP = ntpRaw
+			}
+			if certRaw, exists := unmanaged["certificate"]; exists && cfg.Certificate == nil {
+				cfg.Certificate = certRaw
+			}
+			if expRaw, exists := unmanaged["experimental"]; exists && cfg.Experimental == nil {
+				cfg.Experimental = expRaw
+			}
+			if logRaw, ok := unmanaged["log"].(map[string]interface{}); ok && cfg.Log != nil {
+				if lvl, okL := logRaw["level"].(string); okL && lvl != "" {
+					cfg.Log.Level = lvl
+				}
+				if ts, okT := logRaw["timestamp"].(bool); okT {
+					cfg.Log.Timestamp = ts
+				}
+			}
+		}
 	}
 
 	return cfg, nil

@@ -415,6 +415,21 @@ func ImportExistingSingboxConfig(cfgPath string) (*ImportStats, error) {
 	stats := &ImportStats{ConfigPath: cfgPath}
 	now := time.Now()
 
+	// 0. 保存非受管全局块 (如 dns, experimental, ntp, certificate, 自定义 log 等)
+	var fullDiskMap map[string]interface{}
+	if err := json.Unmarshal(data, &fullDiskMap); err == nil {
+		unmanaged := make(map[string]interface{})
+		for k, v := range fullDiskMap {
+			if k != "inbounds" && k != "outbounds" && k != "route" {
+				unmanaged[k] = v
+			}
+		}
+		if len(unmanaged) > 0 {
+			unBytes, _ := json.Marshal(unmanaged)
+			_ = model.SetSetting("singbox_unmanaged_json", string(unBytes))
+		}
+	}
+
 	// 1. 同步 members
 	syncMembersFromInbounds(raw.Inbounds, now, false, &stats.MembersImported)
 
@@ -511,6 +526,21 @@ func ForceSyncSingboxConfig(cfgPath string) (*SyncStats, error) {
 
 	stats := &SyncStats{ConfigPath: cfgPath}
 	now := time.Now()
+
+	// 0. 保存非受管全局块 (如 dns, experimental, ntp, certificate, 自定义 log 等)
+	var fullDiskMap map[string]interface{}
+	if err := json.Unmarshal(data, &fullDiskMap); err == nil {
+		unmanaged := make(map[string]interface{})
+		for k, v := range fullDiskMap {
+			if k != "inbounds" && k != "outbounds" && k != "route" {
+				unmanaged[k] = v
+			}
+		}
+		if len(unmanaged) > 0 {
+			unBytes, _ := json.Marshal(unmanaged)
+			_ = model.SetSetting("singbox_unmanaged_json", string(unBytes))
+		}
+	}
 
 	tx, err := model.DB.Begin()
 	if err != nil {

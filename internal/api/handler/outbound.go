@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -296,12 +297,28 @@ func GetSingboxFullConfig(c *gin.Context) {
 		checkOutput = "sing-box 核心未安装，将在安装后自动校验生效"
 	}
 
+	// 语义级深度等价比对 (避免因空白、末尾换行或字段序列化排版差异导致的假性不同步)
+	isSynced := false
+	if fileExists {
+		if strings.TrimSpace(diskRawJSON) == strings.TrimSpace(string(rawJSON)) {
+			isSynced = true
+		} else {
+			var diskObj, genObj map[string]interface{}
+			if err1 := json.Unmarshal([]byte(diskRawJSON), &diskObj); err1 == nil {
+				if err2 := json.Unmarshal(rawJSON, &genObj); err2 == nil {
+					isSynced = reflect.DeepEqual(diskObj, genObj)
+				}
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"config":             cfg,
 		"raw_json":           string(rawJSON),
 		"disk_raw_json":      diskRawJSON,
 		"config_path":        cfgPath,
 		"file_exists":        fileExists,
+		"is_synced":          isSynced,
 		"check_ok":           checkOK,
 		"check_output":       checkOutput,
 		"running_status":     st.RunningStatus,
@@ -319,7 +336,7 @@ func ReloadSingboxService(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "sing-box 服务已成功重新加载最新配置！"})
 }
 
-// LoadSingboxFromDisk 从磁盘配置文件强制加载并 100% 覆盖面板数据库记录
+// LoadSingboxFromDisk 从磁盘配置文件强制加载并 100% 覆盖面板数据库记录，并闭环规范化回盘
 func LoadSingboxFromDisk(c *gin.Context) {
 	cfgPath := singbox.GetConfigPath()
 	var req struct {
@@ -341,8 +358,13 @@ func LoadSingboxFromDisk(c *gin.Context) {
 		return
 	}
 
+	// 核心闭环：将反向导入落盘的最新配置通过标准序列化规范化安全回盘，达成双向 100% 同步平衡态
+	if applyErr := configgen.ApplyAndReload(cfgPath); applyErr != nil {
+		fmt.Printf("[LoadSingboxFromDisk] 规范化回盘重载提示: %v\n", applyErr)
+	}
+
 	msg := fmt.Sprintf(
-		"成功从磁盘加载并覆盖数据库！已同步 %d 个入站节点（新增 %d/更新 %d/清理 %d）、%d 个出站规则（新增 %d/更新 %d/清理 %d）",
+		"成功从磁盘加载并完成双向规范化对齐！已同步 %d 个入站节点（新增 %d/更新 %d/清理 %d）、%d 个出站规则（新增 %d/更新 %d/清理 %d）",
 		len(stats.InboundTags), stats.InboundsCreated, stats.InboundsUpdated, stats.InboundsDeleted,
 		len(stats.OutboundTags), stats.OutboundsCreated, stats.OutboundsUpdated, stats.OutboundsDeleted,
 	)

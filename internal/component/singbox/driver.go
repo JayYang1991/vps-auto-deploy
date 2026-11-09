@@ -60,7 +60,16 @@ func findRunningConfigPath() string {
 	return ""
 }
 
+// SetConfigPathForTest 供单元测试显式指定配置文件路径
+func SetConfigPathForTest(p string) {
+	ConfigPath = p
+}
+
 func GetConfigPath() string {
+	if ConfigPath != "" {
+		return ConfigPath
+	}
+
 	// 1. 若宿主机当前已有运行中的 sing-box 进程，优先继承其实际读取的配置文件路径
 	if runningPath := findRunningConfigPath(); runningPath != "" {
 		ConfigPath = runningPath

@@ -158,7 +158,7 @@
               ⚡ 面板数据库生成
             </button>
           </div>
-          <div v-if="configViewer.file_exists && configViewer.disk_raw_json === configViewer.raw_json" style="display: flex; align-items: center; gap: 0.5rem;">
+          <div v-if="configViewer.file_exists && (configViewer.is_synced || isConfigContentEqual(configViewer.disk_raw_json, configViewer.raw_json))" style="display: flex; align-items: center; gap: 0.5rem;">
             <span class="badge badge-success" style="font-size: 0.7rem;">
               ✓ 磁盘与面板数据 100% 同步
             </span>
@@ -174,7 +174,7 @@
               :disabled="syncingFromDisk"
               type="button"
             >
-              📥 以磁盘为准导入面板
+              {{ syncingFromDisk ? '⏳ 导入并同步中...' : '📥 以磁盘为准导入面板' }}
             </button>
             <button
               @click="reloadConfig"
@@ -183,7 +183,7 @@
               :disabled="reloading"
               type="button"
             >
-              ⚡ 以面板为准写入磁盘
+              {{ reloading ? '⏳ 写入中...' : '⚡ 以面板为准写入磁盘' }}
             </button>
           </div>
         </div>
@@ -253,8 +253,21 @@ const configViewer = reactive({
   check_ok: true,
   check_output: '',
   file_exists: false,
+  is_synced: false,
   viewMode: 'disk' as 'disk' | 'generated',
 })
+
+function isConfigContentEqual(a: string, b: string): boolean {
+  if (!a || !b) return false
+  if (a.trim() === b.trim()) return true
+  try {
+    const objA = JSON.parse(a)
+    const objB = JSON.parse(b)
+    return JSON.stringify(objA) === JSON.stringify(objB)
+  } catch {
+    return false
+  }
+}
 
 function selectComponent(key: string) {
   activeComponent.value = key
@@ -283,6 +296,7 @@ async function openConfigViewer() {
     configViewer.check_ok = res.data.check_ok
     configViewer.check_output = res.data.check_output || ''
     configViewer.file_exists = res.data.file_exists
+    configViewer.is_synced = res.data.is_synced ?? false
     // 若磁盘文件存在且有内容，优先默认展示真实磁盘文件
     if (res.data.file_exists && res.data.disk_raw_json) {
       configViewer.viewMode = 'disk'
@@ -318,7 +332,7 @@ async function reloadConfig() {
 async function loadFromDisk() {
   const ok = await showConfirm({
     title: '确认从磁盘反向同步并覆盖面板数据库？',
-    message: '此操作将读取当前宿主机磁盘上的配置文件 (/etc/sing-box/config.json)，反向提取并 100% 覆盖面板数据库中的入站节点与出站规则。磁盘中已被移除的规则将在数据库中同步清理。是否继续？',
+    message: '此操作将读取当前宿主机磁盘上的配置文件，反向提取并覆盖面板数据库中的入站节点、出站规则与路由分流，并自动完成双向规范化回盘与对齐。是否继续？',
     confirmText: '确认从磁盘同步',
     danger: true,
   })
