@@ -226,7 +226,9 @@ func DeleteOutbound(c *gin.Context) {
 	err = model.DB.QueryRow("SELECT id, tag, type, server, server_port, spec_json, priority, enabled, is_system, created_at, updated_at FROM outbounds WHERE id = ?", id).
 		Scan(&oldOb.ID, &oldOb.Tag, &oldOb.Type, &oldOb.Server, &oldOb.ServerPort, &oldOb.SpecJSON, &oldOb.Priority, &oldOb.Enabled, &oldOb.IsSystem, &oldOb.CreatedAt, &oldOb.UpdatedAt)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "outbound not found"})
+		// 幂等性保障：若该出站规则已被删除或已不存在，确保触发一次配置对齐并直接返回成功
+		_ = configgen.ApplyAndReload(singbox.GetConfigPath())
+		c.JSON(http.StatusOK, gin.H{"message": "outbound already deleted"})
 		return
 	}
 	if oldOb.IsSystem {

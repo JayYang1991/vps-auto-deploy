@@ -39,13 +39,19 @@ export function useConfirm() {
   }
 
   function handleConfirm() {
+    if (!confirmState.value.isOpen) return
     confirmState.value.isOpen = false
-    confirmState.value.resolve(true)
+    const fn = confirmState.value.resolve
+    confirmState.value.resolve = () => {}
+    fn(true)
   }
 
   function handleCancel() {
+    if (!confirmState.value.isOpen) return
     confirmState.value.isOpen = false
-    confirmState.value.resolve(false)
+    const fn = confirmState.value.resolve
+    confirmState.value.resolve = () => {}
+    fn(false)
   }
 
   return {

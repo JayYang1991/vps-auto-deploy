@@ -240,7 +240,9 @@ func DeleteInbound(c *gin.Context) {
 	err = model.DB.QueryRow("SELECT id, tag, protocol, listen, port, spec_json, enabled, created_at, updated_at FROM inbounds WHERE id = ?", id).
 		Scan(&oldIb.ID, &oldIb.Tag, &oldIb.Protocol, &oldIb.Listen, &oldIb.Port, &oldIb.SpecJSON, &oldIb.Enabled, &oldIb.CreatedAt, &oldIb.UpdatedAt)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "inbound not found"})
+		// 幂等性保障：若该入站已被删除或已不存在，确保触发一次配置对齐并直接返回成功
+		_ = configgen.ApplyAndReload(singbox.GetConfigPath())
+		c.JSON(http.StatusOK, gin.H{"message": "inbound already deleted"})
 		return
 	}
 

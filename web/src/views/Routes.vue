@@ -206,8 +206,9 @@
               @click="deleteRoute(r)"
               class="btn btn-danger"
               style="padding: 0.35rem 0.65rem; font-size: 0.775rem;"
+              :disabled="deletingId === r.id"
             >
-              🗑️ 删除
+              {{ deletingId === r.id ? '⏳ 删除中...' : '🗑️ 删除' }}
             </button>
           </div>
         </div>
@@ -447,6 +448,7 @@ const loading = ref(true)
 const saving = ref(false)
 const reordering = ref(false)
 const singboxInstalled = ref(true)
+const deletingId = ref<number | null>(null)
 const nodeNeedsUpgrade = ref(false)
 
 function openClusterModal() {
@@ -709,6 +711,7 @@ async function toggleRoute(r: RouteRuleItem) {
 }
 
 async function deleteRoute(r: RouteRuleItem) {
+  if (deletingId.value !== null) return
   const ok = await showConfirm({
     title: '确认删除路由规则',
     message: `确定要删除规则「${r.name}」吗？删除后将立即从 Sing-box 配置中移除。`,
@@ -717,12 +720,15 @@ async function deleteRoute(r: RouteRuleItem) {
   })
   if (!ok) return
 
+  deletingId.value = r.id
   try {
     await api.delete(`/routes/${r.id}`)
     toast.success('规则已删除')
-    await loadData()
   } catch (err: any) {
     toast.error('删除失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    deletingId.value = null
+    await loadData()
   }
 }
 

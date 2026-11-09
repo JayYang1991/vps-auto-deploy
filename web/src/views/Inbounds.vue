@@ -119,8 +119,13 @@
           <button @click="openEditModal(ib)" class="btn btn-secondary" style="padding: 0.4rem 0.75rem; font-size: 0.8rem;">
             ✏️ 编辑
           </button>
-          <button @click="deleteInbound(ib.id)" class="btn btn-danger" style="padding: 0.4rem 0.75rem; font-size: 0.8rem;">
-            🗑️ 删除
+          <button
+            @click="deleteInbound(ib.id)"
+            class="btn btn-danger"
+            style="padding: 0.4rem 0.75rem; font-size: 0.8rem;"
+            :disabled="deletingId === ib.id"
+          >
+            {{ deletingId === ib.id ? '⏳ 删除中...' : '🗑️ 删除' }}
           </button>
         </div>
       </div>
@@ -490,6 +495,7 @@ const { showConfirm } = useConfirm()
 const inbounds = ref<any[]>([])
 const loading = ref(true)
 const singboxInstalled = ref(true)
+const deletingId = ref<number | null>(null)
 
 const modal = reactive({
   show: false,
@@ -920,6 +926,7 @@ async function submitInbound() {
 }
 
 async function deleteInbound(id: number) {
+  if (deletingId.value !== null) return
   const confirmed = await showConfirm({
     title: '确认删除入站节点',
     message: '确定要删除该入站节点吗？删除后 sing-box 配置将自动重写并热重载生效。',
@@ -928,12 +935,15 @@ async function deleteInbound(id: number) {
   })
   if (!confirmed) return
 
+  deletingId.value = id
   try {
     await api.delete(`/inbounds/${id}`)
     toast.success('节点已成功删除！')
-    await loadInbounds()
   } catch (err: any) {
     toast.error('删除失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    deletingId.value = null
+    await loadInbounds()
   }
 }
 

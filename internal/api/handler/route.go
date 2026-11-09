@@ -217,7 +217,9 @@ func DeleteRoute(c *gin.Context) {
 
 	oldRule, err := model.GetRouteRule(id)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "路由规则不存在"})
+		// 幂等性保障：若该路由规则已被删除或已不存在，确保触发一次配置对齐并直接返回成功
+		_ = configgen.ApplyAndReload(singbox.GetConfigPath())
+		c.JSON(http.StatusOK, gin.H{"message": "路由规则已被删除"})
 		return
 	}
 

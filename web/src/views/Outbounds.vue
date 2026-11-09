@@ -117,8 +117,9 @@
             @click="deleteOutbound(ob)"
             class="btn btn-danger"
             style="padding: 0.4rem 0.75rem; font-size: 0.8rem;"
+            :disabled="deletingId === ob.id"
           >
-            🗑️ 删除
+            {{ deletingId === ob.id ? '⏳ 删除中...' : '🗑️ 删除' }}
           </button>
         </div>
       </div>
@@ -787,6 +788,7 @@ const { showConfirm } = useConfirm()
 const outbounds = ref<OutboundItem[]>([])
 const loading = ref(true)
 const singboxInstalled = ref(true)
+const deletingId = ref<number | null>(null)
 const createMode = ref<'relay' | 'manual'>('relay')
 const relayCandidates = ref<RelayNode[]>([])
 const loadingRelayCandidates = ref(false)
@@ -1479,6 +1481,7 @@ async function toggleOutbound(id: number) {
 }
 
 async function deleteOutbound(ob: OutboundItem) {
+  if (deletingId.value !== null) return
   const confirmed = await showConfirm({
     title: '确认删除出站规则',
     message: `确定要删除出站规则 [${ob.tag}] 吗？删除后 sing-box 将自动重写配置并生效。`,
@@ -1487,12 +1490,15 @@ async function deleteOutbound(ob: OutboundItem) {
   })
   if (!confirmed) return
 
+  deletingId.value = ob.id
   try {
     await api.delete(`/outbounds/${ob.id}`)
     toast.success('出站规则已成功删除！')
-    await loadOutbounds()
   } catch (err: any) {
     toast.error('删除失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    deletingId.value = null
+    await loadOutbounds()
   }
 }
 

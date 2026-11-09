@@ -45,6 +45,7 @@ function handleKeyDown(e: KeyboardEvent) {
   if (e.key === 'Escape') {
     handleCancel()
   } else if (e.key === 'Enter') {
+    e.preventDefault()
     handleConfirm()
   }
 }
