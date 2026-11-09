@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
@@ -130,11 +131,21 @@ func StreamDeployLogs(c *gin.Context) {
 	ch := task.Subscribe()
 	defer task.Unsubscribe(ch)
 
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
 	notify := c.Request.Context().Done()
 	for {
 		select {
 		case <-notify:
 			return
+		case <-ticker.C:
+			// 发送 SSE 规范心跳注释，防止反向代理 (Nginx/Cloudflare) 或浏览器静默丢包超时
+			_, err := c.Writer.Write([]byte(": keep-alive\n\n"))
+			if err != nil {
+				return
+			}
+			c.Writer.Flush()
 		case line, ok := <-ch:
 			if !ok {
 				return
@@ -142,6 +153,8 @@ func StreamDeployLogs(c *gin.Context) {
 			c.SSEvent("message", line)
 			c.Writer.Flush()
 			if strings.Contains(line, "[SUCCESS]") || strings.Contains(line, "[ERROR]") {
+				// 给客户端 600ms 缓冲时间读取并关闭连接，避免服务端瞬间截断导致前端误触 onerror
+				time.Sleep(600 * time.Millisecond)
 				return
 			}
 		}

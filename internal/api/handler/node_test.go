@@ -9,10 +9,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/node"
 	"vps-auto-deploy/internal/pkg/crypto"
 )
 
@@ -253,4 +255,37 @@ func TestStartUpgradeNode(t *testing.T) {
 		}
 	}
 }
+
+func TestStreamDeployLogs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	task := node.CreateDeployTask("Test Node", "127.0.0.1")
+
+	r := gin.New()
+	r.GET("/api/nodes/deploy-logs", StreamDeployLogs)
+
+	go func() {
+		// 模拟日志追加并结束任务
+		time.Sleep(100 * time.Millisecond)
+		task.AddLog("Step 1 done")
+		time.Sleep(100 * time.Millisecond)
+		task.AddLog("[SUCCESS] All done")
+	}()
+
+	req, _ := http.NewRequest(http.MethodGet, "/api/nodes/deploy-logs?task_id="+task.ID, nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Expected 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	if !strings.Contains(body, "Step 1 done") {
+		t.Errorf("Expected body to contain 'Step 1 done', got: %s", body)
+	}
+	if !strings.Contains(body, "[SUCCESS]") {
+		t.Errorf("Expected body to contain '[SUCCESS]', got: %s", body)
+	}
+}
+
 

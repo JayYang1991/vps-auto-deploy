@@ -1114,11 +1114,56 @@ function subscribeDeployLogs(taskId: string) {
     }
   }
 
-  eventSource.onerror = () => {
+  eventSource.onerror = async () => {
     eventSource?.close()
-    if (taskStatus.value === 'running') {
+    eventSource = null
+    if (taskStatus.value !== 'running') return
+
+    // SSE 连接中断时，自动启动状态轮询兜底
+    let pollDone = false
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 1500))
+      if (taskStatus.value !== 'running') return
+      try {
+        const statusRes = await api.get(`/nodes/deploy-status?task_id=${taskId}`)
+        const data = statusRes.data
+        if (data && Array.isArray(data.logs)) {
+          if (data.logs.length > taskLogs.value.length) {
+            taskLogs.value = data.logs
+            scrollToBottom()
+          }
+        }
+        if (data.status === 'success') {
+          taskStatus.value = 'success'
+          currentStage.value = 6
+          fetchNodes().then(() => {
+            const match = useNodeContext().nodes.value.find((n) =>
+              (createdInstanceId.value && n.cloud_instance_id === createdInstanceId.value) ||
+              (createdInstanceIP.value && n.host === createdInstanceIP.value) ||
+              n.name === formReq.name ||
+              n.name === existingForm.name
+            )
+            if (match) deployedNodeId = match.id
+          })
+          pollDone = true
+          return
+        } else if (data.status === 'failed') {
+          taskStatus.value = 'failed'
+          if (data.error && !taskLogs.value.some((l: string) => l.includes(data.error))) {
+            taskLogs.value.push(`[ERROR] ${data.error}`)
+            scrollToBottom()
+          }
+          pollDone = true
+          return
+        }
+      } catch {
+        // 忽略单次网络抖动继续重试
+      }
+    }
+    if (!pollDone && taskStatus.value === 'running') {
       taskStatus.value = 'failed'
-      taskLogs.value.push('[ERROR] 日志流异常中断')
+      taskLogs.value.push('[ERROR] 日志流连接中断且状态轮询超时')
+      scrollToBottom()
     }
   }
 }

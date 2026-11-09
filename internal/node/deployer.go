@@ -140,9 +140,9 @@ func PingNode(node *model.Node) (int64, error) {
 
 	var client *http.Client
 	if node.UseTLS {
-		client = crypto.CreatePinnedHTTPClient(node.CertFingerprint, 5*time.Second)
+		client = crypto.CreatePinnedHTTPClient(node.CertFingerprint, 8*time.Second)
 	} else {
-		client = &http.Client{Timeout: 5 * time.Second}
+		client = &http.Client{Timeout: 8 * time.Second}
 	}
 
 	resp, err := client.Do(req)
@@ -816,7 +816,7 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 		}
 
 		// 7. 自动触发全量成员凭据同步
-		task.AddLog("正在向升级后的节点精准推送全量成员身份凭据...")
+		task.AddLog(fmt.Sprintf("正在向升级后的节点精准推送全量成员身份凭据 (目标: %s:%d)...", targetNode.Host, targetNode.PanelPort))
 		if syncErr := SyncMembersToNode(targetNode, nil); syncErr != nil {
 			task.AddLog(fmt.Sprintf("[WARN] 成员凭据自动同步提示: %v", syncErr))
 		} else {

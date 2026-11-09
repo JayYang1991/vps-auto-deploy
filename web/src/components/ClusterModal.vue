@@ -1131,11 +1131,50 @@ async function startDeploy() {
       }
     }
 
-    eventSource.onerror = () => {
+    eventSource.onerror = async () => {
       eventSource?.close()
-      if (deployTaskStatus.value === 'running') {
+      eventSource = null
+      if (deployTaskStatus.value !== 'running') return
+
+      // SSE 连接发生抖动或关闭时，自动转为高可靠轮询保底，杜绝误判断连
+      let pollDone = false
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 1500))
+        if (deployTaskStatus.value !== 'running') return
+        try {
+          const statusRes = await api.get(`/nodes/deploy-status?task_id=${taskId}`)
+          const data = statusRes.data
+          if (data && Array.isArray(data.logs)) {
+            if (data.logs.length > deployLogs.value.length) {
+              deployLogs.value = data.logs
+              scrollToBottom()
+            }
+          }
+          if (data.status === 'success') {
+            deployTaskStatus.value = 'success'
+            fetchNodes().then(() => {
+              const match = nodes.value.find((n) => n.host === deployReq.host)
+              if (match) deployedNodeId = match.id
+            })
+            pollDone = true
+            return
+          } else if (data.status === 'failed') {
+            deployTaskStatus.value = 'failed'
+            if (data.error && !deployLogs.value.some((l: string) => l.includes(data.error))) {
+              deployLogs.value.push(`[ERROR] ${data.error}`)
+              scrollToBottom()
+            }
+            pollDone = true
+            return
+          }
+        } catch {
+          // 忽略单次网络抖动继续重试
+        }
+      }
+      if (!pollDone && deployTaskStatus.value === 'running') {
         deployTaskStatus.value = 'failed'
-        deployLogs.value.push('[ERROR] 日志流连接异常中断')
+        deployLogs.value.push('[ERROR] 日志流连接中断且状态轮询超时')
+        scrollToBottom()
       }
     }
   } catch (err: any) {
@@ -1450,11 +1489,47 @@ async function startUpgrade() {
       }
     }
 
-    upgradeEventSource.onerror = () => {
+    upgradeEventSource.onerror = async () => {
       upgradeEventSource?.close()
-      if (upgradeTaskStatus.value === 'running') {
+      upgradeEventSource = null
+      if (upgradeTaskStatus.value !== 'running') return
+
+      // SSE 连接异常中断时，自动启动状态轮询兜底，杜绝假死与误报失败
+      let pollDone = false
+      for (let i = 0; i < 20; i++) {
+        await new Promise((r) => setTimeout(r, 1500))
+        if (upgradeTaskStatus.value !== 'running') return
+        try {
+          const statusRes = await api.get(`/nodes/deploy-status?task_id=${taskId}`)
+          const data = statusRes.data
+          if (data && Array.isArray(data.logs)) {
+            if (data.logs.length > upgradeLogs.value.length) {
+              upgradeLogs.value = data.logs
+              scrollUpgradeToBottom()
+            }
+          }
+          if (data.status === 'success') {
+            upgradeTaskStatus.value = 'success'
+            fetchNodes()
+            pollDone = true
+            return
+          } else if (data.status === 'failed') {
+            upgradeTaskStatus.value = 'failed'
+            if (data.error && !upgradeLogs.value.some((l: string) => l.includes(data.error))) {
+              upgradeLogs.value.push(`[ERROR] ${data.error}`)
+              scrollUpgradeToBottom()
+            }
+            pollDone = true
+            return
+          }
+        } catch {
+          // 忽略单次网络抖动继续重试
+        }
+      }
+      if (!pollDone && upgradeTaskStatus.value === 'running') {
         upgradeTaskStatus.value = 'failed'
-        upgradeLogs.value.push('[ERROR] 日志流连接异常中断')
+        upgradeLogs.value.push('[ERROR] 日志流连接中断且状态轮询超时')
+        scrollUpgradeToBottom()
       }
     }
   } catch (err: any) {

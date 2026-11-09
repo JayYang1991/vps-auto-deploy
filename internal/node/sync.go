@@ -59,14 +59,38 @@ func SyncMembersToNode(node *model.Node, members []model.Member) error {
 
 	var client *http.Client
 	if node.UseTLS {
-		client = crypto.CreatePinnedHTTPClient(node.CertFingerprint, 8*time.Second)
+		client = crypto.CreatePinnedHTTPClient(node.CertFingerprint, 25*time.Second)
 	} else {
-		client = &http.Client{Timeout: 8 * time.Second}
+		client = &http.Client{Timeout: 25 * time.Second}
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("发送凭据同步网络请求失败: %w", err)
+	}
+
+	// 若 Token 偶发失效 (401)，尝试自愈解密密码重新登录刷新 Token
+	if resp.StatusCode == http.StatusUnauthorized && node.PasswordEncrypted != "" {
+		resp.Body.Close()
+		jwtSecret, _ := model.GetSetting("jwt_secret")
+		rawPass, decErr := crypto.DecryptAESGCM(node.PasswordEncrypted, crypto.DeriveKey(jwtSecret))
+		if decErr == nil && rawPass != "" {
+			newToken, logErr := LoginNode(node.Host, node.PanelPort, node.SecretPath, node.Username, rawPass, node.UseTLS, node.CertFingerprint)
+			if logErr == nil && newToken != "" {
+				node.APIToken = newToken
+				_ = model.UpdateNodeToken(node.ID, newToken)
+				// 重构请求体再次重试
+				reqRetry, retryErr := http.NewRequest(http.MethodPost, url, bytes.NewReader(payload))
+				if retryErr == nil {
+					reqRetry.Header.Set("Content-Type", "application/json")
+					reqRetry.Header.Set("Authorization", "Bearer "+newToken)
+					resp, err = client.Do(reqRetry)
+					if err != nil {
+						return fmt.Errorf("凭据刷新后重试发送失败: %w", err)
+					}
+				}
+			}
+		}
 	}
 	defer resp.Body.Close()
 
