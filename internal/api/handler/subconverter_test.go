@@ -11,6 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"vps-auto-deploy/internal/component/subconverter"
+	"vps-auto-deploy/internal/model"
 )
 
 func TestRollbackSubconverter(t *testing.T) {
@@ -148,5 +149,79 @@ func TestCustomRulesHandler(t *testing.T) {
 	}
 	if !foundCustom {
 		t.Errorf("expected custom_rules.ini found in templates list")
+	}
+}
+
+func TestSaveAndGetSubconverterConfigPersistence(t *testing.T) {
+	// 初始化内存数据库
+	dbPath := filepath.Join(t.TempDir(), "test_subconverter.db")
+	_, err := model.InitDB(dbPath)
+	if err != nil {
+		t.Fatalf("init db: %v", err)
+	}
+
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/subconverter/config", GetSubconverterConfig)
+	r.POST("/subconverter/config", SaveSubconverterConfig)
+
+	// 1. 保存结构化配置，包含 exclude_remarks="socks-in"
+	saveReq := SaveSubconverterConfigRequest{
+		IsRaw:         false,
+		Listen:        "127.0.0.1",
+		Port:          25500,
+		ExcludeRemark: "socks-in",
+		IncludeRemark: "HK",
+		DefaultConfig: "config/ACL4SSR_Online.ini",
+	}
+	body, _ := json.Marshal(saveReq)
+	req := httptest.NewRequest(http.MethodPost, "/subconverter/config", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for SaveSubconverterConfig, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 2. 验证数据库中已持久化配置
+	dbExclude, err := model.GetSetting("subconverter_exclude_remarks")
+	if err != nil || dbExclude != "socks-in" {
+		t.Fatalf("expected db subconverter_exclude_remarks='socks-in', got: %s (err: %v)", dbExclude, err)
+	}
+
+	// 3. 验证通过 GET 读取返回的配置
+	req = httptest.NewRequest(http.MethodGet, "/subconverter/config", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for GetSubconverterConfig, got %d", w.Code)
+	}
+	var resp SubconverterConfigResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp.ExcludeRemark != "socks-in" {
+		t.Fatalf("expected exclude_remarks='socks-in', got: %s", resp.ExcludeRemark)
+	}
+
+	// 4. 模拟组件升级或文件被清理（删除磁盘 pref.ini）
+	configPath := subconverter.GetConfigPath()
+	_ = os.Remove(configPath)
+
+	// 再次调用 GET /subconverter/config，验证自动从数据库兜底还原
+	req = httptest.NewRequest(http.MethodGet, "/subconverter/config", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for GetSubconverterConfig after file removal, got %d", w.Code)
+	}
+	var restoredResp SubconverterConfigResponse
+	_ = json.Unmarshal(w.Body.Bytes(), &restoredResp)
+	if restoredResp.ExcludeRemark != "socks-in" {
+		t.Fatalf("expected exclude_remarks restored from SQLite as 'socks-in', got: %s", restoredResp.ExcludeRemark)
+	}
+
+	// 验证磁盘上的 pref.ini 已被重新创建并包含 exclude_remarks
+	recreatedData, err := os.ReadFile(configPath)
+	if err != nil || !bytes.Contains(recreatedData, []byte("exclude_remarks=socks-in")) {
+		t.Fatalf("expected recreated pref.ini on disk with exclude_remarks, got: %s (err: %v)", string(recreatedData), err)
 	}
 }

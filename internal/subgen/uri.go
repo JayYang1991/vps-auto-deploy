@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/url"
+	"regexp"
 	"strings"
 
 	"vps-auto-deploy/internal/model"
@@ -477,4 +478,68 @@ func AdaptSourceURLsForSubconverter(sourceURLs string) string {
 		adapted[i] = AdaptSingleURIForSubconverter(p)
 	}
 	return strings.Join(adapted, "|")
+}
+
+// ExtractRemarkFromURI 从各协议标准 URI 中提取备注名称 (Remark / PS / Tag)
+func ExtractRemarkFromURI(rawURI string) string {
+	rawURI = strings.TrimSpace(rawURI)
+	if strings.HasPrefix(rawURI, "tg://socks?") || strings.HasPrefix(rawURI, "tg://http?") {
+		if parsed, err := url.Parse(rawURI); err == nil {
+			if r := parsed.Query().Get("remarks"); r != "" {
+				return r
+			}
+			if r := parsed.Query().Get("remark"); r != "" {
+				return r
+			}
+		}
+	}
+	if strings.HasPrefix(rawURI, "vmess://") {
+		b64 := strings.TrimPrefix(rawURI, "vmess://")
+		if data, err := base64.StdEncoding.DecodeString(b64); err == nil {
+			var m map[string]interface{}
+			if err := json.Unmarshal(data, &m); err == nil {
+				if ps, ok := m["ps"].(string); ok {
+					return ps
+				}
+			}
+		}
+	}
+	if idx := strings.Index(rawURI, "#"); idx != -1 {
+		fragment := rawURI[idx+1:]
+		if unescaped, err := url.QueryUnescape(fragment); err == nil && unescaped != "" {
+			return unescaped
+		}
+		return fragment
+	}
+	return ""
+}
+
+// FilterURIsByRemark 根据排除 (excludeRegex) 与包含 (includeRegex) 正则表达式过滤节点链接列表
+func FilterURIsByRemark(uris []string, excludeRegex, includeRegex string) []string {
+	excludeRegex = strings.TrimSpace(excludeRegex)
+	includeRegex = strings.TrimSpace(includeRegex)
+
+	var excludeRE, includeRE *regexp.Regexp
+	if excludeRegex != "" {
+		excludeRE, _ = regexp.Compile(excludeRegex)
+	}
+	if includeRegex != "" {
+		includeRE, _ = regexp.Compile(includeRegex)
+	}
+	if excludeRE == nil && includeRE == nil {
+		return uris
+	}
+
+	filtered := make([]string, 0, len(uris))
+	for _, u := range uris {
+		rem := ExtractRemarkFromURI(u)
+		if excludeRE != nil && excludeRE.MatchString(rem) {
+			continue
+		}
+		if includeRE != nil && !includeRE.MatchString(rem) {
+			continue
+		}
+		filtered = append(filtered, u)
+	}
+	return filtered
 }

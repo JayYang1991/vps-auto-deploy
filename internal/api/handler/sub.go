@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"vps-auto-deploy/internal/component/subconverter"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/pkg/netutil"
 	"vps-auto-deploy/internal/subgen"
@@ -49,9 +50,31 @@ func ServeSubscription(c *gin.Context) {
 		}
 	}
 
+	// 提取排除与包含节点过滤正则
+	// 优先级：URL 查询参数 > 数据库持久化配置 (settings) > pref.ini 物理配置文件
+	excludeRemark := strings.TrimSpace(c.Query("exclude"))
+	if excludeRemark == "" {
+		excludeRemark, _ = model.GetSetting("subconverter_exclude_remarks")
+		excludeRemark = strings.TrimSpace(excludeRemark)
+	}
+	if excludeRemark == "" {
+		excludeRemark = strings.TrimSpace(subconverter.GetSettingFromPref("exclude_remarks"))
+	}
+
+	includeRemark := strings.TrimSpace(c.Query("include"))
+	if includeRemark == "" {
+		includeRemark, _ = model.GetSetting("subconverter_include_remarks")
+		includeRemark = strings.TrimSpace(includeRemark)
+	}
+	if includeRemark == "" {
+		includeRemark = strings.TrimSpace(subconverter.GetSettingFromPref("include_remarks"))
+	}
+
+	filteredURIs := subgen.FilterURIsByRemark(uris, excludeRemark, includeRemark)
+
 	// 2. 若请求的是通用 Base64 / URI 原始链接
 	if clientTarget == "base64" || clientTarget == "uri" || clientTarget == "v2ray" {
-		b64Content := base64.StdEncoding.EncodeToString([]byte(strings.Join(uris, "\n")))
+		b64Content := base64.StdEncoding.EncodeToString([]byte(strings.Join(filteredURIs, "\n")))
 		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"sub-%s.txt\"", member.Name))
 		c.Header("Profile-Update-Interval", "24")
 		c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(b64Content))
@@ -96,7 +119,14 @@ func ServeSubscription(c *gin.Context) {
 		extraParams["scv"] = s
 	}
 
-	subconverterURIs := subgen.AdaptURIsForSubconverter(uris)
+	if excludeRemark != "" {
+		extraParams["exclude"] = excludeRemark
+	}
+	if includeRemark != "" {
+		extraParams["include"] = includeRemark
+	}
+
+	subconverterURIs := subgen.AdaptURIsForSubconverter(filteredURIs)
 	sourceNodes := strings.Join(subconverterURIs, "|")
 	body, contentType, convErr := ProxySubconverterConvert(clientTarget, sourceNodes, configTemplate, extraParams)
 	if convErr == nil && len(body) > 0 {

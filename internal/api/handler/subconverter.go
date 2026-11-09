@@ -38,6 +38,7 @@ type SubconverterConfigResponse struct {
 }
 
 type SaveSubconverterConfigRequest struct {
+	IsRaw         bool   `json:"is_raw"`
 	RawContent    string `json:"raw_content"`
 	Listen        string `json:"listen"`
 	Port          int    `json:"port"`
@@ -97,13 +98,47 @@ func GetSubconverterConfig(c *gin.Context) {
 	configPath := subconverter.GetConfigPath()
 	rawBytes, err := os.ReadFile(configPath)
 	if err != nil && os.IsNotExist(err) {
-		// 尝试读取 example
-		examplePath := filepath.Join(subconverter.GetComponentDir(), "pref.example.ini")
-		rawBytes, _ = os.ReadFile(examplePath)
+		// 优先从 SQLite 数据库还原用户备份配置
+		if dbRaw, _ := model.GetSetting("subconverter_raw_ini"); dbRaw != "" {
+			rawBytes = []byte(dbRaw)
+			_ = os.MkdirAll(filepath.Dir(configPath), 0755)
+			_ = os.WriteFile(configPath, rawBytes, 0644)
+		} else {
+			// 尝试读取 example
+			examplePath := filepath.Join(subconverter.GetComponentDir(), "pref.example.ini")
+			rawBytes, _ = os.ReadFile(examplePath)
+		}
 	}
 
 	rawContent := string(rawBytes)
 	settings := parseIniKeyValues(rawContent)
+
+	// 若 pref.ini 中缺失关键字段，尝试从数据库补充同步
+	dirty := false
+	if settings["exclude_remarks"] == "" {
+		if dbExclude, _ := model.GetSetting("subconverter_exclude_remarks"); dbExclude != "" {
+			settings["exclude_remarks"] = dbExclude
+			rawContent = updateIniSettings(rawContent, map[string]string{"exclude_remarks": dbExclude})
+			dirty = true
+		}
+	}
+	if settings["include_remarks"] == "" {
+		if dbInclude, _ := model.GetSetting("subconverter_include_remarks"); dbInclude != "" {
+			settings["include_remarks"] = dbInclude
+			rawContent = updateIniSettings(rawContent, map[string]string{"include_remarks": dbInclude})
+			dirty = true
+		}
+	}
+	if settings["default_external_config"] == "" {
+		if dbConfig, _ := model.GetSetting("subconverter_default_external_config"); dbConfig != "" {
+			settings["default_external_config"] = dbConfig
+			rawContent = updateIniSettings(rawContent, map[string]string{"default_external_config": dbConfig})
+			dirty = true
+		}
+	}
+	if dirty {
+		_ = os.WriteFile(configPath, []byte(rawContent), 0644)
+	}
 
 	port := subconverter.DefaultPort
 	if pStr, ok := settings["port"]; ok {
@@ -192,25 +227,50 @@ func SaveSubconverterConfig(c *gin.Context) {
 	// 2. 备份原配置
 	oldConfig, _ := os.ReadFile(configPath)
 
-	contentToWrite := req.RawContent
-	if strings.TrimSpace(contentToWrite) == "" {
-		// 若未直接提交完整文本，根据表单字段更新或新建
-		existing, _ := os.ReadFile(configPath)
-		contentToWrite = updateIniSettings(string(existing), map[string]string{
+	var contentToWrite string
+	if req.IsRaw {
+		contentToWrite = req.RawContent
+		if strings.TrimSpace(contentToWrite) == "" {
+			contentToWrite = string(oldConfig)
+		}
+	} else {
+		baseContent := req.RawContent
+		if strings.TrimSpace(baseContent) == "" {
+			baseContent = string(oldConfig)
+		}
+		updates := map[string]string{
 			"listen":                  req.Listen,
 			"port":                    strconv.Itoa(req.Port),
 			"api_access_token":        req.ApiToken,
 			"exclude_remarks":         req.ExcludeRemark,
 			"include_remarks":         req.IncludeRemark,
 			"default_external_config": req.DefaultConfig,
-		})
+		}
+		contentToWrite = updateIniSettings(baseContent, updates)
 	}
 
-	// 3. 写入新配置
+	// 确保基础容灾字段 skip_failed_links 存在
+	if !strings.Contains(contentToWrite, "skip_failed_links") {
+		if strings.Contains(contentToWrite, "[common]") {
+			contentToWrite = strings.Replace(contentToWrite, "[common]", "[common]\nskip_failed_links=true", 1)
+		}
+	}
+
+	// 3. 写入新配置到 pref.ini
 	if err := os.WriteFile(configPath, []byte(contentToWrite), 0644); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "写入配置文件失败: " + err.Error()})
 		return
 	}
+
+	// 4. 解析生效设置并持久化到 SQLite 数据库（单一真相源，防重新升级或重启丢失配置）
+	finalSettings := parseIniKeyValues(contentToWrite)
+	_ = model.SetSetting("subconverter_exclude_remarks", finalSettings["exclude_remarks"])
+	_ = model.SetSetting("subconverter_include_remarks", finalSettings["include_remarks"])
+	_ = model.SetSetting("subconverter_default_external_config", finalSettings["default_external_config"])
+	_ = model.SetSetting("subconverter_listen", finalSettings["listen"])
+	_ = model.SetSetting("subconverter_port", finalSettings["port"])
+	_ = model.SetSetting("subconverter_api_token", finalSettings["api_access_token"])
+	_ = model.SetSetting("subconverter_raw_ini", contentToWrite)
 
 	// 4. 计算目标探活端口
 	targetPort := req.Port
@@ -597,8 +657,16 @@ func GetSubconverterCustomRules(c *gin.Context) {
 	content := string(data)
 
 	if err != nil && os.IsNotExist(err) {
-		exists = false
-		content = DefaultCustomRulesContent
+		// 优先从 SQLite 数据库还原用户保存的自定义规则
+		if dbRules, _ := model.GetSetting("subconverter_custom_rules"); dbRules != "" {
+			_ = os.MkdirAll(filepath.Dir(rulesPath), 0755)
+			_ = os.WriteFile(rulesPath, []byte(dbRules), 0644)
+			exists = true
+			content = dbRules
+		} else {
+			exists = false
+			content = DefaultCustomRulesContent
+		}
 	} else if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取自定义规则失败: " + err.Error()})
 		return
@@ -638,6 +706,9 @@ func SaveSubconverterCustomRules(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "写入自定义规则文件失败: " + err.Error()})
 		return
 	}
+
+	// 持久化保存至 SQLite 数据库（单一真相源）
+	_ = model.SetSetting("subconverter_custom_rules", content)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": "本地自定义规则模板 (custom_rules.ini) 已成功保存并立即生效！",

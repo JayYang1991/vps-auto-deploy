@@ -239,4 +239,35 @@ func TestClusterPrefixSubgen(t *testing.T) {
 	if !strings.HasPrefix(parts[0], "tg://socks?") || parts[1] != rawVless || !strings.HasPrefix(parts[2], "tg://socks?") {
 		t.Fatalf("unexpected adapted multi string: %s", adaptedMulti)
 	}
+
+	// 7. Test ExtractRemarkFromURI and FilterURIsByRemark
+	nodeSocks := "socks5://127.0.0.1:1080#%F0%9F%87%AD%F0%9F%87%B0%20%E9%A6%99%E6%B8%AF%E4%B8%BB%E6%8E%A7%20%7C%20socks-in-1080"
+	nodeVless := "vless://uuid@1.2.3.4:443?security=reality#%F0%9F%87%AD%F0%9F%87%B0%20%E9%A6%99%E6%B8%AF%E4%B8%BB%E6%8E%A7%20%7C%20vless-reality-443"
+	nodeTrojan := "trojan://pwd@1.2.3.4:443#US%20Node%20%7C%20trojan-443"
+	nodeTgSocks := "tg://socks?server=127.0.0.1&port=1080&remarks=%E9%A6%99%E6%B8%AF%E4%B8%BB%E6%8E%A7+%7C+socks-in-1080"
+
+	if rem := ExtractRemarkFromURI(nodeSocks); !strings.Contains(rem, "socks-in-1080") {
+		t.Fatalf("unexpected remark from nodeSocks: %s", rem)
+	}
+	if rem := ExtractRemarkFromURI(nodeTgSocks); !strings.Contains(rem, "socks-in-1080") {
+		t.Fatalf("unexpected remark from nodeTgSocks: %s", rem)
+	}
+
+	allNodes := []string{nodeSocks, nodeVless, nodeTrojan, nodeTgSocks}
+	// Filter excluding socks-in
+	filteredEx := FilterURIsByRemark(allNodes, "socks-in", "")
+	if len(filteredEx) != 2 {
+		t.Fatalf("expected 2 nodes after excluding socks-in, got %d: %v", len(filteredEx), filteredEx)
+	}
+	for _, u := range filteredEx {
+		if strings.Contains(ExtractRemarkFromURI(u), "socks-in") {
+			t.Fatalf("filtered list should not contain socks-in: %s", u)
+		}
+	}
+
+	// Filter including only US
+	filteredIn := FilterURIsByRemark(allNodes, "", "US Node")
+	if len(filteredIn) != 1 || !strings.Contains(filteredIn[0], "trojan") {
+		t.Fatalf("expected only trojan US node, got: %v", filteredIn)
+	}
 }

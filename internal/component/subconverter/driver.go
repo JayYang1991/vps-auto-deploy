@@ -2,6 +2,7 @@ package subconverter
 
 import (
 	"archive/tar"
+	"bufio"
 	"compress/gzip"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"vps-auto-deploy/internal/component"
+	"vps-auto-deploy/internal/model"
 )
 
 const (
@@ -360,12 +362,22 @@ func (d *Driver) Restart() error {
 	return d.systemd.Restart()
 }
 
-// EnsurePrefDefaults 确保 pref.ini 存在并注入推荐的高可用容灾选项 (如 skip_failed_links=true)
+// EnsurePrefDefaults 确保 pref.ini 存在，合并数据库持久化配置，并注入推荐的高可用容灾选项
 func EnsurePrefDefaults() {
 	prefPath := GetConfigPath()
 	data, err := os.ReadFile(prefPath)
 	if err != nil {
-		return
+		// 若文件不存在，尝试从 SQLite 数据库还原用户备份配置
+		if model.DB != nil {
+			if rawIni, _ := model.GetSetting("subconverter_raw_ini"); rawIni != "" {
+				_ = os.MkdirAll(filepath.Dir(prefPath), 0755)
+				_ = os.WriteFile(prefPath, []byte(rawIni), 0644)
+				data = []byte(rawIni)
+			}
+		}
+		if len(data) == 0 {
+			return
+		}
 	}
 	content := string(data)
 	modified := false
@@ -383,9 +395,105 @@ func EnsurePrefDefaults() {
 		modified = true
 	}
 
+	// 2. 从数据库恢复同步用户保存的关键业务配置 (exclude_remarks, include_remarks, default_external_config)
+	if model.DB != nil {
+		if dbExclude, _ := model.GetSetting("subconverter_exclude_remarks"); dbExclude != "" {
+			if curVal := GetSettingFromContent(content, "exclude_remarks"); curVal != dbExclude {
+				content = UpdateIniKey(content, "exclude_remarks", dbExclude)
+				modified = true
+			}
+		}
+		if dbInclude, _ := model.GetSetting("subconverter_include_remarks"); dbInclude != "" {
+			if curVal := GetSettingFromContent(content, "include_remarks"); curVal != dbInclude {
+				content = UpdateIniKey(content, "include_remarks", dbInclude)
+				modified = true
+			}
+		}
+		if dbConfig, _ := model.GetSetting("subconverter_default_external_config"); dbConfig != "" {
+			if curVal := GetSettingFromContent(content, "default_external_config"); curVal != dbConfig {
+				content = UpdateIniKey(content, "default_external_config", dbConfig)
+				modified = true
+			}
+		}
+	}
+
 	if modified {
 		_ = os.WriteFile(prefPath, []byte(content), 0644)
 	}
+
+	// 3. 检查并从数据库还原 custom_rules.ini (若磁盘丢失)
+	if model.DB != nil {
+		customRulesPath := filepath.Join(GetComponentDir(), "config", "custom_rules.ini")
+		if _, err := os.Stat(customRulesPath); os.IsNotExist(err) {
+			if dbRules, _ := model.GetSetting("subconverter_custom_rules"); dbRules != "" {
+				_ = os.MkdirAll(filepath.Dir(customRulesPath), 0755)
+				_ = os.WriteFile(customRulesPath, []byte(dbRules), 0644)
+			}
+		}
+	}
+}
+
+// GetSettingFromPref 从 pref.ini 中读取指定 key 的配置值
+func GetSettingFromPref(key string) string {
+	prefPath := GetConfigPath()
+	data, err := os.ReadFile(prefPath)
+	if err != nil {
+		return ""
+	}
+	return GetSettingFromContent(string(data), key)
+}
+
+// GetSettingFromContent 从 INI 内容中解析 key 对应的 value
+func GetSettingFromContent(content, key string) string {
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, ";") || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "[") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		if len(parts) == 2 && strings.TrimSpace(parts[0]) == key {
+			return strings.TrimSpace(parts[1])
+		}
+	}
+	return ""
+}
+
+// UpdateIniKey 更新或插入 INI 内容中的 key=value
+func UpdateIniKey(content, key, val string) string {
+	var lines []string
+	found := false
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	for scanner.Scan() {
+		line := scanner.Text()
+		trimmed := strings.TrimSpace(line)
+		if trimmed != "" && !strings.HasPrefix(trimmed, ";") && !strings.HasPrefix(trimmed, "#") && !strings.HasPrefix(trimmed, "[") {
+			parts := strings.SplitN(trimmed, "=", 2)
+			if len(parts) == 2 && strings.TrimSpace(parts[0]) == key {
+				lines = append(lines, fmt.Sprintf("%s=%s", key, val))
+				found = true
+				continue
+			}
+		}
+		lines = append(lines, line)
+	}
+	if !found {
+		// 插入到 [common] 之后或末尾
+		inserted := false
+		var out []string
+		for _, l := range lines {
+			out = append(out, l)
+			if strings.TrimSpace(l) == "[common]" {
+				out = append(out, fmt.Sprintf("%s=%s", key, val))
+				inserted = true
+			}
+		}
+		if !inserted {
+			out = append(out, fmt.Sprintf("%s=%s", key, val))
+		}
+		lines = out
+	}
+	return strings.Join(lines, "\n")
 }
 
 // extractTarGzToDir 将 tar.gz 解包并剥离最外层的 subconverter/ 根目录
@@ -438,6 +546,15 @@ func extractTarGzToDir(archivePath, destDir string) error {
 			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
 				return err
 			}
+
+			// 保护用户自定义配置文件：若目标 pref.ini 或 custom_rules.ini 已存在，严禁被 release 压缩包覆盖！
+			baseName := filepath.Base(targetPath)
+			if baseName == "pref.ini" || baseName == "custom_rules.ini" {
+				if _, err := os.Stat(targetPath); err == nil {
+					targetPath = targetPath + ".example"
+				}
+			}
+
 			tmpPath := targetPath + ".tmp"
 			outFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, header.FileInfo().Mode())
 			if err != nil {

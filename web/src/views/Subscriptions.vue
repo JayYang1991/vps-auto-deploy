@@ -1479,6 +1479,15 @@ const currentTesterSubURL = computed(() => {
   if (tester.udp) params.set('udp', 'true')
   if (tester.scv) params.set('scv', 'true')
 
+  const excludeVal = subForm.exclude_remarks?.trim()
+  if (excludeVal) {
+    params.set('exclude', excludeVal)
+  }
+  const includeVal = subForm.include_remarks?.trim()
+  if (includeVal) {
+    params.set('include', includeVal)
+  }
+
   return `${host}/sub/${token}?${params.toString()}`
 })
 
@@ -1532,9 +1541,14 @@ async function fetchTemplates() {
 async function savePreferences() {
   savingConfig.value = true
   try {
-    const res = await api.post('/subconverter/config', subForm)
+    const payload = {
+      ...subForm,
+      is_raw: showRawEditor.value,
+    }
+    const res = await api.post('/subconverter/config', payload)
     toast.success(res.data.message || '配置已成功保存！')
     await fetchSubStatus()
+    await fetchSubConfig()
   } catch (err: any) {
     toast.error('保存失败: ' + (err.response?.data?.error || err.message))
     await fetchSubConfig()
@@ -1619,6 +1633,8 @@ function copySavedAdvancedSubURL(subToken: string) {
   if (savedPrefs.emoji) params.set('emoji', 'true')
   if (savedPrefs.udp) params.set('udp', 'true')
   if (savedPrefs.scv) params.set('scv', 'true')
+  if (subForm.exclude_remarks?.trim()) params.set('exclude', subForm.exclude_remarks.trim())
+  if (subForm.include_remarks?.trim()) params.set('include', subForm.include_remarks.trim())
 
   const url = `${host}/sub/${subToken}?${params.toString()}`
   copyToClipboard(url, `Subconverter ${savedPrefs.target.toUpperCase()} 分流订阅链接`)
@@ -1634,6 +1650,8 @@ function openSavedAdvancedSubQR(memberName: string, subToken: string) {
   if (savedPrefs.emoji) params.set('emoji', 'true')
   if (savedPrefs.udp) params.set('udp', 'true')
   if (savedPrefs.scv) params.set('scv', 'true')
+  if (subForm.exclude_remarks?.trim()) params.set('exclude', subForm.exclude_remarks.trim())
+  if (subForm.include_remarks?.trim()) params.set('include', subForm.include_remarks.trim())
 
   qrModal.title = `${memberName} - Subconverter ${savedPrefs.target.toUpperCase()} 分流订阅`
   qrModal.url = `${host}/sub/${subToken}?${params.toString()}`
