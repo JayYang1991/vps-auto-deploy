@@ -377,12 +377,23 @@
             </div>
 
             <div>
-              <label class="form-label">规则集与分流模板 (Ruleset / Config)</label>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                <label class="form-label" style="margin: 0;">规则集与分流模板 (Ruleset / Config)</label>
+                <button
+                  type="button"
+                  @click="openCustomRulesModal"
+                  class="btn btn-secondary"
+                  style="font-size: 0.72rem; padding: 0.15rem 0.5rem; color: #38bdf8;"
+                  title="查看与修改本地专属的 custom_rules.ini 规则文件"
+                >
+                  ✏️ 编辑本地规则
+                </button>
+              </div>
               <select v-model="tester.template" class="input">
                 <option v-for="t in templates" :key="t.name" :value="t.config_value">
                   {{ t.label }} {{ t.recommended ? '★ 推荐' : '' }}
                 </option>
-                <option value="custom">✏️ 自定义外部规则集 URL...</option>
+                <option value="custom">🌐 外部在线规则集链接 (URL)...</option>
               </select>
             </div>
           </div>
@@ -1205,6 +1216,63 @@
         </div>
       </div>
     </div>
+
+    <!-- 本地自定义规则模板 (custom_rules.ini) 编辑弹窗 -->
+    <div v-if="customRulesModal.show" class="modal-overlay" @click.self="customRulesModal.show = false">
+      <div class="modal-content" style="max-width: 880px; max-height: 90vh; display: flex; flex-direction: column;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div>
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <span style="font-size: 1.25rem;">✏️</span>
+              <h3 style="font-size: 1.15rem; font-weight: 600; color: #f8fafc;">本地自定义分流规则 (custom_rules.ini)</h3>
+              <span v-if="customRulesModal.exists" class="badge badge-success" style="font-size: 0.7rem;">已落盘</span>
+              <span v-else class="badge badge-warning" style="font-size: 0.7rem;">推荐范例 (未保存)</span>
+            </div>
+            <div style="color: #64748b; font-size: 0.75rem; margin-top: 0.25rem; font-family: monospace;">
+              保存路径: {{ customRulesModal.path || 'components/subconverter/config/custom_rules.ini' }}
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button @click="resetToDefaultCustomRules" class="btn btn-secondary" style="font-size: 0.775rem; padding: 0.35rem 0.75rem;" type="button">
+              🔄 载入官方范例
+            </button>
+            <button @click="copyCustomRules" class="btn btn-secondary" style="font-size: 0.775rem; padding: 0.35rem 0.75rem;" type="button">
+              📋 复制内容
+            </button>
+            <button @click="customRulesModal.show = false" class="btn btn-secondary" style="font-size: 0.775rem; padding: 0.35rem 0.75rem;" type="button">
+              ✕ 关闭
+            </button>
+          </div>
+        </div>
+
+        <p style="color: #94a3b8; font-size: 0.8rem; margin-bottom: 0.75rem; line-height: 1.4;">
+          此模板由 Subconverter 直接离线解析，支持自由编写策略组（<code style="color: #38bdf8;">custom_group</code>）与规则集分流（<code style="color: #38bdf8;">ruleset</code>）。保存后订阅转换秒级生效，无需借助任何第三方外部网络。
+        </p>
+
+        <div style="flex: 1; display: flex; flex-direction: column; min-height: 380px;">
+          <textarea
+            v-model="customRulesModal.content"
+            class="code-editor"
+            style="flex: 1; min-height: 380px; font-family: 'JetBrains Mono', monospace; font-size: 0.825rem; line-height: 1.45; resize: vertical;"
+            placeholder="[custom]&#10;custom_group=🚀 节点选择`select`.*&#10;ruleset=..."
+          ></textarea>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1rem;">
+          <button type="button" @click="customRulesModal.show = false" class="btn btn-secondary">取消</button>
+          <button
+            type="button"
+            @click="saveCustomRules"
+            class="btn btn-primary"
+            :disabled="customRulesModal.saving"
+          >
+            <span>💾</span>
+            <span>{{ customRulesModal.saving ? '正在保存...' : '保存并设为当前模板' }}</span>
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -1316,6 +1384,61 @@ const qrModal = reactive({
   title: '',
   url: '',
 })
+
+const customRulesModal = reactive({
+  show: false,
+  saving: false,
+  path: '',
+  exists: false,
+  content: '',
+})
+
+async function openCustomRulesModal() {
+  try {
+    const res = await api.get('/subconverter/custom-rules')
+    customRulesModal.path = res.data.path || ''
+    customRulesModal.exists = !!res.data.exists
+    customRulesModal.content = res.data.content || ''
+    customRulesModal.show = true
+  } catch (err: any) {
+    toast.error('读取自定义规则模板失败: ' + (err.response?.data?.error || err.message))
+  }
+}
+
+async function saveCustomRules() {
+  customRulesModal.saving = true
+  try {
+    const res = await api.post('/subconverter/custom-rules', {
+      content: customRulesModal.content,
+    })
+    toast.success(res.data.message || '本地自定义规则模板已成功保存！')
+    customRulesModal.exists = true
+    customRulesModal.show = false
+
+    await fetchTemplates()
+    tester.template = 'config/custom_rules.ini'
+  } catch (err: any) {
+    toast.error('保存自定义规则模板失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    customRulesModal.saving = false
+  }
+}
+
+async function resetToDefaultCustomRules() {
+  try {
+    const res = await api.get('/subconverter/custom-rules')
+    if (res.data.content) {
+      customRulesModal.content = res.data.content
+      toast.success('已载入推荐分流规则范例')
+    }
+  } catch {
+    // ignore
+  }
+}
+
+async function copyCustomRules() {
+  await copyToClipboard(customRulesModal.content, '自定义规则内容')
+}
 
 // 计算当前选中的测试订阅 URL
 const currentTesterSubURL = computed(() => {

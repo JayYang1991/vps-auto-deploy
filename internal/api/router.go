@@ -109,6 +109,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			// sing-box 完整配置透视与重载
 			api.GET("/singbox/config", handler.GetSingboxFullConfig)
 			api.POST("/singbox/reload", handler.ReloadSingboxService)
+			api.POST("/singbox/load-from-disk", handler.LoadSingboxFromDisk)
 
 			// 隧道管理
 			api.GET("/tunnels", handler.ListTunnels)
@@ -131,6 +132,8 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.GET("/subconverter/templates", handler.ListSubconverterTemplates)
 			api.GET("/subconverter/preferences", handler.GetSubconverterPreferences)
 			api.POST("/subconverter/preferences", handler.SaveSubconverterPreferences)
+			api.GET("/subconverter/custom-rules", handler.GetSubconverterCustomRules)
+			api.POST("/subconverter/custom-rules", handler.SaveSubconverterCustomRules)
 
 			// Cloudflare 优选 IP 管理与定时同步
 			api.GET("/cf-preferred/status", handler.GetCFPreferredStatus)

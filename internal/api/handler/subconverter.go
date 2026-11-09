@@ -274,6 +274,14 @@ func ListSubconverterTemplates(c *gin.Context) {
 	// 预设推荐模板池
 	presets := []RuleTemplateItem{
 		{
+			Name:        "custom_rules.ini",
+			Label:       "✏️ 本地专属自定义分流规则 (custom_rules.ini)",
+			Description: "由您自定义维护的本地分流规则与策略组，支持离线即时转换生效",
+			Recommended: false,
+			IsLocal:     true,
+			ConfigValue: "config/custom_rules.ini",
+		},
+		{
 			Name:        "ACL4SSR_Online.ini",
 			Label:       "ACL4SSR 经典在线分流版",
 			Description: "默认推荐：自动测速节点池、国内直连、国外代理、主流流媒体分流",
@@ -545,3 +553,91 @@ func ProxySubconverterConvert(target, sourceSubURL, configTemplate string, extra
 
 	return body, contentType, nil
 }
+
+// DefaultCustomRulesContent 预置的标准自定义规则模板范例
+const DefaultCustomRulesContent = `[custom]
+; ==============================================================================
+; 🚀 VPS Auto Deploy - 本地自定义分流规则模板 (custom_rules.ini)
+; 本文件供 Clash / Surge / Loon / Quantumult X 等客户端一键应用自定义策略组与分流规则
+; ==============================================================================
+
+; --- 1. 策略组定义 (Proxy Groups) ---
+; 语法: custom_group=策略组名称` + "`" + `select|url-test|fallback` + "`" + `规则1` + "`" + `规则2` + "`" + `...` + "`" + `节点正则
+custom_group=🚀 节点选择` + "`" + `select` + "`" + `[]♻️ 自动选择` + "`" + `[]🎯 全球直连` + "`" + `.*
+custom_group=♻️ 自动选择` + "`" + `url-test` + "`" + `.*` + "`" + `http://www.gstatic.com/generate_204` + "`" + `300,,50
+custom_group=🎬 国外流媒体` + "`" + `select` + "`" + `[]🚀 节点选择` + "`" + `[]♻️ 自动选择` + "`" + `[]🎯 全球直连` + "`" + `.*
+custom_group=🤖 人工智能` + "`" + `select` + "`" + `[]🚀 节点选择` + "`" + `[]♻️ 自动选择` + "`" + `.*
+custom_group=🛑 广告拦截` + "`" + `select` + "`" + `[]🍃 全球拦截` + "`" + `[]🎯 全球直连
+custom_group=🎯 全球直连` + "`" + `select` + "`" + `[]DIRECT
+custom_group=🍃 全球拦截` + "`" + `select` + "`" + `[]REJECT
+
+; --- 2. 外部规则集引用 (Rulesets) ---
+; 语法: ruleset=策略组名称,规则集URL或本地路径
+ruleset=🛑 广告拦截,https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/BanAD.list
+ruleset=🤖 人工智能,https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Ruleset/OpenAi.list
+ruleset=🎬 国外流媒体,https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Ruleset/Netflix.list
+ruleset=🎬 国外流媒体,https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/Ruleset/YouTube.list
+ruleset=🎯 全球直连,https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/ChinaDomain.list
+ruleset=🎯 全球直连,https://raw.githubusercontent.com/ACL4SSR/ACL4SSR/master/Clash/ChinaCompanyIp.list
+ruleset=🎯 全球直连,[]GEOIP,CN
+ruleset=🚀 节点选择,[]FINAL
+`
+
+// GetSubconverterCustomRules 获取本地自定义规则 custom_rules.ini 内容
+func GetSubconverterCustomRules(c *gin.Context) {
+	compDir := subconverter.GetComponentDir()
+	rulesPath := filepath.Join(compDir, "config", "custom_rules.ini")
+
+	data, err := os.ReadFile(rulesPath)
+	exists := true
+	content := string(data)
+
+	if err != nil && os.IsNotExist(err) {
+		exists = false
+		content = DefaultCustomRulesContent
+	} else if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取自定义规则失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"path":    rulesPath,
+		"exists":  exists,
+		"content": content,
+	})
+}
+
+// SaveSubconverterCustomRules 保存本地自定义规则 custom_rules.ini 内容
+func SaveSubconverterCustomRules(c *gin.Context) {
+	var req struct {
+		Content string `json:"content"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "请求参数无效: " + err.Error()})
+		return
+	}
+
+	content := strings.TrimSpace(req.Content)
+	if content == "" {
+		content = DefaultCustomRulesContent
+	}
+
+	compDir := subconverter.GetComponentDir()
+	configDir := filepath.Join(compDir, "config")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建规则目录失败: " + err.Error()})
+		return
+	}
+
+	rulesPath := filepath.Join(configDir, "custom_rules.ini")
+	if err := os.WriteFile(rulesPath, []byte(content), 0644); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "写入自定义规则文件失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "本地自定义规则模板 (custom_rules.ini) 已成功保存并立即生效！",
+		"path":    rulesPath,
+	})
+}
+

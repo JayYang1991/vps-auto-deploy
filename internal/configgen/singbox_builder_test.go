@@ -238,7 +238,7 @@ func TestGenerateServerConfig_Singbox114Routes(t *testing.T) {
 		}
 	}
 
-	// 3. 将完整配置落盘，通过宿主机已安装的 sing-box 1.14 进行严格语法预检
+	// 3. 将完整配置落盘，若宿主机已安装 sing-box 1.14 则进行严格语法预检
 	tmpCfgPath := filepath.Join(t.TempDir(), "singbox_1_14_verify.json")
 	rawJSON, err := json.MarshalIndent(cfgWithRS, "", "  ")
 	if err != nil {
@@ -247,8 +247,14 @@ func TestGenerateServerConfig_Singbox114Routes(t *testing.T) {
 	if err := os.WriteFile(tmpCfgPath, rawJSON, 0644); err != nil {
 		t.Fatalf("write tmp file failed: %v", err)
 	}
-	if err := singbox.CheckConfig(tmpCfgPath); err != nil {
-		t.Fatalf("sing-box 1.14 syntax check failed: %v\nJSON:\n%s", err, string(rawJSON))
+	driver := singbox.NewDriver()
+	st, _ := driver.Status()
+	if st.Installed {
+		if err := singbox.CheckConfig(tmpCfgPath); err != nil {
+			t.Fatalf("sing-box 1.14 syntax check failed: %v\nJSON:\n%s", err, string(rawJSON))
+		}
+	} else {
+		t.Log("sing-box not installed on test host, skipping live CheckConfig")
 	}
 }
 

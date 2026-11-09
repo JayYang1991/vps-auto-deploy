@@ -11,15 +11,15 @@
         </p>
       </div>
 
-      <div style="display: flex; gap: 0.5rem;">
+      <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
         <button
-          @click="importExistingConfig"
+          @click="loadFromDisk"
           class="btn btn-secondary"
-          :disabled="importing"
-          title="从宿主机已有配置（如 /etc/sing-box/config.json）一键同步导入入站节点与用户"
+          :disabled="syncingFromDisk"
+          title="读取宿主机磁盘 /etc/sing-box/config.json 强制加载并覆盖面板数据库"
         >
           <span>📥</span>
-          <span>{{ importing ? '正在导入...' : '导入宿主机配置' }}</span>
+          <span>{{ syncingFromDisk ? '正在覆盖...' : '从磁盘覆盖数据库' }}</span>
         </button>
         <button @click="openCreateModal" class="btn btn-primary">+ 新增节点</button>
       </div>
@@ -644,6 +644,28 @@ const shareModal = reactive({
 })
 
 const importing = ref(false)
+const syncingFromDisk = ref(false)
+
+async function loadFromDisk() {
+  const confirmed = await showConfirm({
+    title: '确认从磁盘强制加载覆盖数据库？',
+    message: '此操作将读取宿主机磁盘上的配置文件 (/etc/sing-box/config.json)，并 100% 覆盖面板数据库中的入站节点与出站规则。磁盘中已被删除的规则将在数据库中同步移除。是否继续？',
+    confirmText: '确认强制覆盖',
+    danger: true,
+  })
+  if (!confirmed) return
+
+  syncingFromDisk.value = true
+  try {
+    const res = await api.post('/singbox/load-from-disk')
+    toast.success(res.data.message || '已成功从磁盘加载并覆盖数据库！')
+    await loadInbounds()
+  } catch (err: any) {
+    toast.error('从磁盘强制加载失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    syncingFromDisk.value = false
+  }
+}
 
 async function importExistingConfig() {
   importing.value = true

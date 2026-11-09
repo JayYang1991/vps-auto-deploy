@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -317,3 +318,36 @@ func ReloadSingboxService(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"message": "sing-box 服务已成功重新加载最新配置！"})
 }
+
+// LoadSingboxFromDisk 从磁盘配置文件强制加载并 100% 覆盖面板数据库记录
+func LoadSingboxFromDisk(c *gin.Context) {
+	cfgPath := singbox.GetConfigPath()
+	var req struct {
+		Path string `json:"path"`
+	}
+	_ = c.ShouldBindJSON(&req)
+	if strings.TrimSpace(req.Path) != "" {
+		cfgPath = strings.TrimSpace(req.Path)
+	}
+
+	if _, err := os.Stat(cfgPath); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "未找到磁盘配置文件: " + cfgPath})
+		return
+	}
+
+	stats, err := configgen.ForceSyncSingboxConfig(cfgPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "从磁盘强制加载配置失败: " + err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": fmt.Sprintf(
+			"成功从磁盘加载并覆盖数据库！已同步 %d 个入站节点（新增 %d/更新 %d/清理 %d）、%d 个出站规则（新增 %d/更新 %d/清理 %d）",
+			len(stats.InboundTags), stats.InboundsCreated, stats.InboundsUpdated, stats.InboundsDeleted,
+			len(stats.OutboundTags), stats.OutboundsCreated, stats.OutboundsUpdated, stats.OutboundsDeleted,
+		),
+		"stats": stats,
+	})
+}
+

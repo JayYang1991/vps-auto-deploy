@@ -63,10 +63,14 @@
         </div>
 
         <!-- Sing-box 专属操作：配置透视与热重载 -->
-        <div style="display: flex; gap: 0.6rem; align-items: center;">
+        <div style="display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap;">
           <button @click="openConfigViewer" class="btn btn-secondary" style="font-size: 0.825rem; padding: 0.4rem 0.8rem;" title="预览与语法预检当前 Sing-box 完整配置">
             <span>🔍</span>
             <span>预览 JSON 配置</span>
+          </button>
+          <button @click="loadFromDisk" class="btn btn-secondary" style="font-size: 0.825rem; padding: 0.4rem 0.8rem;" :disabled="syncingFromDisk" title="读取宿主机磁盘上的 /etc/sing-box/config.json 强制覆盖面板数据库">
+            <span>📥</span>
+            <span>{{ syncingFromDisk ? '加载中...' : '从磁盘覆盖数据库' }}</span>
           </button>
           <button @click="reloadConfig" class="btn btn-secondary" style="font-size: 0.825rem; padding: 0.4rem 0.8rem;" :disabled="reloading" title="应用最新入站/出站规则并重载内核">
             <span>⚡</span>
@@ -76,7 +80,7 @@
       </div>
 
       <!-- 二级子视图工作区 -->
-      <div class="tab-content-area">
+      <div class="tab-content-area" :key="subKey">
         <keep-alive>
           <Inbounds v-if="singboxSubTab === 'inbounds'" />
           <Outbounds v-else-if="singboxSubTab === 'outbounds'" />
@@ -120,7 +124,10 @@
             </div>
           </div>
 
-          <div style="display: flex; gap: 0.5rem;">
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button @click="loadFromDisk" class="btn btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;" :disabled="syncingFromDisk" title="读取磁盘文件强制覆盖面板数据库">
+              📥 从磁盘覆盖数据库
+            </button>
             <button @click="copyConfig" class="btn btn-primary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">
               📋 复制当前配置
             </button>
@@ -151,12 +158,34 @@
               ⚡ 面板数据库生成
             </button>
           </div>
-          <span v-if="configViewer.file_exists && configViewer.disk_raw_json === configViewer.raw_json" class="badge badge-success" style="font-size: 0.7rem;">
-            ✓ 磁盘与面板数据 100% 同步
-          </span>
-          <span v-else-if="configViewer.file_exists" class="badge badge-warning" style="font-size: 0.7rem;">
-            ⚠️ 磁盘配置与面板存在差异（可点击强制热重载更新）
-          </span>
+          <div v-if="configViewer.file_exists && configViewer.disk_raw_json === configViewer.raw_json" style="display: flex; align-items: center; gap: 0.5rem;">
+            <span class="badge badge-success" style="font-size: 0.7rem;">
+              ✓ 磁盘与面板数据 100% 同步
+            </span>
+          </div>
+          <div v-else-if="configViewer.file_exists" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+            <span class="badge badge-warning" style="font-size: 0.7rem;">
+              ⚠️ 磁盘配置与面板存在差异
+            </span>
+            <button
+              @click="loadFromDisk"
+              class="btn btn-primary"
+              style="font-size: 0.72rem; padding: 0.2rem 0.6rem; background: #d97706; border-color: #f59e0b;"
+              :disabled="syncingFromDisk"
+              type="button"
+            >
+              📥 从磁盘加载覆盖数据库
+            </button>
+            <button
+              @click="reloadConfig"
+              class="btn btn-secondary"
+              style="font-size: 0.72rem; padding: 0.2rem 0.6rem;"
+              :disabled="reloading"
+              type="button"
+            >
+              ⚡ 以面板为准写入磁盘
+            </button>
+          </div>
         </div>
 
         <div v-if="!configViewer.check_ok" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); padding: 0.6rem 0.85rem; border-radius: 0.5rem; margin-bottom: 0.75rem; color: #fca5a5; font-size: 0.8rem;">
@@ -182,10 +211,12 @@ import Tunnels from './Tunnels.vue'
 import Subscriptions from './Subscriptions.vue'
 import api from '../api'
 import { useToast, copyToClipboard } from '../composables/useToast'
+import { useConfirm } from '../composables/useConfirm'
 
 const route = useRoute()
 const router = useRouter()
 const { toast } = useToast()
+const { showConfirm } = useConfirm()
 
 const componentTabs = [
   {
@@ -211,6 +242,8 @@ const componentTabs = [
 const activeComponent = ref('singbox')
 const singboxSubTab = ref<'inbounds' | 'outbounds' | 'routes'>('inbounds')
 const reloading = ref(false)
+const syncingFromDisk = ref(false)
+const subKey = ref(0)
 
 const configViewer = reactive({
   show: false,
@@ -272,10 +305,38 @@ async function reloadConfig() {
   try {
     const res = await api.post('/singbox/reload')
     toast.success(res.data.message || 'sing-box 服务已重载最新配置！')
+    if (configViewer.show) {
+      await openConfigViewer()
+    }
   } catch (err: any) {
     toast.error('重载配置失败: ' + (err.response?.data?.error || err.message))
   } finally {
     reloading.value = false
+  }
+}
+
+async function loadFromDisk() {
+  const ok = await showConfirm({
+    title: '确认从磁盘强制加载覆盖数据库？',
+    message: '此操作将读取当前宿主机磁盘上的配置文件 (/etc/sing-box/config.json)，并 100% 覆盖面板数据库中的入站节点与出站规则。磁盘中已被删除的规则将在数据库中同步移除。是否继续？',
+    confirmText: '确认强制覆盖数据库',
+    danger: true,
+  })
+  if (!ok) return
+
+  syncingFromDisk.value = true
+  try {
+    const res = await api.post('/singbox/load-from-disk')
+    toast.success(res.data.message || '已成功从磁盘加载并覆盖数据库！')
+    if (configViewer.show) {
+      await openConfigViewer()
+    }
+    // 强制刷新子组件数据
+    subKey.value++
+  } catch (err: any) {
+    toast.error('从磁盘强制加载失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    syncingFromDisk.value = false
   }
 }
 

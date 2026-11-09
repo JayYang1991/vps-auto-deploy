@@ -3,7 +3,7 @@ set -e
 
 echo "==> 1. Building Web UI (Vue 3 + Vite)..."
 cd web
-export PATH="$HOME/.local/bin:$HOME/.local/share/pnpm:$PATH"
+export PATH="$HOME/.local/share/pnpm:$HOME/.local/share/pnpm/bin:$HOME/.local/bin:$PATH"
 pnpm build
 cd ..
 

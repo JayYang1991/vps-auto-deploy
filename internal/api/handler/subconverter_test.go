@@ -85,3 +85,68 @@ func TestSaveSubconverterConfigValidation(t *testing.T) {
 		t.Errorf("expected 400 for raw_content with invalid port, got %d", w.Code)
 	}
 }
+
+func TestCustomRulesHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/subconverter/custom-rules", GetSubconverterCustomRules)
+	r.POST("/subconverter/custom-rules", SaveSubconverterCustomRules)
+	r.GET("/subconverter/templates", ListSubconverterTemplates)
+
+	// 1. 获取默认自定义规则模板（此时文件可能尚未落盘，应返回预置范例）
+	req := httptest.NewRequest(http.MethodGet, "/subconverter/custom-rules", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for GetSubconverterCustomRules, got %d", w.Code)
+	}
+
+	var getResp struct {
+		Path    string `json:"path"`
+		Exists  bool   `json:"exists"`
+		Content string `json:"content"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &getResp); err != nil {
+		t.Fatalf("unmarshal json failed: %v", err)
+	}
+	if getResp.Content == "" {
+		t.Errorf("expected non-empty default custom rules content")
+	}
+
+	// 2. 保存自定义规则内容
+	customContent := "[custom]\ncustom_group=测试策略组`select`.*"
+	saveBody, _ := json.Marshal(map[string]string{"content": customContent})
+	req = httptest.NewRequest(http.MethodPost, "/subconverter/custom-rules", bytes.NewReader(saveBody))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for SaveSubconverterCustomRules, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// 3. 再次获取，验证已成功落盘
+	req = httptest.NewRequest(http.MethodGet, "/subconverter/custom-rules", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	_ = json.Unmarshal(w.Body.Bytes(), &getResp)
+	if !getResp.Exists || getResp.Content != customContent {
+		t.Errorf("expected content '%s', got '%s'", customContent, getResp.Content)
+	}
+
+	// 4. 获取模板列表，验证 custom_rules.ini 处于模板选项中
+	req = httptest.NewRequest(http.MethodGet, "/subconverter/templates", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	var templates []RuleTemplateItem
+	_ = json.Unmarshal(w.Body.Bytes(), &templates)
+	foundCustom := false
+	for _, tpl := range templates {
+		if tpl.Name == "custom_rules.ini" && tpl.ConfigValue == "config/custom_rules.ini" {
+			foundCustom = true
+			break
+		}
+	}
+	if !foundCustom {
+		t.Errorf("expected custom_rules.ini found in templates list")
+	}
+}
