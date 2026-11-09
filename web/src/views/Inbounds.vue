@@ -445,8 +445,10 @@
           </div>
 
           <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1rem;">
-            <button type="button" @click="modal.show = false" class="btn btn-secondary">取消</button>
-            <button type="submit" class="btn btn-primary">保存并应用</button>
+            <button type="button" @click="modal.show = false" class="btn btn-secondary" :disabled="saving">取消</button>
+            <button type="submit" class="btn btn-primary" :disabled="saving">
+              {{ saving ? '保存并应用中...' : '保存并应用' }}
+            </button>
           </div>
         </form>
       </div>
@@ -496,6 +498,7 @@ const { activeNode } = useNodeContext()
 
 const inbounds = ref<any[]>([])
 const loading = ref(true)
+const saving = ref(false)
 const singboxInstalled = ref(true)
 const deletingId = ref<number | null>(null)
 
@@ -844,6 +847,8 @@ function onProtocolChange() {
 }
 
 async function submitInbound() {
+  if (saving.value) return
+  saving.value = true
   let specObj: any = {}
   if (form.protocol === 'vless-reality') {
     if (!realitySpec.server_name) {
@@ -924,6 +929,8 @@ async function submitInbound() {
     await loadInbounds()
   } catch (err: any) {
     toast.error('保存失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    saving.value = false
   }
 }
 

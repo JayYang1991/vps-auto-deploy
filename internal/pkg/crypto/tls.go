@@ -175,7 +175,10 @@ func CreatePinnedTLSConfig(pinnedFingerprint string) *tls.Config {
 func CreatePinnedTransport(pinnedFingerprint string) *http.Transport {
 	return &http.Transport{
 		TLSClientConfig:       CreatePinnedTLSConfig(pinnedFingerprint),
-		ResponseHeaderTimeout: 15 * time.Second,
+		ResponseHeaderTimeout: 60 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   10,
 		ForceAttemptHTTP2:     true,
 	}
 }

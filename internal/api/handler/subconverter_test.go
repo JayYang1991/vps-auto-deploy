@@ -153,6 +153,7 @@ func TestCustomRulesHandler(t *testing.T) {
 }
 
 func TestSaveAndGetSubconverterConfigPersistence(t *testing.T) {
+	t.Setenv("SKIP_SERVICE_RELOAD", "1")
 	// 初始化内存数据库
 	dbPath := filepath.Join(t.TempDir(), "test_subconverter.db")
 	_, err := model.InitDB(dbPath)

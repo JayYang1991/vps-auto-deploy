@@ -285,11 +285,11 @@ func SaveSubconverterConfig(c *gin.Context) {
 		targetPort = subconverter.DefaultPort
 	}
 
-	// 5. 若服务已安装且运行中，重启并执行健康探活
+	// 5. 若服务已安装且运行中，重启并执行健康探活 (测试环境若设置 SKIP_SERVICE_RELOAD 则跳过实际 systemd 重启)
 	drv := subconverter.NewDriver()
 	st, _ := drv.Status()
 	restarted := false
-	if st.Installed && st.Active {
+	if st.Installed && st.Active && os.Getenv("SKIP_SERVICE_RELOAD") != "1" {
 		if err := drv.Restart(); err != nil {
 			rollbackSubconverter(configPath, oldConfig, drv)
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Subconverter 服务重启失败，已自动回滚原配置: " + err.Error()})

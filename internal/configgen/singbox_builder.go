@@ -734,9 +734,9 @@ func EnsureDefaultTLSCert() (string, string, error) {
 }
 
 func probeSingboxHealth(driver *singbox.Driver) error {
-	// 启动后探活检查：多次检测服务是否异常退出或进入 crash loop
-	for i := 0; i < 6; i++ {
-		time.Sleep(250 * time.Millisecond)
+	// 启动/重载后探活检查：多次检测服务是否异常退出或进入 crash loop
+	for i := 0; i < 3; i++ {
+		time.Sleep(150 * time.Millisecond)
 		st, err := driver.Status()
 		if err != nil {
 			continue

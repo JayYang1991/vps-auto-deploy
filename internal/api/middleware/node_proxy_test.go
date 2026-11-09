@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"vps-auto-deploy/internal/model"
@@ -186,5 +187,17 @@ func TestNodeProxyWithTLSFingerprint(t *testing.T) {
 		if !strings.Contains(w.Body.String(), "master_settings") {
 			t.Fatalf("Expected master_settings response, got: %s", w.Body.String())
 		}
+	}
+}
+
+func TestPinnedTransportCaching(t *testing.T) {
+	fp := "aa:bb:cc:dd"
+	t1 := getPinnedTransport(99, fp)
+	t2 := getPinnedTransport(99, fp)
+	if t1 != t2 {
+		t.Fatalf("expected identical cached transport for the same node and fingerprint")
+	}
+	if t1.ResponseHeaderTimeout != 60*time.Second {
+		t.Fatalf("expected ResponseHeaderTimeout to be 60s, got %v", t1.ResponseHeaderTimeout)
 	}
 }

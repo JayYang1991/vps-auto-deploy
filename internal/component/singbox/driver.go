@@ -120,8 +120,24 @@ type Driver struct {
 }
 
 func NewDriver() *Driver {
+	EnsureServiceUnit()
 	return &Driver{
 		systemd: component.NewSystemdManager(UnitName),
+	}
+}
+
+// EnsureServiceUnit 自动检查并补齐 ExecReload，确保热重载毫秒级极速生效
+func EnsureServiceUnit() {
+	unitPath := component.GetSystemdUnitPath(UnitName)
+	data, err := os.ReadFile(unitPath)
+	if err != nil {
+		return
+	}
+	content := string(data)
+	if !strings.Contains(content, "ExecReload=") && strings.Contains(content, "[Service]") {
+		newContent := strings.Replace(content, "[Service]", "[Service]\nExecReload=/bin/kill -HUP $MAINPID", 1)
+		_ = os.WriteFile(unitPath, []byte(newContent), 0644)
+		_ = component.DaemonReload()
 	}
 }
 
@@ -245,6 +261,7 @@ After=network.target nss-lookup.target network-online.target
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
 ExecStart=%s run -c %s
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=10s
 LimitNOFILE=infinity

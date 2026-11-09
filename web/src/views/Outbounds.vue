@@ -738,8 +738,10 @@
           </div>
 
           <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1rem;">
-            <button type="button" @click="modal.show = false" class="btn btn-secondary">取消</button>
-            <button type="submit" class="btn btn-primary">保存出站规则</button>
+            <button type="button" @click="modal.show = false" class="btn btn-secondary" :disabled="saving">取消</button>
+            <button type="submit" class="btn btn-primary" :disabled="saving">
+              {{ saving ? '保存中...' : '保存出站规则' }}
+            </button>
           </div>
         </form>
       </div>
@@ -787,6 +789,7 @@ const { showConfirm } = useConfirm()
 
 const outbounds = ref<OutboundItem[]>([])
 const loading = ref(true)
+const saving = ref(false)
 const singboxInstalled = ref(true)
 const deletingId = ref<number | null>(null)
 const createMode = ref<'relay' | 'manual'>('relay')
@@ -1432,6 +1435,8 @@ async function submitOutbound() {
     toast.warning('请输入出站标识 Tag')
     return
   }
+  if (saving.value) return
+  saving.value = true
 
   let specObj: any = {}
   if (form.type === 'custom') {
@@ -1467,6 +1472,8 @@ async function submitOutbound() {
     await loadOutbounds()
   } catch (err: any) {
     toast.error('保存失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    saving.value = false
   }
 }
 

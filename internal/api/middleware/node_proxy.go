@@ -10,12 +10,38 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/pkg/crypto"
 )
+
+var (
+	proxyTransportMutex sync.RWMutex
+	proxyTransports     = make(map[string]*http.Transport)
+)
+
+func getPinnedTransport(nodeID int64, fingerprint string) *http.Transport {
+	key := fmt.Sprintf("%d:%s", nodeID, fingerprint)
+	proxyTransportMutex.RLock()
+	t, ok := proxyTransports[key]
+	proxyTransportMutex.RUnlock()
+	if ok {
+		return t
+	}
+
+	proxyTransportMutex.Lock()
+	defer proxyTransportMutex.Unlock()
+	if t, ok := proxyTransports[key]; ok {
+		return t
+	}
+
+	t = crypto.CreatePinnedTransport(fingerprint)
+	proxyTransports[key] = t
+	return t
+}
 
 // NodeProxyMiddleware 智能反向代理中间件：
 // 当检测到 X-Target-Node-ID 或 node_id 目标指向远端被纳管节点时，
@@ -77,9 +103,9 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 		proxy := httputil.NewSingleHostReverseProxy(targetURL)
 		proxy.FlushInterval = 50 * time.Millisecond // 确保 SSE 实时日志流不被缓冲卡顿
 
-		// 防中间人攻击 (Phase 1)：若启用 TLS，注入带有硬件证书指纹锁定的 Transport
+		// 防中间人攻击 (Phase 1)：若启用 TLS，注入带有硬件证书指纹锁定的长连接 Transport
 		if targetNode.UseTLS {
-			proxy.Transport = crypto.CreatePinnedTransport(targetNode.CertFingerprint)
+			proxy.Transport = getPinnedTransport(targetNode.ID, targetNode.CertFingerprint)
 		}
 
 		// 代理响应后置处理：节点在线自愈与系统概览 IP 兜底补齐
