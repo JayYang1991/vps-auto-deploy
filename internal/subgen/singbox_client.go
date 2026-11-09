@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/model"
 )
 
@@ -48,6 +49,10 @@ func GenerateSingboxClientConfig(member *model.Member) (string, error) {
 
 			tag := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
 
+			pbk := spec.PublicKey
+			if pbk == "" && spec.PrivateKey != "" {
+				pbk = singbox.DeriveRealityPublicKey(spec.PrivateKey)
+			}
 			outbound := map[string]interface{}{
 				"type":        "vless",
 				"tag":         tag,
@@ -64,7 +69,7 @@ func GenerateSingboxClientConfig(member *model.Member) (string, error) {
 					},
 					"reality": map[string]interface{}{
 						"enabled":    true,
-						"public_key": spec.PublicKey,
+						"public_key": pbk,
 						"short-id":   spec.ShortID,
 					},
 				},

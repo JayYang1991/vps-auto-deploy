@@ -200,12 +200,15 @@
 
             <div>
               <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">服务端私钥 (Private Key)</label>
-              <input v-model="realitySpec.private_key" class="input" required placeholder="点击右上角自动生成" />
+              <input v-model="realitySpec.private_key" class="input" required placeholder="点击右上角自动生成" @blur="onPrivateKeyBlur" />
             </div>
 
             <div>
-              <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">客户端公钥 (Public Key - pbk)</label>
-              <input v-model="realitySpec.public_key" class="input" required placeholder="点击右上角自动生成" />
+              <label style="display: block; font-size: 0.75rem; color: #94a3b8; margin-bottom: 0.25rem;">
+                客户端公钥 (Public Key - pbk)
+                <span style="color: #64748b; font-weight: normal; margin-left: 0.35rem;">(选填，留空将自动从私钥推导)</span>
+              </label>
+              <input v-model="realitySpec.public_key" class="input" placeholder="选填：留空将自动根据私钥推导，或点击右上角生成" />
             </div>
 
             <div>
@@ -806,6 +809,20 @@ async function generateRealityKeys() {
   }
 }
 
+async function onPrivateKeyBlur() {
+  const priv = realitySpec.private_key?.trim()
+  if (priv && !realitySpec.public_key?.trim()) {
+    try {
+      const res = await api.post('/inbounds/derive-reality-key', { private_key: priv })
+      if (res.data?.public_key) {
+        realitySpec.public_key = res.data.public_key
+      }
+    } catch {
+      // 容错处理：不阻断用户输入流程
+    }
+  }
+}
+
 function onProtocolChange() {
   if (form.protocol === 'vless-reality') {
     form.listen = '::'
@@ -856,6 +873,17 @@ async function submitInbound() {
     }
     if (!realitySpec.handshake_server) {
       realitySpec.handshake_server = realitySpec.server_name
+    }
+    // 客户端公钥选填：若留空且私钥存在，尝试前端预先推导一次
+    if (!realitySpec.public_key?.trim() && realitySpec.private_key?.trim()) {
+      try {
+        const res = await api.post('/inbounds/derive-reality-key', { private_key: realitySpec.private_key.trim() })
+        if (res.data?.public_key) {
+          realitySpec.public_key = res.data.public_key
+        }
+      } catch {
+        // 允许继续，后端落盘时亦会兜底推导
+      }
     }
     specObj = realitySpec
   } else if (form.protocol === 'vless-ws') {
@@ -1080,14 +1108,26 @@ async function showShareModal(ib: any) {
       return
     }
 
+    let pbk = spec.public_key || ''
+    if (!pbk && spec.private_key) {
+      try {
+        const res = await api.post('/inbounds/derive-reality-key', { private_key: spec.private_key })
+        if (res.data?.public_key) {
+          pbk = res.data.public_key
+        }
+      } catch {
+        // 忽略推导错误
+      }
+    }
+
     const q = new URLSearchParams({
       encryption: 'none',
       flow: spec.flow || 'xtls-rprx-vision',
       security: 'reality',
       sni: spec.server_name || 'dl.google.com',
       fp: spec.fingerprint || 'chrome',
-      pbk: spec.public_key,
-      sid: spec.short_id,
+      pbk: pbk,
+      sid: spec.short_id || '',
       type: 'tcp',
     })
 

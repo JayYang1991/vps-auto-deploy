@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/model"
 )
 
@@ -101,6 +102,9 @@ func ParseInboundMap(ib map[string]interface{}) (tag, protocol, listen string, p
 		}
 		if priv, okPriv := realityMap["private_key"].(string); okPriv {
 			specMap["private_key"] = priv
+			if pub := singbox.DeriveRealityPublicKey(priv); pub != "" {
+				specMap["public_key"] = pub
+			}
 		}
 		if sids, okSids := realityMap["short_id"].([]interface{}); okSids && len(sids) > 0 {
 			if sid, okSid := sids[0].(string); okSid {

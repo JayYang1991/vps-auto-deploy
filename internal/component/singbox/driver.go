@@ -404,6 +404,39 @@ func GenerateRealityKeypair() (privateKey, publicKey, shortID string, err error)
 	return privateKey, publicKey, shortID, nil
 }
 
+// DeriveRealityPublicKey 从 X25519 私钥推导 Base64URL 编码的客户端公钥
+func DeriveRealityPublicKey(privateKey string) string {
+	privateKey = strings.TrimSpace(privateKey)
+	if privateKey == "" {
+		return ""
+	}
+	var raw []byte
+	var err error
+	for _, enc := range []*base64.Encoding{
+		base64.RawURLEncoding,
+		base64.URLEncoding,
+		base64.RawStdEncoding,
+		base64.StdEncoding,
+	} {
+		if b, e := enc.DecodeString(privateKey); e == nil && len(b) == 32 {
+			raw = b
+			err = nil
+			break
+		} else if e != nil {
+			err = e
+		}
+	}
+	if err != nil || len(raw) != 32 {
+		return ""
+	}
+	curve := ecdh.X25519()
+	priv, err := curve.NewPrivateKey(raw)
+	if err != nil {
+		return ""
+	}
+	return base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes())
+}
+
 func extractBinary(archivePath, targetName string) (string, error) {
 	file, err := os.Open(archivePath)
 	if err != nil {

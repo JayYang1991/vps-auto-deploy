@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/model"
 )
 
@@ -60,6 +61,10 @@ func GenerateClashMetaConfig(member *model.Member) (string, error) {
 
 			name := fmt.Sprintf("%s | %s-%d", prefix, ib.Tag, ib.Port)
 
+			pbk := spec.PublicKey
+			if pbk == "" && spec.PrivateKey != "" {
+				pbk = singbox.DeriveRealityPublicKey(spec.PrivateKey)
+			}
 			proxy := map[string]interface{}{
 				"name":               name,
 				"type":               "vless",
@@ -73,7 +78,7 @@ func GenerateClashMetaConfig(member *model.Member) (string, error) {
 				"servername":         serverName,
 				"client-fingerprint": fp,
 				"reality-opts": map[string]interface{}{
-					"public-key": spec.PublicKey,
+					"public-key": pbk,
 					"short-id":   spec.ShortID,
 				},
 			}

@@ -107,6 +107,40 @@ func GenerateRealityKeys(c *gin.Context) {
 	})
 }
 
+// DeriveRealityKey 接收 X25519 私钥并实时推导出对应的 Base64URL 客户端公钥
+func DeriveRealityKey(c *gin.Context) {
+	var req struct {
+		PrivateKey string `json:"private_key" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "私钥不能为空"})
+		return
+	}
+	pub := singbox.DeriveRealityPublicKey(req.PrivateKey)
+	if pub == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "无效的 X25519 私钥，必须是 32 字节 Base64 编码"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"public_key": pub})
+}
+
+func enrichInboundSpec(protocol, specStr string) string {
+	if protocol == "vless-reality" {
+		var rSpec model.VLESSRealitySpec
+		if err := json.Unmarshal([]byte(specStr), &rSpec); err == nil {
+			if strings.TrimSpace(rSpec.PublicKey) == "" && strings.TrimSpace(rSpec.PrivateKey) != "" {
+				if pub := singbox.DeriveRealityPublicKey(rSpec.PrivateKey); pub != "" {
+					rSpec.PublicKey = pub
+					if updatedBytes, err := json.Marshal(rSpec); err == nil {
+						return string(updatedBytes)
+					}
+				}
+			}
+		}
+	}
+	return specStr
+}
+
 func GenerateTLSCert(c *gin.Context) {
 	certPath, keyPath, err := configgen.EnsureDefaultTLSCert()
 	if err != nil {
@@ -140,6 +174,7 @@ func CreateInbound(c *gin.Context) {
 	if specStr == "" || specStr == "null" {
 		specStr = "{}"
 	}
+	specStr = enrichInboundSpec(req.Protocol, specStr)
 
 	now := time.Now()
 	res, err := model.DB.Exec(
@@ -203,6 +238,7 @@ func UpdateInbound(c *gin.Context) {
 	if specStr == "" || specStr == "null" {
 		specStr = "{}"
 	}
+	specStr = enrichInboundSpec(req.Protocol, specStr)
 
 	now := time.Now()
 	_, err = model.DB.Exec(

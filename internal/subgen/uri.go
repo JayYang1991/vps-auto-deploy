@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 
+	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/node"
 	"vps-auto-deploy/internal/pkg/netutil"
@@ -204,7 +205,11 @@ func GenerateURIs(member *model.Member) ([]string, error) {
 			q.Set("security", "reality")
 			q.Set("sni", sni)
 			q.Set("fp", fp)
-			q.Set("pbk", spec.PublicKey)
+			pbk := spec.PublicKey
+			if pbk == "" && spec.PrivateKey != "" {
+				pbk = singbox.DeriveRealityPublicKey(spec.PrivateKey)
+			}
+			q.Set("pbk", pbk)
 			q.Set("sid", spec.ShortID)
 			q.Set("type", "tcp")
 

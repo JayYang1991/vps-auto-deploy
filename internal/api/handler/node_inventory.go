@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/node"
 	"vps-auto-deploy/internal/pkg/netutil"
@@ -234,6 +235,11 @@ func buildInventoryItem(ib model.Inbound, nodeName, serverHost string, member *m
 		item.Flow = flow
 		item.Fingerprint = fp
 
+		pbk := spec.PublicKey
+		if pbk == "" && spec.PrivateKey != "" {
+			pbk = singbox.DeriveRealityPublicKey(spec.PrivateKey)
+		}
+
 		// 生成 vless:// 链接
 		q := url.Values{}
 		q.Set("encryption", "none")
@@ -241,7 +247,7 @@ func buildInventoryItem(ib model.Inbound, nodeName, serverHost string, member *m
 		q.Set("security", "reality")
 		q.Set("sni", sni)
 		q.Set("fp", fp)
-		q.Set("pbk", spec.PublicKey)
+		q.Set("pbk", pbk)
 		q.Set("sid", spec.ShortID)
 		q.Set("type", "tcp")
 
@@ -261,7 +267,7 @@ func buildInventoryItem(ib model.Inbound, nodeName, serverHost string, member *m
   reality-opts:
     public-key: "%s"
     short-id: "%s"
-  client-fingerprint: "%s"`, displayName, serverHost, ib.Port, uuid, flow, sni, spec.PublicKey, spec.ShortID, fp)
+  client-fingerprint: "%s"`, displayName, serverHost, ib.Port, uuid, flow, sni, pbk, spec.ShortID, fp)
 
 	case "vless-ws":
 		item.ProtocolLabel = "VLESS WebSocket (Argo)"

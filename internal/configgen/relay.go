@@ -1,13 +1,12 @@
 package configgen
 
 import (
-	"crypto/ecdh"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"regexp"
 	"strings"
 
+	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/node"
 )
@@ -233,11 +232,7 @@ func BuildRelayOutbound(targetNode *model.Node, inbound *model.Inbound, tunnelDo
 
 		pubKey := spec.PublicKey
 		if pubKey == "" && spec.PrivateKey != "" {
-			if decoded, err := base64.RawURLEncoding.DecodeString(spec.PrivateKey); err == nil {
-				if priv, err := ecdh.X25519().NewPrivateKey(decoded); err == nil {
-					pubKey = base64.RawURLEncoding.EncodeToString(priv.PublicKey().Bytes())
-				}
-			}
+			pubKey = singbox.DeriveRealityPublicKey(spec.PrivateKey)
 		}
 
 		flow := spec.Flow
