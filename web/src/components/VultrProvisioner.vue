@@ -737,6 +737,7 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from
 import api, { getSecretPath } from '../api'
 import { useToast } from '../composables/useToast'
 import { useNodeContext } from '../composables/useNodeContext'
+import { getToken } from '../utils/auth'
 
 const emit = defineEmits<{
   (e: 'deployed', nodeId: number): void
@@ -1066,7 +1067,7 @@ function getLineClass(line: string) {
 // 订阅部署日志流
 function subscribeDeployLogs(taskId: string) {
   const secret = getSecretPath()
-  const token = localStorage.getItem('token') || ''
+  const token = getToken() || ''
   const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&token=${token}`
 
   if (eventSource) eventSource.close()

@@ -308,6 +308,7 @@ import { useRoute } from 'vue-router'
 import api, { getSecretPath } from '../api'
 import { useToast, copyToClipboard } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
+import { getToken } from '../utils/auth'
 
 interface ServiceStatus {
   name: string
@@ -418,7 +419,7 @@ async function startInstall(c: ServiceStatus) {
 
   // 建立 SSE 流接收安装日志
   const secret = getSecretPath()
-  const token = localStorage.getItem('token') || ''
+  const token = getToken() || ''
   const sseUrl = `/${secret}/api/components/${c.name}/install-logs?token=${token}`
 
   if (installModal.eventSource) {
@@ -533,7 +534,7 @@ function openLogs(unit: string) {
   logModal.show = true
 
   const secret = getSecretPath()
-  const token = localStorage.getItem('token') || ''
+  const token = getToken() || ''
   const activeNodeId = localStorage.getItem('active_node_id') || '1'
   let url = `/${secret}/api/system/logs?unit=${unit}&token=${token}`
   if (activeNodeId !== '1') {

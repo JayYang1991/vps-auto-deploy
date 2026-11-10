@@ -553,6 +553,35 @@ func ForceSyncSingboxConfig(cfgPath string) (*SyncStats, error) {
 	defer tx.Rollback()
 
 	// 1. 同步用户（members）
+	// 若磁盘配置包含有效用户且当前数据库仅有初始占位的 "Default Owner"，自动退役占位用户
+	hasDiskUsers := false
+	for _, ib := range raw.Inbounds {
+		if usersRaw, ok := ib["users"].([]interface{}); ok && len(usersRaw) > 0 {
+			for _, uItem := range usersRaw {
+				if uMap, okUM := uItem.(map[string]interface{}); okUM {
+					if uStr, _ := uMap["uuid"].(string); strings.TrimSpace(uStr) != "" {
+						hasDiskUsers = true
+						break
+					}
+				}
+			}
+		}
+		if hasDiskUsers {
+			break
+		}
+	}
+	if hasDiskUsers {
+		var memberCount int
+		_ = tx.QueryRow("SELECT COUNT(*) FROM members").Scan(&memberCount)
+		if memberCount == 1 {
+			var defaultOwnerID int64
+			err := tx.QueryRow("SELECT id FROM members WHERE name = 'Default Owner'").Scan(&defaultOwnerID)
+			if err == nil && defaultOwnerID > 0 {
+				_, _ = tx.Exec("DELETE FROM members WHERE id = ?", defaultOwnerID)
+			}
+		}
+	}
+
 	for _, ib := range raw.Inbounds {
 		usersRaw, ok := ib["users"].([]interface{})
 		if !ok {

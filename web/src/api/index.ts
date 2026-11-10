@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { getToken, clearToken, recordActivity } from '../utils/auth'
 
 // 从当前 URL 提取安全前缀
 export function getSecretPath(): string {
@@ -18,10 +19,13 @@ const api = axios.create({
 })
 
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token')
+  const token = getToken()
   if (token) {
     config.headers.Authorization = `Bearer ${token}`
   }
+
+  // 记录请求活跃
+  recordActivity()
 
   // 跨节点上下文透传：若当前选中的不是主控本机，注入 X-Target-Node-ID
   const activeNodeId = localStorage.getItem('active_node_id')
@@ -33,10 +37,13 @@ api.interceptors.request.use((config) => {
 })
 
 api.interceptors.response.use(
-  (res) => res,
+  (res) => {
+    recordActivity()
+    return res
+  },
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token')
+      clearToken('unauthorized')
       window.location.hash = '#/login'
     }
     return Promise.reject(error)

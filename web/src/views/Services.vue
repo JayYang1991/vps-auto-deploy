@@ -100,7 +100,7 @@
 
     <!-- 成员与订阅规则组件专属配置区 -->
     <div v-else-if="activeComponent === 'subscriptions'" class="component-workspace">
-      <div class="tab-content-area">
+      <div class="tab-content-area" :key="subKey">
         <keep-alive>
           <Subscriptions />
         </keep-alive>
@@ -347,6 +347,7 @@ async function loadFromDisk() {
     }
     // 强制刷新子组件数据
     subKey.value++
+    window.dispatchEvent(new CustomEvent('node-context-changed'))
   } catch (err: any) {
     toast.error('从磁盘同步失败: ' + (err.response?.data?.error || err.message))
   } finally {

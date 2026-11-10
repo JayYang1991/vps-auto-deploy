@@ -3,6 +3,8 @@ package handler
 import (
 	"crypto/subtle"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
@@ -11,8 +13,9 @@ import (
 )
 
 type LoginRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	Username   string `json:"username" binding:"required"`
+	Password   string `json:"password" binding:"required"`
+	RememberMe bool   `json:"remember_me"`
 }
 
 type UpdatePasswordRequest struct {
@@ -21,8 +24,9 @@ type UpdatePasswordRequest struct {
 }
 
 type UpdateSettingsRequest struct {
-	SecretPath string `json:"secret_path"`
-	PublicIP   string `json:"public_ip"`
+	SecretPath         string `json:"secret_path"`
+	PublicIP           string `json:"public_ip"`
+	SessionIdleTimeout *int   `json:"session_idle_timeout"`
 }
 
 func Login(c *gin.Context) {
@@ -50,15 +54,22 @@ func Login(c *gin.Context) {
 	// 认证通过，重置该 IP 失败尝试记录
 	middleware.ResetLoginAttempts(c.ClientIP())
 
-	token, err := middleware.GenerateJWT(req.Username)
+	// 根据是否勾选“记住我”决定 JWT 签发生命周期 (未勾选 24 小时，勾选 7 天)
+	duration := 24 * time.Hour
+	if req.RememberMe {
+		duration = 7 * 24 * time.Hour
+	}
+
+	token, err := middleware.GenerateJWTWithDuration(req.Username, duration)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate token"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"token":    token,
-		"username": req.Username,
+		"token":       token,
+		"username":    req.Username,
+		"remember_me": req.RememberMe,
 	})
 }
 
@@ -88,9 +99,17 @@ func UpdatePassword(c *gin.Context) {
 func GetSettings(c *gin.Context) {
 	secretPath, _ := model.GetSetting("secret_path")
 	publicIP, _ := model.GetSetting("public_ip")
+	idleTimeoutStr, err := model.GetSetting("session_idle_timeout")
+	idleTimeout := 30 // 默认 30 分钟无操作自动退出
+	if err == nil && idleTimeoutStr != "" {
+		if v, err := strconv.Atoi(idleTimeoutStr); err == nil {
+			idleTimeout = v
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"secret_path": secretPath,
-		"public_ip":   publicIP,
+		"secret_path":          secretPath,
+		"public_ip":            publicIP,
+		"session_idle_timeout": idleTimeout,
 	})
 }
 
@@ -107,7 +126,19 @@ func UpdateSettings(c *gin.Context) {
 	if req.PublicIP != "" {
 		_ = model.SetSetting("public_ip", req.PublicIP)
 	}
+	if req.SessionIdleTimeout != nil {
+		if *req.SessionIdleTimeout >= 0 {
+			_ = model.SetSetting("session_idle_timeout", strconv.Itoa(*req.SessionIdleTimeout))
+		}
+	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "settings saved"})
+}
+
+// RevokeAllSessions 记录全局会话失效时刻，强制注销所有设备上已签发的 Token
+func RevokeAllSessions(c *gin.Context) {
+	epoch := time.Now().Unix()
+	_ = model.SetSetting("auth_min_issued_at", strconv.FormatInt(epoch, 10))
+	c.JSON(http.StatusOK, gin.H{"message": "所有会话已强制注销，请重新登录"})
 }
 

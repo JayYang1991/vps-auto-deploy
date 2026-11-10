@@ -42,7 +42,7 @@ func SyncMembersToNode(node *model.Node, members []model.Member) error {
 		scheme = "https"
 	}
 
-	url := fmt.Sprintf("%s://%s:%d/%s/api/members/sync",
+	url := fmt.Sprintf("%s://%s:%d/%s/api/members/sync?mode=replace",
 		scheme,
 		node.Host,
 		node.PanelPort,

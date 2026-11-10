@@ -884,6 +884,7 @@ import api, { getSecretPath } from '../api'
 import { useNodeContext, NodeItem } from '../composables/useNodeContext'
 import { useToast, copyToClipboard } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
+import { getToken } from '../utils/auth'
 import VultrProvisioner from './VultrProvisioner.vue'
 
 const props = defineProps<{
@@ -1182,7 +1183,7 @@ async function startDeploy() {
 
     // 建立 SSE 日志连接
     const secret = getSecretPath()
-    const token = localStorage.getItem('token') || ''
+    const token = getToken() || ''
     const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&token=${token}`
 
     if (eventSource) {
@@ -1573,7 +1574,7 @@ async function startUpgrade() {
     const taskId = res.data.task_id
 
     const secret = getSecretPath()
-    const token = localStorage.getItem('token') || ''
+    const token = getToken() || ''
     const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&token=${token}`
 
     if (upgradeEventSource) {

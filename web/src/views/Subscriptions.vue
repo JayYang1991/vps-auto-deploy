@@ -1295,7 +1295,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, shallowRef, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { ref, shallowRef, reactive, computed, onMounted, onUnmounted, onActivated, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import QrcodeVue from 'qrcode.vue'
 import api from '../api'
@@ -2156,6 +2156,10 @@ onMounted(async () => {
     await loadInventory()
   }
   window.addEventListener('node-context-changed', loadMembers)
+})
+
+onActivated(async () => {
+  await loadMembers()
 })
 
 onUnmounted(() => {

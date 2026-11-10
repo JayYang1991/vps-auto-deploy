@@ -121,12 +121,15 @@ import ConfirmModal from './components/ConfirmModal.vue'
 import NodeSwitcher from './components/NodeSwitcher.vue'
 import ClusterModal from './components/ClusterModal.vue'
 import { useConfirm } from './composables/useConfirm'
+import { useToast } from './composables/useToast'
 import { useNodeContext } from './composables/useNodeContext'
+import { initSessionSecurity, onAuthLogout, clearToken, updateSessionIdleTimeout, getToken } from './utils/auth'
 import api from './api'
 
 const route = useRoute()
 const router = useRouter()
 const { showConfirm } = useConfirm()
+const { toast } = useToast()
 const { activeNodeId } = useNodeContext()
 
 const appVersion = ref('v1.0.1')
@@ -162,6 +165,29 @@ function openClusterModal(tab: 'nodes' | 'cloud' | 'deploy' | 'import' = 'nodes'
 }
 
 onMounted(() => {
+  // 启动全局会话安全防护 (空闲超时守卫与多标签页同态监听)
+  initSessionSecurity()
+
+  onAuthLogout((reason) => {
+    if (reason === 'idle_timeout') {
+      toast.warning('由于长时间未操作，会话已安全退出，请重新登录')
+    } else if (reason === 'remote_logout') {
+      toast.info('会话已在其他窗口退出')
+    }
+    if (route.path !== '/login') {
+      router.push('/login')
+    }
+  })
+
+  // 若已登录，同步加载服务端的空闲超时配置
+  if (getToken()) {
+    api.get('/settings').then(res => {
+      if (res.data && typeof res.data.session_idle_timeout === 'number') {
+        updateSessionIdleTimeout(res.data.session_idle_timeout)
+      }
+    }).catch(() => {})
+  }
+
   api.get('/system/overview').then(res => {
     if (res.data?.version) appVersion.value = res.data.version
   }).catch(() => {})
@@ -184,7 +210,7 @@ async function handleLogout() {
   })
   if (!confirmed) return
 
-  localStorage.removeItem('token')
+  clearToken('manual_logout')
   router.push('/login')
 }
 </script>

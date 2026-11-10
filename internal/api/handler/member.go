@@ -29,19 +29,13 @@ type MemberUpdateRequest struct {
 }
 
 func ListMembers(c *gin.Context) {
-	rows, err := model.DB.Query("SELECT id, name, uuid, sub_token, enabled, created_at, updated_at FROM members ORDER BY id ASC")
+	list, err := model.ListMembers()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-	defer rows.Close()
-
-	var list []model.Member
-	for rows.Next() {
-		var m model.Member
-		if err := rows.Scan(&m.ID, &m.Name, &m.UUID, &m.SubToken, &m.Enabled, &m.CreatedAt, &m.UpdatedAt); err == nil {
-			list = append(list, m)
-		}
+	if list == nil {
+		list = []model.Member{}
 	}
 	c.JSON(http.StatusOK, list)
 }
@@ -222,7 +216,7 @@ func DeleteMember(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "member deleted"})
 }
 
-// SyncMembers 被纳管节点接收来自主控端的成员身份无损增量同步（保留本地原有用户）
+// SyncMembers 被纳管节点接收来自主控端的成员身份同步（支持 mode=replace 全量原子替换或 mode=merge 增量合并）
 func SyncMembers(c *gin.Context) {
 	var members []model.Member
 	if err := c.ShouldBindJSON(&members); err != nil {
@@ -230,8 +224,16 @@ func SyncMembers(c *gin.Context) {
 		return
 	}
 
-	if err := model.SyncMembers(members); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "写入本地成员数据失败: " + err.Error()})
+	mode := c.DefaultQuery("mode", "merge")
+	var syncErr error
+	if mode == "replace" {
+		syncErr = model.ReplaceMembers(members)
+	} else {
+		syncErr = model.SyncMembers(members)
+	}
+
+	if syncErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "写入本地成员数据失败: " + syncErr.Error()})
 		return
 	}
 

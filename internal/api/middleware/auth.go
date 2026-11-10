@@ -3,6 +3,7 @@ package middleware
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,8 +17,13 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
-// GenerateJWT 生成 JWT Token
+// GenerateJWT 生成默认 7 天有效期的 JWT Token (保留用于向后兼容)
 func GenerateJWT(username string) (string, error) {
+	return GenerateJWTWithDuration(username, 7*24*time.Hour)
+}
+
+// GenerateJWTWithDuration 生成指定有效期的 JWT Token
+func GenerateJWTWithDuration(username string, duration time.Duration) (string, error) {
 	secret, err := model.GetSetting("jwt_secret")
 	if err != nil {
 		return "", err
@@ -26,7 +32,7 @@ func GenerateJWT(username string) (string, error) {
 	claims := Claims{
 		Username: username,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(7 * 24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(duration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
@@ -92,6 +98,16 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 		if !ok {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token claims"})
 			return
+		}
+
+		// 会话撤销阻断检查：若管理员执行了“强制注销所有会话”，废止在撤销时刻之前签发的所有 Token
+		if minIssuedAtStr, err := model.GetSetting("auth_min_issued_at"); err == nil && minIssuedAtStr != "" {
+			if minEpoch, err := strconv.ParseInt(minIssuedAtStr, 10, 64); err == nil {
+				if claims.IssuedAt != nil && claims.IssuedAt.Unix() < minEpoch {
+					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "session revoked, please re-login"})
+					return
+				}
+			}
 		}
 
 		c.Set("username", claims.Username)

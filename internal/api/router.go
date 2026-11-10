@@ -59,6 +59,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 
 			// 设置与密码
 			api.POST("/auth/password", handler.UpdatePassword)
+			api.POST("/auth/revoke-all-sessions", handler.RevokeAllSessions)
 			api.GET("/settings", handler.GetSettings)
 			api.POST("/settings", handler.UpdateSettings)
 

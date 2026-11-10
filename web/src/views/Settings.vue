@@ -264,7 +264,34 @@
           </p>
         </div>
 
-        <button type="submit" class="btn btn-primary" style="align-self: flex-start;">保存系统设置</button>
+        <div>
+          <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.35rem;">
+            会话空闲自动登出 (Idle Timeout)
+          </label>
+          <select v-model.number="settings.session_idle_timeout" class="input" style="max-width: 320px;">
+            <option :value="15">15 分钟无操作自动退出</option>
+            <option :value="30">30 分钟无操作自动退出 (推荐)</option>
+            <option :value="60">1 小时无操作自动退出</option>
+            <option :value="240">4 小时无操作自动退出</option>
+            <option :value="0">关闭自动登出 (仅依赖长周期 Token，不推荐)</option>
+          </select>
+          <p style="color: #64748b; font-size: 0.75rem; margin-top: 0.25rem;">
+            当在指定时间内未检测到键盘、鼠标或 API 请求交互时，系统将自动安全注销并返回登录页，防范工位脱离风险。
+          </p>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin-top: 0.5rem;">
+          <button type="submit" class="btn btn-primary">保存系统设置</button>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            @click="revokeAllSessions"
+            style="color: #f87171; border-color: rgba(239, 68, 68, 0.4);"
+            title="立即废止所有设备上已签发的有效访问凭据"
+          >
+            ⚡ 强制注销所有设备会话
+          </button>
+        </div>
       </form>
     </div>
 
@@ -320,6 +347,7 @@ import { ref, reactive, onMounted } from 'vue'
 import api from '../api'
 import { useToast, copyToClipboard } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
+import { clearToken, updateSessionIdleTimeout } from '../utils/auth'
 
 const { toast } = useToast()
 const { showConfirm } = useConfirm()
@@ -352,6 +380,7 @@ const upgradingNodes = reactive<Record<number, boolean>>({})
 const settings = reactive({
   secret_path: '',
   public_ip: '',
+  session_idle_timeout: 30,
 })
 
 const passForm = reactive({
@@ -395,6 +424,10 @@ async function loadSettings() {
     const res = await api.get('/settings')
     settings.secret_path = res.data.secret_path
     settings.public_ip = res.data.public_ip
+    if (typeof res.data.session_idle_timeout === 'number') {
+      settings.session_idle_timeout = res.data.session_idle_timeout
+      updateSessionIdleTimeout(res.data.session_idle_timeout)
+    }
   } catch (err: any) {
     toast.error('加载系统设置失败: ' + (err.response?.data?.error || err.message))
   }
@@ -575,10 +608,36 @@ async function batchUpgradeRemoteNodes(pkg: any) {
 
 async function saveSettings() {
   try {
-    await api.post('/settings', settings)
+    await api.post('/settings', {
+      secret_path: settings.secret_path,
+      public_ip: settings.public_ip,
+      session_idle_timeout: Number(settings.session_idle_timeout),
+    })
+    updateSessionIdleTimeout(Number(settings.session_idle_timeout))
     toast.success('系统设置已更新！如果修改了安全路径，请使用新路径重新访问。', 5000)
   } catch (err: any) {
     toast.error('保存失败: ' + (err.response?.data?.error || err.message))
+  }
+}
+
+async function revokeAllSessions() {
+  const ok = await showConfirm({
+    title: '强制注销所有设备会话',
+    message: '确定要注销所有设备上的登录状态吗？此操作将立即废止所有已签发的访问凭据，所有已登录的浏览器均需重新输入密码登录。',
+    confirmText: '立即强制注销',
+    danger: true,
+  })
+  if (!ok) return
+
+  try {
+    await api.post('/auth/revoke-all-sessions')
+    toast.success('所有会话已强制注销，请重新登录')
+    clearToken('manual_revoke')
+    setTimeout(() => {
+      window.location.hash = '#/login'
+    }, 1000)
+  } catch (err: any) {
+    toast.error('注销会话失败: ' + (err.response?.data?.error || err.message))
   }
 }
 
@@ -595,7 +654,7 @@ async function updatePassword() {
     })
     toast.success('密码修改成功，请使用新密码重新登录！', 3000)
     setTimeout(() => {
-      localStorage.removeItem('token')
+      clearToken('password_changed')
       window.location.hash = '#/login'
     }, 1200)
   } catch (err: any) {

@@ -4,6 +4,7 @@ import Components from '../views/Components.vue'
 import Services from '../views/Services.vue'
 import Settings from '../views/Settings.vue'
 import Login from '../views/Login.vue'
+import { getToken } from '../utils/auth'
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
@@ -22,7 +23,7 @@ const router = createRouter({
 })
 
 router.beforeEach((to, from, next) => {
-  const token = localStorage.getItem('token')
+  const token = getToken()
   if (!to.meta.public && !token) {
     next('/login')
   } else if (to.path === '/login' && token) {

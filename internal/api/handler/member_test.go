@@ -15,6 +15,20 @@ import (
 	"vps-auto-deploy/internal/node"
 )
 
+func TestListMembersHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupTestDB(t)
+
+	r := gin.New()
+	r.GET("/api/members", ListMembers)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/members", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	t.Logf("Status: %d, Body: %s", w.Code, w.Body.String())
+}
+
 func TestSyncMembersHandler(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	setupTestDB(t)
@@ -86,6 +100,53 @@ func TestSyncMembersHandler(t *testing.T) {
 	}
 	if !foundA || !foundB {
 		t.Fatalf("synced master members missing or mismatched: %+v", members)
+	}
+}
+
+func TestSyncMembersHandlerReplaceMode(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupTestDB(t)
+
+	now := time.Now()
+	r := gin.New()
+	r.POST("/api/members/sync", SyncMembers)
+
+	// 初始默认包含 Default Owner
+	// 构造 replace 列表，不包含 Default Owner
+	syncList := []model.Member{
+		{
+			ID:        100,
+			Name:      "Clean-Master-User",
+			UUID:      "cccccccc-cccc-cccc-cccc-cccccccccccc",
+			SubToken:  "token-clean",
+			Enabled:   true,
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+	}
+
+	body, _ := json.Marshal(syncList)
+	req := httptest.NewRequest(http.MethodPost, "/api/members/sync?mode=replace", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	members, err := model.ListMembers()
+	if err != nil {
+		t.Fatalf("ListMembers failed: %v", err)
+	}
+
+	// 在 replace 模式下，本地残留的 Default Owner 必须被彻底清除，仅保留主控推过来的 1 个成员
+	if len(members) != 1 {
+		t.Fatalf("expected exactly 1 member after replace sync, got %d: %+v", len(members), members)
+	}
+	if members[0].Name != "Clean-Master-User" {
+		t.Fatalf("expected Clean-Master-User, got %s", members[0].Name)
 	}
 }
 
