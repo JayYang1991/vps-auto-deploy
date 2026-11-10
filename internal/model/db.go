@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -286,6 +287,60 @@ func initDefaults() error {
 }
 
 // GetNode 获取单个节点信息
+// ParseTime 安全解析 SQLite 中存储的各类时间形态 (time.Time, string, []byte, int64)
+func ParseTime(val any) time.Time {
+	if val == nil {
+		return time.Now()
+	}
+	switch v := val.(type) {
+	case time.Time:
+		return v
+	case string:
+		v = strings.TrimSpace(v)
+		if v == "" {
+			return time.Now()
+		}
+		layouts := []string{
+			time.RFC3339Nano,
+			time.RFC3339,
+			"2006-01-02 15:04:05.999999999-07:00",
+			"2006-01-02 15:04:05.999999999",
+			"2006-01-02 15:04:05-07:00",
+			"2006-01-02 15:04:05",
+			"2006-01-02T15:04:05",
+			"2006-01-02",
+			time.ANSIC,
+			time.UnixDate,
+			time.RubyDate,
+			time.RFC822,
+			time.RFC822Z,
+			time.RFC850,
+			time.RFC1123,
+			time.RFC1123Z,
+		}
+		for _, layout := range layouts {
+			if t, err := time.Parse(layout, v); err == nil {
+				return t
+			}
+		}
+		if len(v) >= 19 {
+			if t, err := time.Parse("2006-01-02 15:04:05", v[:19]); err == nil {
+				return t
+			}
+			if t, err := time.Parse("2006-01-02T15:04:05", v[:19]); err == nil {
+				return t
+			}
+		}
+		return time.Now()
+	case []byte:
+		return ParseTime(string(v))
+	case int64:
+		return time.Unix(v, 0)
+	default:
+		return time.Now()
+	}
+}
+
 func GetNode(id int64) (*Node, error) {
 	row := DB.QueryRow(
 		"SELECT id, name, sub_prefix, host, ssh_port, panel_port, secret_path, username, password_encrypted, api_token, is_master, use_tls, cert_fingerprint, ssh_host_key, cloud_provider, cloud_instance_id, region, plan, status, os_info, latency_ms, created_at, updated_at FROM nodes WHERE id = ?",
@@ -293,18 +348,21 @@ func GetNode(id int64) (*Node, error) {
 	)
 	var n Node
 	var isMasterInt, useTLSInt int
+	var createdAtRaw, updatedAtRaw any
 	err := row.Scan(
 		&n.ID, &n.Name, &n.SubPrefix, &n.Host, &n.SSHPort, &n.PanelPort, &n.SecretPath,
 		&n.Username, &n.PasswordEncrypted, &n.APIToken, &isMasterInt,
 		&useTLSInt, &n.CertFingerprint, &n.SSHHostKey,
 		&n.CloudProvider, &n.CloudInstanceID, &n.Region, &n.Plan,
-		&n.Status, &n.OSInfo, &n.LatencyMs, &n.CreatedAt, &n.UpdatedAt,
+		&n.Status, &n.OSInfo, &n.LatencyMs, &createdAtRaw, &updatedAtRaw,
 	)
 	if err != nil {
 		return nil, err
 	}
 	n.IsMaster = isMasterInt == 1
 	n.UseTLS = useTLSInt == 1
+	n.CreatedAt = ParseTime(createdAtRaw)
+	n.UpdatedAt = ParseTime(updatedAtRaw)
 	return &n, nil
 }
 
@@ -322,17 +380,20 @@ func ListNodes() ([]Node, error) {
 	for rows.Next() {
 		var n Node
 		var isMasterInt, useTLSInt int
+		var createdAtRaw, updatedAtRaw any
 		if err := rows.Scan(
 			&n.ID, &n.Name, &n.SubPrefix, &n.Host, &n.SSHPort, &n.PanelPort, &n.SecretPath,
 			&n.Username, &n.PasswordEncrypted, &n.APIToken, &isMasterInt,
 			&useTLSInt, &n.CertFingerprint, &n.SSHHostKey,
 			&n.CloudProvider, &n.CloudInstanceID, &n.Region, &n.Plan,
-			&n.Status, &n.OSInfo, &n.LatencyMs, &n.CreatedAt, &n.UpdatedAt,
+			&n.Status, &n.OSInfo, &n.LatencyMs, &createdAtRaw, &updatedAtRaw,
 		); err != nil {
 			return nil, err
 		}
 		n.IsMaster = isMasterInt == 1
 		n.UseTLS = useTLSInt == 1
+		n.CreatedAt = ParseTime(createdAtRaw)
+		n.UpdatedAt = ParseTime(updatedAtRaw)
 		nodes = append(nodes, n)
 	}
 	return nodes, nil
@@ -455,10 +516,13 @@ func ListMembers() ([]Member, error) {
 	for rows.Next() {
 		var m Member
 		var enabledInt int
-		if err := rows.Scan(&m.ID, &m.Name, &m.UUID, &m.SubToken, &enabledInt, &m.CreatedAt, &m.UpdatedAt); err != nil {
+		var createdAtRaw, updatedAtRaw any
+		if err := rows.Scan(&m.ID, &m.Name, &m.UUID, &m.SubToken, &enabledInt, &createdAtRaw, &updatedAtRaw); err != nil {
 			return nil, err
 		}
 		m.Enabled = enabledInt == 1
+		m.CreatedAt = ParseTime(createdAtRaw)
+		m.UpdatedAt = ParseTime(updatedAtRaw)
 		list = append(list, m)
 	}
 	return list, nil
@@ -548,12 +612,13 @@ func ListRouteRules() ([]RouteRule, error) {
 	for rows.Next() {
 		var r RouteRule
 		var ipPrivateInt, invertInt, enabledInt int
+		var createdAtRaw, updatedAtRaw any
 		err := rows.Scan(
 			&r.ID, &r.Name, &r.Action, &r.OutboundTag, &r.InboundTags,
 			&r.Domains, &r.DomainSuffix, &r.DomainKeyword, &r.IPCIDR,
 			&ipPrivateInt, &r.Port, &r.PortRange, &r.Protocol, &r.RuleSet,
 			&r.RuleSetURLs, &invertInt, &r.Priority, &enabledInt,
-			&r.CreatedAt, &r.UpdatedAt,
+			&createdAtRaw, &updatedAtRaw,
 		)
 		if err != nil {
 			return nil, err
@@ -561,6 +626,8 @@ func ListRouteRules() ([]RouteRule, error) {
 		r.IPIsPrivate = ipPrivateInt == 1
 		r.Invert = invertInt == 1
 		r.Enabled = enabledInt == 1
+		r.CreatedAt = ParseTime(createdAtRaw)
+		r.UpdatedAt = ParseTime(updatedAtRaw)
 		list = append(list, r)
 	}
 	return list, nil
@@ -577,12 +644,13 @@ func GetRouteRule(id int64) (*RouteRule, error) {
 
 	var r RouteRule
 	var ipPrivateInt, invertInt, enabledInt int
+	var createdAtRaw, updatedAtRaw any
 	err := row.Scan(
 		&r.ID, &r.Name, &r.Action, &r.OutboundTag, &r.InboundTags,
 		&r.Domains, &r.DomainSuffix, &r.DomainKeyword, &r.IPCIDR,
 		&ipPrivateInt, &r.Port, &r.PortRange, &r.Protocol, &r.RuleSet,
 		&r.RuleSetURLs, &invertInt, &r.Priority, &enabledInt,
-		&r.CreatedAt, &r.UpdatedAt,
+		&createdAtRaw, &updatedAtRaw,
 	)
 	if err != nil {
 		return nil, err
@@ -590,6 +658,8 @@ func GetRouteRule(id int64) (*RouteRule, error) {
 	r.IPIsPrivate = ipPrivateInt == 1
 	r.Invert = invertInt == 1
 	r.Enabled = enabledInt == 1
+	r.CreatedAt = ParseTime(createdAtRaw)
+	r.UpdatedAt = ParseTime(updatedAtRaw)
 	return &r, nil
 }
 

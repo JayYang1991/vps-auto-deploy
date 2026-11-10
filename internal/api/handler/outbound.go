@@ -39,9 +39,18 @@ func ListOutbounds(c *gin.Context) {
 	var list []model.Outbound
 	for rows.Next() {
 		var ob model.Outbound
-		if err := rows.Scan(&ob.ID, &ob.Tag, &ob.Type, &ob.Server, &ob.ServerPort, &ob.SpecJSON, &ob.Priority, &ob.Enabled, &ob.IsSystem, &ob.CreatedAt, &ob.UpdatedAt); err == nil {
+		var enabledInt, isSystemInt int
+		var createdAtRaw, updatedAtRaw any
+		if err := rows.Scan(&ob.ID, &ob.Tag, &ob.Type, &ob.Server, &ob.ServerPort, &ob.SpecJSON, &ob.Priority, &enabledInt, &isSystemInt, &createdAtRaw, &updatedAtRaw); err == nil {
+			ob.Enabled = enabledInt == 1
+			ob.IsSystem = isSystemInt == 1
+			ob.CreatedAt = model.ParseTime(createdAtRaw)
+			ob.UpdatedAt = model.ParseTime(updatedAtRaw)
 			list = append(list, ob)
 		}
+	}
+	if list == nil {
+		list = []model.Outbound{}
 	}
 	c.JSON(http.StatusOK, list)
 }
@@ -56,12 +65,18 @@ func GetOutbound(c *gin.Context) {
 	}
 
 	var ob model.Outbound
+	var enabledInt, isSystemInt int
+	var createdAtRaw, updatedAtRaw any
 	err = model.DB.QueryRow("SELECT id, tag, type, server, server_port, spec_json, priority, enabled, is_system, created_at, updated_at FROM outbounds WHERE id = ?", id).
-		Scan(&ob.ID, &ob.Tag, &ob.Type, &ob.Server, &ob.ServerPort, &ob.SpecJSON, &ob.Priority, &ob.Enabled, &ob.IsSystem, &ob.CreatedAt, &ob.UpdatedAt)
+		Scan(&ob.ID, &ob.Tag, &ob.Type, &ob.Server, &ob.ServerPort, &ob.SpecJSON, &ob.Priority, &enabledInt, &isSystemInt, &createdAtRaw, &updatedAtRaw)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "outbound not found"})
 		return
 	}
+	ob.Enabled = enabledInt == 1
+	ob.IsSystem = isSystemInt == 1
+	ob.CreatedAt = model.ParseTime(createdAtRaw)
+	ob.UpdatedAt = model.ParseTime(updatedAtRaw)
 	c.JSON(http.StatusOK, ob)
 }
 
@@ -126,12 +141,18 @@ func UpdateOutbound(c *gin.Context) {
 
 	// 检查并备份当前出站记录
 	var oldOb model.Outbound
+	var oldEnabledInt, oldIsSystemInt int
+	var oldCreatedAtRaw, oldUpdatedAtRaw any
 	err = model.DB.QueryRow("SELECT id, tag, type, server, server_port, spec_json, priority, enabled, is_system, created_at, updated_at FROM outbounds WHERE id = ?", id).
-		Scan(&oldOb.ID, &oldOb.Tag, &oldOb.Type, &oldOb.Server, &oldOb.ServerPort, &oldOb.SpecJSON, &oldOb.Priority, &oldOb.Enabled, &oldOb.IsSystem, &oldOb.CreatedAt, &oldOb.UpdatedAt)
+		Scan(&oldOb.ID, &oldOb.Tag, &oldOb.Type, &oldOb.Server, &oldOb.ServerPort, &oldOb.SpecJSON, &oldOb.Priority, &oldEnabledInt, &oldIsSystemInt, &oldCreatedAtRaw, &oldUpdatedAtRaw)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "outbound not found"})
 		return
 	}
+	oldOb.Enabled = oldEnabledInt == 1
+	oldOb.IsSystem = oldIsSystemInt == 1
+	oldOb.CreatedAt = model.ParseTime(oldCreatedAtRaw)
+	oldOb.UpdatedAt = model.ParseTime(oldUpdatedAtRaw)
 
 	specStr := string(req.Spec)
 	if specStr == "" || specStr == "null" {
@@ -223,14 +244,20 @@ func DeleteOutbound(c *gin.Context) {
 	}
 
 	var oldOb model.Outbound
+	var oldEnabledInt, oldIsSystemInt int
+	var oldCreatedAtRaw, oldUpdatedAtRaw any
 	err = model.DB.QueryRow("SELECT id, tag, type, server, server_port, spec_json, priority, enabled, is_system, created_at, updated_at FROM outbounds WHERE id = ?", id).
-		Scan(&oldOb.ID, &oldOb.Tag, &oldOb.Type, &oldOb.Server, &oldOb.ServerPort, &oldOb.SpecJSON, &oldOb.Priority, &oldOb.Enabled, &oldOb.IsSystem, &oldOb.CreatedAt, &oldOb.UpdatedAt)
+		Scan(&oldOb.ID, &oldOb.Tag, &oldOb.Type, &oldOb.Server, &oldOb.ServerPort, &oldOb.SpecJSON, &oldOb.Priority, &oldEnabledInt, &oldIsSystemInt, &oldCreatedAtRaw, &oldUpdatedAtRaw)
 	if err != nil {
 		// 幂等性保障：若该出站规则已被删除或已不存在，确保触发一次配置对齐并直接返回成功
 		_ = configgen.ApplyAndReload(singbox.GetConfigPath())
 		c.JSON(http.StatusOK, gin.H{"message": "outbound already deleted"})
 		return
 	}
+	oldOb.Enabled = oldEnabledInt == 1
+	oldOb.IsSystem = oldIsSystemInt == 1
+	oldOb.CreatedAt = model.ParseTime(oldCreatedAtRaw)
+	oldOb.UpdatedAt = model.ParseTime(oldUpdatedAtRaw)
 	if oldOb.IsSystem {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "系统核心预置出站规则不允许删除"})
 		return

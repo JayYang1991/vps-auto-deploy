@@ -35,9 +35,17 @@ func ListInbounds(c *gin.Context) {
 	var list []model.Inbound
 	for rows.Next() {
 		var ib model.Inbound
-		if err := rows.Scan(&ib.ID, &ib.Tag, &ib.Protocol, &ib.Listen, &ib.Port, &ib.SpecJSON, &ib.Enabled, &ib.CreatedAt, &ib.UpdatedAt); err == nil {
+		var enabledInt int
+		var createdAtRaw, updatedAtRaw any
+		if err := rows.Scan(&ib.ID, &ib.Tag, &ib.Protocol, &ib.Listen, &ib.Port, &ib.SpecJSON, &enabledInt, &createdAtRaw, &updatedAtRaw); err == nil {
+			ib.Enabled = enabledInt == 1
+			ib.CreatedAt = model.ParseTime(createdAtRaw)
+			ib.UpdatedAt = model.ParseTime(updatedAtRaw)
 			list = append(list, ib)
 		}
+	}
+	if list == nil {
+		list = []model.Inbound{}
 	}
 	c.JSON(http.StatusOK, list)
 }
@@ -51,12 +59,17 @@ func GetInbound(c *gin.Context) {
 	}
 
 	var ib model.Inbound
+	var enabledInt int
+	var createdAtRaw, updatedAtRaw any
 	err = model.DB.QueryRow("SELECT id, tag, protocol, listen, port, spec_json, enabled, created_at, updated_at FROM inbounds WHERE id = ?", id).
-		Scan(&ib.ID, &ib.Tag, &ib.Protocol, &ib.Listen, &ib.Port, &ib.SpecJSON, &ib.Enabled, &ib.CreatedAt, &ib.UpdatedAt)
+		Scan(&ib.ID, &ib.Tag, &ib.Protocol, &ib.Listen, &ib.Port, &ib.SpecJSON, &enabledInt, &createdAtRaw, &updatedAtRaw)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "inbound not found"})
 		return
 	}
+	ib.Enabled = enabledInt == 1
+	ib.CreatedAt = model.ParseTime(createdAtRaw)
+	ib.UpdatedAt = model.ParseTime(updatedAtRaw)
 
 	c.JSON(http.StatusOK, ib)
 }
@@ -218,12 +231,17 @@ func UpdateInbound(c *gin.Context) {
 	}
 
 	var oldIb model.Inbound
+	var oldEnabledInt int
+	var oldCreatedAtRaw, oldUpdatedAtRaw any
 	err = model.DB.QueryRow("SELECT id, tag, protocol, listen, port, spec_json, enabled, created_at, updated_at FROM inbounds WHERE id = ?", id).
-		Scan(&oldIb.ID, &oldIb.Tag, &oldIb.Protocol, &oldIb.Listen, &oldIb.Port, &oldIb.SpecJSON, &oldIb.Enabled, &oldIb.CreatedAt, &oldIb.UpdatedAt)
+		Scan(&oldIb.ID, &oldIb.Tag, &oldIb.Protocol, &oldIb.Listen, &oldIb.Port, &oldIb.SpecJSON, &oldEnabledInt, &oldCreatedAtRaw, &oldUpdatedAtRaw)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "inbound not found"})
 		return
 	}
+	oldIb.Enabled = oldEnabledInt == 1
+	oldIb.CreatedAt = model.ParseTime(oldCreatedAtRaw)
+	oldIb.UpdatedAt = model.ParseTime(oldUpdatedAtRaw)
 
 	listen := req.Listen
 	if listen == "" {
@@ -273,14 +291,19 @@ func DeleteInbound(c *gin.Context) {
 	}
 
 	var oldIb model.Inbound
+	var oldEnabledInt int
+	var oldCreatedAtRaw, oldUpdatedAtRaw any
 	err = model.DB.QueryRow("SELECT id, tag, protocol, listen, port, spec_json, enabled, created_at, updated_at FROM inbounds WHERE id = ?", id).
-		Scan(&oldIb.ID, &oldIb.Tag, &oldIb.Protocol, &oldIb.Listen, &oldIb.Port, &oldIb.SpecJSON, &oldIb.Enabled, &oldIb.CreatedAt, &oldIb.UpdatedAt)
+		Scan(&oldIb.ID, &oldIb.Tag, &oldIb.Protocol, &oldIb.Listen, &oldIb.Port, &oldIb.SpecJSON, &oldEnabledInt, &oldCreatedAtRaw, &oldUpdatedAtRaw)
 	if err != nil {
 		// 幂等性保障：若该入站已被删除或已不存在，确保触发一次配置对齐并直接返回成功
 		_ = configgen.ApplyAndReload(singbox.GetConfigPath())
 		c.JSON(http.StatusOK, gin.H{"message": "inbound already deleted"})
 		return
 	}
+	oldIb.Enabled = oldEnabledInt == 1
+	oldIb.CreatedAt = model.ParseTime(oldCreatedAtRaw)
+	oldIb.UpdatedAt = model.ParseTime(oldUpdatedAtRaw)
 
 	_, err = model.DB.Exec("DELETE FROM inbounds WHERE id = ?", id)
 	if err != nil {

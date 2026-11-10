@@ -121,12 +121,14 @@ func UpdateMember(c *gin.Context) {
 	}
 
 	var existing model.Member
+	var enabledInt int
 	err = model.DB.QueryRow("SELECT id, name, uuid, enabled FROM members WHERE id = ?", id).
-		Scan(&existing.ID, &existing.Name, &existing.UUID, &existing.Enabled)
+		Scan(&existing.ID, &existing.Name, &existing.UUID, &enabledInt)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "member not found"})
 		return
 	}
+	existing.Enabled = enabledInt == 1
 
 	name := existing.Name
 	if strings.TrimSpace(req.Name) != "" {
@@ -188,12 +190,17 @@ func DeleteMember(c *gin.Context) {
 	}
 
 	var oldM model.Member
+	var enabledInt int
+	var createdAtRaw, updatedAtRaw any
 	err = model.DB.QueryRow("SELECT id, name, uuid, sub_token, enabled, created_at, updated_at FROM members WHERE id = ?", id).
-		Scan(&oldM.ID, &oldM.Name, &oldM.UUID, &oldM.SubToken, &oldM.Enabled, &oldM.CreatedAt, &oldM.UpdatedAt)
+		Scan(&oldM.ID, &oldM.Name, &oldM.UUID, &oldM.SubToken, &enabledInt, &createdAtRaw, &updatedAtRaw)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "member not found"})
 		return
 	}
+	oldM.Enabled = enabledInt == 1
+	oldM.CreatedAt = model.ParseTime(createdAtRaw)
+	oldM.UpdatedAt = model.ParseTime(updatedAtRaw)
 
 	_, err = model.DB.Exec("DELETE FROM members WHERE id = ?", id)
 	if err != nil {

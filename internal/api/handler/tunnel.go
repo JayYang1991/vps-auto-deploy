@@ -34,9 +34,17 @@ func ListTunnels(c *gin.Context) {
 	var list []model.Tunnel
 	for rows.Next() {
 		var t model.Tunnel
-		if err := rows.Scan(&t.ID, &t.Name, &t.Mode, &t.Token, &t.Domain, &t.TargetPort, &t.EdgeIPVersion, &t.Protocol, &t.Status, &t.Enabled, &t.CreatedAt, &t.UpdatedAt); err == nil {
+		var enabledInt int
+		var createdAtRaw, updatedAtRaw any
+		if err := rows.Scan(&t.ID, &t.Name, &t.Mode, &t.Token, &t.Domain, &t.TargetPort, &t.EdgeIPVersion, &t.Protocol, &t.Status, &enabledInt, &createdAtRaw, &updatedAtRaw); err == nil {
+			t.Enabled = enabledInt == 1
+			t.CreatedAt = model.ParseTime(createdAtRaw)
+			t.UpdatedAt = model.ParseTime(updatedAtRaw)
 			list = append(list, t)
 		}
+	}
+	if list == nil {
+		list = []model.Tunnel{}
 	}
 	c.JSON(http.StatusOK, list)
 }

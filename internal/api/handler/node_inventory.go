@@ -69,15 +69,21 @@ func GetNodeInventory(c *gin.Context) {
 
 	if memberIDStr != "" {
 		if id, err := strconv.ParseInt(memberIDStr, 10, 64); err == nil {
-			_ = model.DB.QueryRow("SELECT id, name, uuid, sub_token, enabled FROM members WHERE id = ?", id).
-				Scan(&member.ID, &member.Name, &member.UUID, &member.SubToken, &member.Enabled)
+			var enabledInt int
+			if err := model.DB.QueryRow("SELECT id, name, uuid, sub_token, enabled FROM members WHERE id = ?", id).
+				Scan(&member.ID, &member.Name, &member.UUID, &member.SubToken, &enabledInt); err == nil {
+				member.Enabled = enabledInt == 1
+			}
 		}
 	}
 
 	if member.UUID == "" {
 		// 默认取第一个有效成员
-		_ = model.DB.QueryRow("SELECT id, name, uuid, sub_token, enabled FROM members WHERE enabled = 1 ORDER BY id ASC LIMIT 1").
-			Scan(&member.ID, &member.Name, &member.UUID, &member.SubToken, &member.Enabled)
+		var enabledInt int
+		if err := model.DB.QueryRow("SELECT id, name, uuid, sub_token, enabled FROM members WHERE enabled = 1 ORDER BY id ASC LIMIT 1").
+			Scan(&member.ID, &member.Name, &member.UUID, &member.SubToken, &enabledInt); err == nil {
+			member.Enabled = enabledInt == 1
+		}
 	}
 
 	// 2. 获取集群节点列表
@@ -119,7 +125,9 @@ func GetNodeInventory(c *gin.Context) {
 			if err == nil {
 				for inboundRows.Next() {
 					var ib model.Inbound
-					if err := inboundRows.Scan(&ib.ID, &ib.Tag, &ib.Protocol, &ib.Listen, &ib.Port, &ib.SpecJSON, &ib.Enabled); err == nil {
+					var enabledInt int
+					if err := inboundRows.Scan(&ib.ID, &ib.Tag, &ib.Protocol, &ib.Listen, &ib.Port, &ib.SpecJSON, &enabledInt); err == nil {
+						ib.Enabled = enabledInt == 1
 						inbounds = append(inbounds, ib)
 					}
 				}
