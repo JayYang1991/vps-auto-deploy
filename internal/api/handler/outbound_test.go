@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -110,6 +111,77 @@ func TestLoadSingboxFromDiskAndFullConfigSync(t *testing.T) {
 	cfgMap, _ := res["config"].(map[string]interface{})
 	if cfgMap["dns"] == nil {
 		t.Errorf("expected dns section preserved in config, got nil")
+	}
+}
+
+func TestDeleteOutboundWithReferencingRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dbPath := filepath.Join(t.TempDir(), "test_outbound_ref.db")
+	_, err := model.InitDB(dbPath)
+	if err != nil {
+		t.Fatalf("init db failed: %v", err)
+	}
+
+	r := gin.New()
+	r.DELETE("/outbounds/:id", DeleteOutbound)
+	r.PUT("/outbounds/:id", UpdateOutbound)
+
+	// 1. 插入测试出站
+	res, err := model.DB.Exec(
+		"INSERT INTO outbounds (tag, type, server, server_port, spec_json, priority, enabled, is_system, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"hk-node", "shadowsocks", "1.1.1.1", 8388, `{"method":"chacha20-ietf-poly1305","password":"test"}`, 10,
+	)
+	if err != nil {
+		t.Fatalf("failed to insert outbound: %v", err)
+	}
+	obID, _ := res.LastInsertId()
+
+	// 2. 插入绑定该出站的路由规则
+	_, err = model.DB.Exec(`
+		INSERT INTO routes (name, action, outbound_tag, inbound_tags, domains, domain_suffix, domain_keyword, ip_cidr, ip_is_private, port, port_range, protocol, rule_set, rule_set_urls, invert, priority, enabled, created_at, updated_at)
+		VALUES ('流媒体专线路由', 'route', 'hk-node', '', '', '', '', '', 0, '', '', '', '', '', 0, 10, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`)
+	if err != nil {
+		t.Fatalf("failed to insert route: %v", err)
+	}
+
+	// 3. 尝试删除该出站 -> 应被依赖拦截拒绝 (400 Bad Request)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("/outbounds/%d", obID), nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request on deleting referenced outbound, got %d: %s", w.Code, w.Body.String())
+	}
+	var resBody map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &resBody)
+	if resBody["error"] == "" || !bytes.Contains(w.Body.Bytes(), []byte("流媒体专线路由")) {
+		t.Fatalf("expected error mentioning referencing route, got: %v", resBody["error"])
+	}
+
+	// 4. 重命名该出站 -> 路由的 outbound_tag 自动级联更新
+	updatePayload := `{
+		"tag": "hk-node-v2",
+		"type": "shadowsocks",
+		"server": "1.1.1.1",
+		"server_port": 8388,
+		"spec": {"method":"chacha20-ietf-poly1305","password":"test"},
+		"priority": 10,
+		"enabled": true
+	}`
+	wUpdate := httptest.NewRecorder()
+	reqUpdate, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/outbounds/%d", obID), bytes.NewReader([]byte(updatePayload)))
+	reqUpdate.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(wUpdate, reqUpdate)
+
+	if wUpdate.Code != http.StatusOK {
+		t.Fatalf("expected 200 on update outbound, got %d: %s", wUpdate.Code, wUpdate.Body.String())
+	}
+
+	var updatedOutboundTag string
+	_ = model.DB.QueryRow("SELECT outbound_tag FROM routes WHERE name = '流媒体专线路由'").Scan(&updatedOutboundTag)
+	if updatedOutboundTag != "hk-node-v2" {
+		t.Fatalf("expected route outbound_tag cascade updated to 'hk-node-v2', got: %s", updatedOutboundTag)
 	}
 }
 

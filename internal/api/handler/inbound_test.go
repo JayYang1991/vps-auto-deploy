@@ -179,3 +179,69 @@ func TestCreateInboundAutoDerivePublicKey(t *testing.T) {
 		t.Fatalf("expected public_key to be auto-derived, but got empty string")
 	}
 }
+
+func TestDeleteInboundWithReferencingRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupTestDB(t)
+
+	r := gin.New()
+	r.DELETE("/inbounds/:id", DeleteInbound)
+	r.PUT("/inbounds/:id", UpdateInbound)
+
+	// 1. 插入测试入站
+	res, err := model.DB.Exec(
+		"INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+		"bound-inbound", "vless-reality", "::", 20443, "{}",
+	)
+	if err != nil {
+		t.Fatalf("failed to insert inbound: %v", err)
+	}
+	ibID, _ := res.LastInsertId()
+
+	// 2. 插入绑定该入站的路由规则
+	_, err = model.DB.Exec(`
+		INSERT INTO routes (name, action, outbound_tag, inbound_tags, domains, domain_suffix, domain_keyword, ip_cidr, ip_is_private, port, port_range, protocol, rule_set, rule_set_urls, invert, priority, enabled, created_at, updated_at)
+		VALUES ('限定入站路由测试', 'route', 'direct', 'bound-inbound, other-in', '', '', '', '', 0, '', '', '', '', '', 0, 10, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`)
+	if err != nil {
+		t.Fatalf("failed to insert route: %v", err)
+	}
+
+	// 3. 尝试删除该入站 -> 应被依赖拦截拒绝 (400 Bad Request)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("/inbounds/%d", ibID), nil)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 Bad Request on deleting referenced inbound, got %d: %s", w.Code, w.Body.String())
+	}
+	var resBody map[string]string
+	_ = json.Unmarshal(w.Body.Bytes(), &resBody)
+	if !strings.Contains(resBody["error"], "无法删除入站节点 [bound-inbound]") || !strings.Contains(resBody["error"], "限定入站路由测试") {
+		t.Fatalf("expected error message mentioning inbound and route name, got: %v", resBody["error"])
+	}
+
+	// 4. 重命名该入站 -> 路由应自动级联更新
+	updatePayload := `{
+		"tag": "renamed-inbound",
+		"protocol": "vless-reality",
+		"listen": "::",
+		"port": 20443,
+		"spec": {},
+		"enabled": true
+	}`
+	wUpdate := httptest.NewRecorder()
+	reqUpdate, _ := http.NewRequest(http.MethodPut, fmt.Sprintf("/inbounds/%d", ibID), strings.NewReader(updatePayload))
+	reqUpdate.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(wUpdate, reqUpdate)
+
+	if wUpdate.Code != http.StatusOK {
+		t.Fatalf("expected 200 on update inbound, got %d: %s", wUpdate.Code, wUpdate.Body.String())
+	}
+
+	var updatedInTags string
+	_ = model.DB.QueryRow("SELECT inbound_tags FROM routes WHERE name = '限定入站路由测试'").Scan(&updatedInTags)
+	if !strings.Contains(updatedInTags, "renamed-inbound") {
+		t.Fatalf("expected route inbound_tags to be cascade updated to 'renamed-inbound', got: %s", updatedInTags)
+	}
+}

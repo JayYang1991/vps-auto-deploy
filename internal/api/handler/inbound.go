@@ -268,6 +268,32 @@ func UpdateInbound(c *gin.Context) {
 		return
 	}
 
+	// 若入站 tag 发生变更，级联自动同步更新关联路由规则中的 inbound_tags
+	if oldIb.Tag != req.Tag {
+		routeRows, rErr := model.DB.Query("SELECT id, inbound_tags FROM routes")
+		if rErr == nil {
+			defer routeRows.Close()
+			for routeRows.Next() {
+				var rID int64
+				var inTags string
+				if err := routeRows.Scan(&rID, &inTags); err == nil && inTags != "" {
+					parts := strings.Split(inTags, ",")
+					changed := false
+					for i, part := range parts {
+						if strings.TrimSpace(part) == oldIb.Tag {
+							parts[i] = req.Tag
+							changed = true
+						}
+					}
+					if changed {
+						newInTags := strings.Join(parts, ", ")
+						_, _ = model.DB.Exec("UPDATE routes SET inbound_tags = ?, updated_at = ? WHERE id = ?", newInTags, now, rID)
+					}
+				}
+			}
+		}
+	}
+
 	if err := configgen.ApplyAndReload(singbox.GetConfigPath()); err != nil {
 		// 回滚数据库记录
 		_, _ = model.DB.Exec(
@@ -304,6 +330,30 @@ func DeleteInbound(c *gin.Context) {
 	oldIb.Enabled = oldEnabledInt == 1
 	oldIb.CreatedAt = model.ParseTime(oldCreatedAtRaw)
 	oldIb.UpdatedAt = model.ParseTime(oldUpdatedAtRaw)
+
+	// 依赖预检：检查是否有路由规则限定引用了该入站节点
+	routeRows, rErr := model.DB.Query("SELECT name, inbound_tags FROM routes")
+	if rErr == nil {
+		defer routeRows.Close()
+		var referencingRoutes []string
+		for routeRows.Next() {
+			var rName, inTags string
+			if err := routeRows.Scan(&rName, &inTags); err == nil && inTags != "" {
+				for _, part := range strings.Split(inTags, ",") {
+					if strings.TrimSpace(part) == oldIb.Tag {
+						referencingRoutes = append(referencingRoutes, rName)
+						break
+					}
+				}
+			}
+		}
+		if len(referencingRoutes) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("无法删除入站节点 [%s]：该节点正被以下路由规则限定引用：%s。请先修改或解除对应路由规则的入站绑定。", oldIb.Tag, strings.Join(referencingRoutes, "、")),
+			})
+			return
+		}
+	}
 
 	_, err = model.DB.Exec("DELETE FROM inbounds WHERE id = ?", id)
 	if err != nil {

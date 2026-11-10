@@ -354,7 +354,25 @@
                 <!-- 5. 入站限定与反向匹配 -->
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
                   <div>
-                    <label class="form-label">限定入站节点 (Inbound Tags，留空为全部)</label>
+                    <label class="form-label">
+                      限定入站节点 (Inbound Tags，留空为全部)
+                      <span v-if="inbounds.length > 0" style="font-size: 0.72rem; color: #38bdf8; font-weight: normal; margin-left: 0.4rem;">
+                        (点击快速勾选/取消)
+                      </span>
+                    </label>
+                    <!-- 快捷选择胶囊 -->
+                    <div v-if="inbounds.length > 0" style="display: flex; flex-wrap: wrap; gap: 0.35rem; margin-bottom: 0.45rem;">
+                      <span
+                        v-for="ib in inbounds"
+                        :key="ib.tag"
+                        @click="toggleInboundTag(ib.tag)"
+                        :class="['badge', isTagSelected(ib.tag) ? 'badge-primary' : 'badge-secondary', 'ruleset-chip']"
+                        style="cursor: pointer; user-select: none;"
+                        :title="'点击' + (isTagSelected(ib.tag) ? '取消勾选 ' : '勾选 ') + ib.tag"
+                      >
+                        {{ isTagSelected(ib.tag) ? '✓ ' : '+ ' }}{{ ib.tag }} ({{ ib.protocol }}:{{ ib.port }})
+                      </span>
+                    </div>
                     <input v-model="form.inbound_tags" class="input" placeholder="例如: vless-in, socks-in" />
                   </div>
                   <div style="display: flex; align-items: center; gap: 1rem; padding-top: 1.4rem;">
@@ -439,11 +457,21 @@ interface OutboundItem {
   is_system: boolean
 }
 
+interface InboundItem {
+  id: number
+  tag: string
+  protocol: string
+  port: number
+  listen: string
+  enabled: boolean
+}
+
 const { toast } = useToast()
 const { showConfirm } = useConfirm()
 
 const routes = ref<RouteRuleItem[]>([])
 const outbounds = ref<OutboundItem[]>([])
+const inbounds = ref<InboundItem[]>([])
 const loading = ref(true)
 const saving = ref(false)
 const reordering = ref(false)
@@ -582,6 +610,28 @@ function appendRuleSet(tag: string) {
   }
 }
 
+function isTagSelected(tag: string): boolean {
+  const list = form.inbound_tags
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  return list.includes(tag)
+}
+
+function toggleInboundTag(tag: string) {
+  const list = form.inbound_tags
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  const idx = list.indexOf(tag)
+  if (idx >= 0) {
+    list.splice(idx, 1)
+  } else {
+    list.push(tag)
+  }
+  form.inbound_tags = list.join(', ')
+}
+
 function openCreateModal() {
   modal.isEdit = false
   modal.editId = 0
@@ -645,10 +695,11 @@ async function loadData() {
   loading.value = true
   nodeNeedsUpgrade.value = false
   try {
-    const [compRes, routesRes, obRes] = await Promise.all([
+    const [compRes, routesRes, obRes, ibRes] = await Promise.all([
       api.get('/components'),
       api.get('/routes'),
       api.get('/outbounds'),
+      api.get('/inbounds'),
     ])
 
     const comps = compRes.data || []
@@ -657,6 +708,7 @@ async function loadData() {
 
     routes.value = routesRes.data || []
     outbounds.value = obRes.data || []
+    inbounds.value = ibRes.data || []
   } catch (err: any) {
     if (err.response?.status === 404 || err.response?.data?.error?.includes('not found')) {
       nodeNeedsUpgrade.value = true

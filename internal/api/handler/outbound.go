@@ -183,6 +183,11 @@ func UpdateOutbound(c *gin.Context) {
 		return
 	}
 
+	// 若出站 tag 发生变更，级联自动同步更新关联路由规则中的 outbound_tag
+	if !oldOb.IsSystem && oldOb.Tag != req.Tag {
+		_, _ = model.DB.Exec("UPDATE routes SET outbound_tag = ?, updated_at = ? WHERE outbound_tag = ?", req.Tag, now, oldOb.Tag)
+	}
+
 	if err := configgen.ApplyAndReload(singbox.GetConfigPath()); err != nil {
 		// 回滚出站数据库记录
 		_, _ = model.DB.Exec(
@@ -217,6 +222,30 @@ func ToggleOutbound(c *gin.Context) {
 
 	now := time.Now()
 	newEnabled := !oldEnabled
+
+	// 若准备停用出站，依赖预检：检查是否有启用的路由规则正引用该出站
+	if !newEnabled {
+		var tag string
+		_ = model.DB.QueryRow("SELECT tag FROM outbounds WHERE id = ?", id).Scan(&tag)
+		routeRows, rErr := model.DB.Query("SELECT name FROM routes WHERE outbound_tag = ? AND enabled = 1", tag)
+		if rErr == nil {
+			defer routeRows.Close()
+			var referencingRoutes []string
+			for routeRows.Next() {
+				var rName string
+				if err := routeRows.Scan(&rName); err == nil {
+					referencingRoutes = append(referencingRoutes, rName)
+				}
+			}
+			if len(referencingRoutes) > 0 {
+				c.JSON(http.StatusBadRequest, gin.H{
+					"error": fmt.Sprintf("无法停用出站规则 [%s]：该出站正被启用的路由规则指定为目标出口：%s。请先调整相关路由规则。", tag, strings.Join(referencingRoutes, "、")),
+				})
+				return
+			}
+		}
+	}
+
 	_, err = model.DB.Exec("UPDATE outbounds SET enabled = ?, updated_at = ? WHERE id = ?", newEnabled, now, id)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -261,6 +290,25 @@ func DeleteOutbound(c *gin.Context) {
 	if oldOb.IsSystem {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "系统核心预置出站规则不允许删除"})
 		return
+	}
+
+	// 依赖预检：检查是否有路由规则指定该出站为目标出口
+	routeRows, rErr := model.DB.Query("SELECT name FROM routes WHERE outbound_tag = ?", oldOb.Tag)
+	if rErr == nil {
+		defer routeRows.Close()
+		var referencingRoutes []string
+		for routeRows.Next() {
+			var rName string
+			if err := routeRows.Scan(&rName); err == nil {
+				referencingRoutes = append(referencingRoutes, rName)
+			}
+		}
+		if len(referencingRoutes) > 0 {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error": fmt.Sprintf("无法删除出站规则 [%s]：该出站正被以下路由规则指定为目标出口：%s。请先修改或解除对应路由规则绑定。", oldOb.Tag, strings.Join(referencingRoutes, "、")),
+			})
+			return
+		}
 	}
 
 	_, err = model.DB.Exec("DELETE FROM outbounds WHERE id = ?", id)
