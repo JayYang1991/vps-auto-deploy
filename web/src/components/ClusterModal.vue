@@ -1353,7 +1353,7 @@ const terminalNode = ref<any>(null)
 const cachedMasterPassword = ref('')
 
 function openTerminalModal(item: any) {
-  terminalNode.value = item
+  terminalNode.value = { ...item }
   showTerminal.value = true
 }
 

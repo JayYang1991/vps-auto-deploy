@@ -239,7 +239,10 @@ function handleOverlayClick() {
 }
 
 function close() {
-  destroyConnection()
+  destroyTerminal()
+  connectionStatus.value = 'connecting'
+  sshForm.password = ''
+  sshForm.privateKey = ''
   emit('update:modelValue', false)
 }
 
@@ -265,9 +268,40 @@ function handleClearScreen() {
   term?.focus()
 }
 
-// 初始化 xterm.js 实例
+// 彻底销毁终端实例与监听器，释放 DOM 与长连接
+function destroyTerminal() {
+  if (socket) {
+    try {
+      socket.close()
+    } catch {
+      // ignore
+    }
+    socket = null
+  }
+
+  if (resizeObserver) {
+    resizeObserver.disconnect()
+    resizeObserver = null
+  }
+
+  if (term) {
+    try {
+      term.dispose()
+    } catch {
+      // ignore
+    }
+    term = null
+    fitAddon = null
+  }
+
+  if (terminalCanvas.value) {
+    terminalCanvas.value.innerHTML = ''
+  }
+}
+
+// 初始化并重新挂载 xterm.js 实例
 function initTerminal() {
-  if (term) return
+  destroyTerminal()
 
   term = new Terminal({
     cursorBlink: true,
@@ -298,7 +332,14 @@ function initTerminal() {
 
   if (terminalCanvas.value) {
     term.open(terminalCanvas.value)
-    fitAddon.fit()
+    nextTick(() => {
+      try {
+        fitAddon?.fit()
+        syncTerminalSize()
+      } catch {
+        // ignore
+      }
+    })
   }
 
   // 监听键盘按键并发送至后端
@@ -314,7 +355,7 @@ function initTerminal() {
       try {
         fitAddon?.fit()
         syncTerminalSize()
-      } catch (e) {
+      } catch {
         // ignore
       }
     })
@@ -441,8 +482,17 @@ function connectWebSocket(ticket: string) {
   socket.onopen = () => {
     connecting.value = false
     connectionStatus.value = 'connected'
-    syncTerminalSize()
-    term?.focus()
+    nextTick(() => {
+      setTimeout(() => {
+        try {
+          fitAddon?.fit()
+          syncTerminalSize()
+          term?.focus()
+        } catch {
+          // ignore
+        }
+      }, 60)
+    })
   }
 
   socket.onmessage = event => {
@@ -473,41 +523,54 @@ function connectWebSocket(ticket: string) {
 }
 
 function reconnect() {
-  destroyConnection()
+  destroyTerminal()
   startTerminalSession()
-}
-
-function destroyConnection() {
-  if (socket) {
-    try {
-      socket.close()
-    } catch {
-      // ignore
-    }
-    socket = null
-  }
 }
 
 watch(
   () => props.modelValue,
   val => {
     if (val) {
+      destroyTerminal()
+      connectionStatus.value = 'connecting'
+      sshForm.password = ''
+      sshForm.privateKey = ''
+      if (props.node?.ssh_user) {
+        sshForm.user = props.node.ssh_user
+      } else {
+        sshForm.user = 'root'
+      }
       nextTick(() => {
-        if (props.node?.ssh_user) {
-          sshForm.user = props.node.ssh_user
-        }
         startTerminalSession()
       })
     } else {
-      destroyConnection()
+      destroyTerminal()
+    }
+  }
+)
+
+watch(
+  () => props.node?.id,
+  (newId, oldId) => {
+    if (props.modelValue && newId && newId !== oldId) {
+      destroyTerminal()
+      connectionStatus.value = 'connecting'
+      sshForm.password = ''
+      sshForm.privateKey = ''
+      if (props.node?.ssh_user) {
+        sshForm.user = props.node.ssh_user
+      } else {
+        sshForm.user = 'root'
+      }
+      nextTick(() => {
+        startTerminalSession()
+      })
     }
   }
 )
 
 onBeforeUnmount(() => {
-  destroyConnection()
-  resizeObserver?.disconnect()
-  term?.dispose()
+  destroyTerminal()
 })
 </script>
 
