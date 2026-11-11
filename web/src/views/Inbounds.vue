@@ -132,7 +132,7 @@
     </div>
 
     <!-- 新增/编辑弹窗 -->
-    <div v-if="modal.show" class="modal-overlay" @click.self="modal.show = false">
+    <div v-if="modal.show" class="modal-overlay">
       <div class="modal-content">
         <h3 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 1.25rem;">
           {{ modal.isEdit ? '编辑入站节点' : '新建入站节点' }}
@@ -461,7 +461,7 @@
     </div>
 
     <!-- 节点链接与二维码分享弹窗 -->
-    <div v-if="shareModal.show" class="modal-overlay" @click.self="shareModal.show = false">
+    <div v-if="shareModal.show" class="modal-overlay">
       <div class="modal-content" style="text-align: center;">
         <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 1rem;">
           {{ shareModal.title }}

@@ -661,7 +661,7 @@
     </div>
 
     <!-- 彻底销毁 Vultr 实例二次安全验证模态框 -->
-    <div v-if="destroyModalVisible" class="destroy-overlay" @click.self="closeDestroyModal">
+    <div v-if="destroyModalVisible" class="destroy-overlay">
       <div class="destroy-card">
         <div class="destroy-header">
           <div class="destroy-title-box">

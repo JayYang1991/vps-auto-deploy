@@ -126,11 +126,14 @@
     </div>
 
     <!-- 新建/编辑出站规则弹窗 -->
-    <div v-if="modal.show" class="modal-overlay" @click.self="modal.show = false">
+    <div v-if="modal.show" class="modal-overlay">
       <div class="modal-content" style="max-width: 680px; max-height: 90vh; overflow-y: auto;">
-        <h3 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 1.25rem; color: #f8fafc;">
-          {{ modal.isEdit ? '编辑出站规则' : '新建出站规则' }}
-        </h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+          <h3 style="font-size: 1.25rem; font-weight: 600; color: #f8fafc; margin: 0;">
+            {{ modal.isEdit ? '编辑出站规则' : '新建出站规则' }}
+          </h3>
+          <button type="button" @click="modal.show = false" class="btn btn-secondary" style="padding: 0.2rem 0.55rem; font-size: 0.85rem;" title="关闭">✕</button>
+        </div>
 
         <!-- 模式切换：仅在新建出站时提供一键中转选项 -->
         <div v-if="!modal.isEdit" style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem; background: #0f172a; padding: 0.25rem; border-radius: 0.5rem;">

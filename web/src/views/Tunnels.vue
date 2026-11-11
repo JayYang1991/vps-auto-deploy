@@ -80,9 +80,12 @@
     </div>
 
     <!-- 新建隧道弹窗 -->
-    <div v-if="modal.show" class="modal-overlay" @click.self="modal.show = false">
+    <div v-if="modal.show" class="modal-overlay">
       <div class="modal-content">
-        <h3 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 1.25rem;">新建 Cloudflare 隧道</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+          <h3 style="font-size: 1.25rem; font-weight: 600; margin: 0;">新建 Cloudflare 隧道</h3>
+          <button type="button" @click="modal.show = false" class="btn btn-secondary" style="padding: 0.2rem 0.55rem; font-size: 0.85rem;" title="关闭">✕</button>
+        </div>
 
         <form @submit.prevent="submitTunnel" style="display: flex; flex-direction: column; gap: 1rem;">
           <div>

@@ -172,7 +172,7 @@
     </div>
 
     <!-- 实时安装/升级终端进度抽屉/弹窗 -->
-    <div v-if="installModal.show" class="modal-overlay" @click.self="handleInstallModalBackdrop">
+    <div v-if="installModal.show" class="modal-overlay">
       <div class="modal-content" style="max-width: 720px; display: flex; flex-direction: column;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
           <div style="display: flex; align-items: center; gap: 0.6rem;">
@@ -232,7 +232,7 @@
     </div>
 
     <!-- 实时运行日志弹窗 (SSE journalctl) -->
-    <div v-if="logModal.show" class="modal-overlay" @click.self="closeLogs">
+    <div v-if="logModal.show" class="modal-overlay">
       <div
         :class="['modal-content', 'modal-content-log', logModal.isMaximized ? 'is-maximized' : '']"
       >

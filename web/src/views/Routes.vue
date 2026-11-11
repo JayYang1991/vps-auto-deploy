@@ -230,7 +230,7 @@
     </div>
 
     <!-- 创建 / 编辑路由规则弹窗 -->
-    <div v-if="modal.show" class="modal-overlay" @click.self="modal.show = false">
+    <div v-if="modal.show" class="modal-overlay">
       <div class="modal-content" style="max-width: 680px; max-height: 90vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
           <h3 style="font-size: 1.15rem; font-weight: 600; color: #f8fafc;">

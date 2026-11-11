@@ -1,5 +1,5 @@
 <template>
-  <div v-if="modelValue" class="terminal-overlay" :class="{ 'fullscreen-overlay': isFullscreen }" @click.self="handleOverlayClick">
+  <div v-if="modelValue" class="terminal-overlay" :class="{ 'fullscreen-overlay': isFullscreen }">
     <div class="terminal-window" :class="{ 'fullscreen-window': isFullscreen }">
       <!-- 终端头部工具栏 -->
       <div class="terminal-header">

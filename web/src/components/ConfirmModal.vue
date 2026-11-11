@@ -1,5 +1,5 @@
 <template>
-  <div v-if="confirmState.isOpen" class="modal-overlay" @click.self="handleCancel">
+  <div v-if="confirmState.isOpen" class="modal-overlay">
     <div class="modal-content confirm-box" role="dialog" aria-modal="true">
       <div class="confirm-header">
         <div :class="['confirm-icon', confirmState.danger ? 'icon-danger' : 'icon-info']">

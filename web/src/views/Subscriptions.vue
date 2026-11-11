@@ -1163,7 +1163,7 @@
     </div>
 
     <!-- 成员添加与编辑弹窗 -->
-    <div v-if="modal.show" class="modal-overlay" @click.self="modal.show = false">
+    <div v-if="modal.show" class="modal-overlay">
       <div class="modal-content">
         <h3 style="font-size: 1.25rem; font-weight: 600; margin-bottom: 1.25rem;">
           {{ modal.isEdit ? '编辑成员配置' : '添加团队成员' }}
@@ -1208,7 +1208,7 @@
     </div>
 
     <!-- 订阅二维码弹窗 -->
-    <div v-if="qrModal.show" class="modal-overlay" @click.self="qrModal.show = false">
+    <div v-if="qrModal.show" class="modal-overlay">
       <div class="modal-content" style="text-align: center;">
         <h3 style="font-size: 1.125rem; font-weight: 600; margin-bottom: 1rem;">
           {{ qrModal.title }}
@@ -1236,7 +1236,7 @@
     </div>
 
     <!-- 本地自定义规则模板 (custom_rules.ini) 编辑弹窗 -->
-    <div v-if="customRulesModal.show" class="modal-overlay" @click.self="customRulesModal.show = false">
+    <div v-if="customRulesModal.show" class="modal-overlay">
       <div class="modal-content" style="max-width: 880px; max-height: 90vh; display: flex; flex-direction: column;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
           <div>

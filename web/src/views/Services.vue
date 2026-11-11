@@ -108,7 +108,7 @@
     </div>
 
     <!-- Sing-box 服务端完整配置透视弹窗 -->
-    <div v-if="configViewer.show" class="modal-overlay" @click.self="configViewer.show = false">
+    <div v-if="configViewer.show" class="modal-overlay">
       <div class="modal-content" style="max-width: 840px; max-height: 88vh; display: flex; flex-direction: column;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
           <div>

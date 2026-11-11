@@ -1,5 +1,5 @@
 <template>
-  <div v-show="modelValue" class="modal-overlay" @click.self="handleOverlayClick">
+  <div v-show="modelValue" class="modal-overlay">
     <div class="cluster-modal">
       <!-- 模态框头部 -->
       <div class="modal-header">
@@ -436,7 +436,7 @@
     </div>
 
     <!-- 二次鉴权查看密码模态框 (Step-Up Authentication Modal) -->
-    <div v-if="revealModalVisible" class="reveal-overlay" @click.self="closeRevealModal">
+    <div v-if="revealModalVisible" class="reveal-overlay">
       <div class="reveal-card">
         <div class="reveal-header">
           <div class="reveal-title-box">
@@ -552,7 +552,7 @@
     </div>
 
     <!-- 云端节点销毁二次安全确认模态框 -->
-    <div v-if="cloudDeleteModalVisible" class="reveal-overlay" @click.self="closeCloudDeleteModal">
+    <div v-if="cloudDeleteModalVisible" class="reveal-overlay">
       <div class="reveal-card">
         <div class="reveal-header">
           <div class="reveal-title-box">
@@ -607,7 +607,7 @@
     </div>
 
     <!-- 定制订阅节点名称前缀模态框 -->
-    <div v-if="prefixModalVisible" class="reveal-overlay" @click.self="closePrefixModal">
+    <div v-if="prefixModalVisible" class="reveal-overlay">
       <div class="reveal-card">
         <div class="reveal-header">
           <div class="reveal-title-box">
@@ -688,7 +688,7 @@
     </div>
 
     <!-- 远程节点升级模态框 (Remote Node Upgrade Modal) -->
-    <div v-if="upgradeModalVisible" class="reveal-overlay" @click.self="closeUpgradeModal">
+    <div v-if="upgradeModalVisible" class="reveal-overlay">
       <div class="reveal-card" style="max-width: 620px; width: 95%;">
         <div class="reveal-header">
           <div class="reveal-title-box">
