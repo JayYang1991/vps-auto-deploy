@@ -20,6 +20,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 	r.RedirectTrailingSlash = false
 	r.RedirectFixedPath = false
 	r.Use(gin.Recovery())
+	r.Use(middleware.SecurityHeadersMiddleware())
 	r.Use(middleware.CORSMiddleware())
 
 	// 1. 公开免认证订阅接口
@@ -50,9 +51,9 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.POST("/nodes/:id/ping", handler.PingNode)
 			api.PUT("/nodes/:id", handler.UpdateNode)
 			api.DELETE("/nodes/:id", handler.DeleteNode)
-			api.POST("/nodes/:id/reveal-credentials", handler.RevealNodeCredentials)
-			api.POST("/nodes/:id/terminal-ticket", handler.RequestTerminalTicket)
-			api.POST("/nodes/:id/ssh-credentials", handler.SaveNodeSSHCredentials)
+			api.POST("/nodes/:id/reveal-credentials", middleware.LoginRateLimitMiddleware(), handler.RevealNodeCredentials)
+			api.POST("/nodes/:id/terminal-ticket", middleware.LoginRateLimitMiddleware(), handler.RequestTerminalTicket)
+			api.POST("/nodes/:id/ssh-credentials", middleware.LoginRateLimitMiddleware(), handler.SaveNodeSSHCredentials)
 
 			// Vultr 云主机弹性创建与纳管
 			api.GET("/nodes/cloud/vultr/config", handler.GetVultrConfig)

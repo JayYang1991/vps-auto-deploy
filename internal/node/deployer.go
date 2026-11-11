@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -23,6 +24,11 @@ import (
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/pkg/crypto"
 	"vps-auto-deploy/internal/pkg/upgrade"
+)
+
+var (
+	validNameRegex   = regexp.MustCompile(`^[a-zA-Z0-9_\-\.]{1,32}$`)
+	validSecretRegex = regexp.MustCompile(`^[a-zA-Z0-9_\-]{1,64}$`)
 )
 
 // DeploySSHRequest SSH 远程部署请求参数
@@ -237,6 +243,26 @@ func RunDeploySSH(task *DeployTask, req DeploySSHRequest) {
 	}
 	if strings.TrimSpace(req.Name) == "" {
 		req.Name = req.Host
+	}
+
+	// 白名单字符安全校验，防范命令行参数注入
+	if !validNameRegex.MatchString(req.SSHUser) {
+		task.Status = "failed"
+		task.Error = fmt.Sprintf("SSH 用户名格式不合法: %q (仅允许 1-32 位字母、数字、点、下划线及横线)", req.SSHUser)
+		task.AddLog("[ERROR] " + task.Error)
+		return
+	}
+	if !validNameRegex.MatchString(req.AdminUsername) {
+		task.Status = "failed"
+		task.Error = fmt.Sprintf("管理员用户名格式不合法: %q (仅允许 1-32 位字母、数字、点、下划线及横线)", req.AdminUsername)
+		task.AddLog("[ERROR] " + task.Error)
+		return
+	}
+	if !validSecretRegex.MatchString(req.SecretPath) {
+		task.Status = "failed"
+		task.Error = fmt.Sprintf("安全路径格式不合法: %q (仅允许 1-64 位字母、数字、下划线及横线)", req.SecretPath)
+		task.AddLog("[ERROR] " + task.Error)
+		return
 	}
 	// 默认开启自签 TLS 防中间人劫持
 	enableTLS := true
@@ -871,6 +897,13 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 	}
 	if strings.TrimSpace(req.SSHUser) == "" {
 		req.SSHUser = "root"
+	}
+
+	if !validNameRegex.MatchString(req.SSHUser) {
+		task.Status = "failed"
+		task.Error = fmt.Sprintf("SSH 用户名格式不合法: %q (仅允许 1-32 位字母、数字、点、下划线及横线)", req.SSHUser)
+		task.AddLog("[ERROR] " + task.Error)
+		return
 	}
 
 	// 1. 获取目标节点元数据

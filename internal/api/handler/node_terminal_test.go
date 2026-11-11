@@ -62,8 +62,13 @@ func TestTerminalTicketWorkflow(t *testing.T) {
 		t.Errorf("expected 403 Forbidden on wrong password, got %d", wBad.Code)
 	}
 
-	// 2. 测试正确密码签发 Ticket
-	okBody, _ := json.Marshal(gin.H{"master_password": "admin123456"})
+	// 2. 测试正确密码签发 Ticket (含临时凭据载荷)
+	okBody, _ := json.Marshal(gin.H{
+		"master_password": "admin123456",
+		"temp_user":       "ubuntu",
+		"temp_pass":       "temp_pwd_123",
+		"temp_key":        "temp_key_content",
+	})
 	reqOK, _ := http.NewRequest(http.MethodPost, "/api/nodes/1/terminal-ticket", bytes.NewReader(okBody))
 	reqOK.Header.Set("Content-Type", "application/json")
 	wOK := httptest.NewRecorder()
@@ -84,11 +89,15 @@ func TestTerminalTicketWorkflow(t *testing.T) {
 		t.Errorf("ticket should not be empty")
 	}
 
-	// 3. 测试 Ticket 验证与一次性消费
-	if !node.ValidateAndConsumeTicket(res.Ticket, 1) {
-		t.Errorf("expected ticket to be valid on first consume")
+	// 3. 测试 Ticket 验证、临时凭据绑定与一次性消费
+	ticketInfo, ok := node.ValidateAndConsumeTicket(res.Ticket, 1)
+	if !ok || ticketInfo == nil {
+		t.Fatalf("expected ticket to be valid on first consume")
 	}
-	if node.ValidateAndConsumeTicket(res.Ticket, 1) {
+	if ticketInfo.TempUser != "ubuntu" || ticketInfo.TempPass != "temp_pwd_123" || ticketInfo.TempKey != "temp_key_content" {
+		t.Errorf("unexpected ticket payload: %+v", ticketInfo)
+	}
+	if _, ok := node.ValidateAndConsumeTicket(res.Ticket, 1); ok {
 		t.Errorf("ticket should be destroyed after first consume (anti-replay)")
 	}
 

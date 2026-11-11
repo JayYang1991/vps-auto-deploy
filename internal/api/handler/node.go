@@ -9,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
+	"vps-auto-deploy/internal/api/middleware"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/node"
 	"vps-auto-deploy/internal/pkg/crypto"
@@ -411,6 +412,7 @@ func RevealNodeCredentials(c *gin.Context) {
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(masterPassHash), []byte(req.MasterPassword)); err != nil {
+		middleware.RecordFailedLogin(c.ClientIP())
 		c.JSON(http.StatusForbidden, gin.H{"error": "主控管理员密码错误，二次安全验证失败！"})
 		return
 	}

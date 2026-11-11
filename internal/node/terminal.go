@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -20,18 +22,24 @@ import (
 	"vps-auto-deploy/internal/pkg/crypto"
 )
 
-type terminalTicketInfo struct {
+// TerminalTicketInfo 包含一次性终端令牌绑定的元数据与凭据载荷
+type TerminalTicketInfo struct {
 	NodeID    int64
 	ExpiresAt time.Time
+	Username  string
+	ClientIP  string
+	TempUser  string
+	TempPass  string
+	TempKey   string
 }
 
 var (
 	ticketLock sync.RWMutex
-	ticketMap  = make(map[string]terminalTicketInfo)
+	ticketMap  = make(map[string]TerminalTicketInfo)
 )
 
-// IssueTerminalTicket 为目标节点签发一个一次性有效、30秒有效期的终端票据
-func IssueTerminalTicket(nodeID int64, ttl time.Duration) string {
+// IssueTerminalTicket 为目标节点签发一个一次性有效、30秒有效期的终端票据，并安全绑定临时凭据
+func IssueTerminalTicket(nodeID int64, username, clientIP, tempUser, tempPass, tempKey string, ttl time.Duration) string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	ticket := hex.EncodeToString(b)
@@ -47,31 +55,66 @@ func IssueTerminalTicket(nodeID int64, ttl time.Duration) string {
 		}
 	}
 
-	ticketMap[ticket] = terminalTicketInfo{
+	ticketMap[ticket] = TerminalTicketInfo{
 		NodeID:    nodeID,
 		ExpiresAt: now.Add(ttl),
+		Username:  username,
+		ClientIP:  clientIP,
+		TempUser:  tempUser,
+		TempPass:  tempPass,
+		TempKey:   tempKey,
 	}
 	return ticket
 }
 
-// ValidateAndConsumeTicket 验证并立即销毁单次票据（防重放攻击）
-func ValidateAndConsumeTicket(ticket string, nodeID int64) bool {
+// ValidateAndConsumeTicket 验证并立即销毁单次票据（防重放攻击），并返回绑定的凭据元数据
+func ValidateAndConsumeTicket(ticket string, nodeID int64) (*TerminalTicketInfo, bool) {
 	if ticket == "" {
-		return false
+		return nil, false
 	}
 	ticketLock.Lock()
 	defer ticketLock.Unlock()
 
 	info, exists := ticketMap[ticket]
 	if !exists {
-		return false
+		return nil, false
 	}
 	delete(ticketMap, ticket)
 
 	if time.Now().After(info.ExpiresAt) {
-		return false
+		return nil, false
 	}
-	return info.NodeID == nodeID
+	if info.NodeID != nodeID {
+		return nil, false
+	}
+	return &info, true
+}
+
+// RecordTerminalAudit 记录终端特权运维审计日志
+func RecordTerminalAudit(event, username, clientIP, nodeName, targetAddr, details string) {
+	nowStr := time.Now().Format("2006-01-02 15:04:05")
+	entry := fmt.Sprintf("[%s] [AUDIT-TERMINAL] event=%s user=%q ip=%s node=%q target=%s details=%q\n",
+		nowStr, event, username, clientIP, nodeName, targetAddr, details)
+
+	// 控制台标准输出
+	log.Print(entry)
+
+	// 写入持久化审计日志文件
+	auditPaths := []string{
+		"/etc/vps-auto-deploy/audit.log",
+		"audit.log",
+		filepath.Join(os.TempDir(), "vps-panel-audit.log"),
+	}
+
+	for _, p := range auditPaths {
+		_ = os.MkdirAll(filepath.Dir(p), 0755)
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err == nil {
+			_, _ = f.WriteString(entry)
+			_ = f.Close()
+			break
+		}
+	}
 }
 
 // TerminalMessage WebSocket 前后端通信帧格式
@@ -83,7 +126,7 @@ type TerminalMessage struct {
 }
 
 // HandleTerminalSession 接管 WebSocket 与宿主机 PTY/SSH 之间的全双工双向交互
-func HandleTerminalSession(ws *websocket.Conn, targetNode *model.Node, initCols, initRows int, tempUser, tempPass, tempKey string) {
+func HandleTerminalSession(ws *websocket.Conn, targetNode *model.Node, initCols, initRows int, ticketInfo *TerminalTicketInfo) {
 	defer ws.Close()
 
 	if initCols <= 0 {
@@ -93,15 +136,37 @@ func HandleTerminalSession(ws *websocket.Conn, targetNode *model.Node, initCols,
 		initRows = 30
 	}
 
+	user := "admin"
+	clientIP := "unknown"
+	tempUser, tempPass, tempKey := "", "", ""
+	if ticketInfo != nil {
+		if ticketInfo.Username != "" {
+			user = ticketInfo.Username
+		}
+		if ticketInfo.ClientIP != "" {
+			clientIP = ticketInfo.ClientIP
+		}
+		tempUser = ticketInfo.TempUser
+		tempPass = ticketInfo.TempPass
+		tempKey = ticketInfo.TempKey
+	}
+
 	if targetNode.IsMaster {
-		handleLocalPTYSession(ws, initCols, initRows)
+		handleLocalPTYSession(ws, initCols, initRows, user, clientIP)
 	} else {
-		handleRemoteSSHSession(ws, targetNode, initCols, initRows, tempUser, tempPass, tempKey)
+		handleRemoteSSHSession(ws, targetNode, initCols, initRows, user, clientIP, tempUser, tempPass, tempKey)
 	}
 }
 
 // handleLocalPTYSession 为主控本机启动本地伪终端 (pty)
-func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int) {
+func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int, user, clientIP string) {
+	startTime := time.Now()
+	RecordTerminalAudit("CONNECT", user, clientIP, "本地主控", "127.0.0.1 (Local PTY)", "启动本机 Bash 控制台")
+	defer func() {
+		duration := time.Since(startTime).Round(time.Second)
+		RecordTerminalAudit("DISCONNECT", user, clientIP, "本地主控", "127.0.0.1 (Local PTY)", fmt.Sprintf("会话已关闭，持续时长: %v", duration))
+	}()
+
 	shell := "/bin/bash"
 	if _, err := exec.LookPath(shell); err != nil {
 		shell = "/bin/sh"
@@ -189,7 +254,7 @@ func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int) {
 }
 
 // handleRemoteSSHSession 建立至远程纳管节点的 SSH PTY 会话
-func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, initRows int, tempUser, tempPass, tempKey string) {
+func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, initRows int, user, clientIP, tempUser, tempPass, tempKey string) {
 	jwtSecret, _ := model.GetSetting("jwt_secret")
 	key := crypto.DeriveKey(jwtSecret)
 
@@ -238,6 +303,15 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 		sshPort = 22
 	}
 
+	targetAddr := fmt.Sprintf("%s:%d", node.Host, sshPort)
+	startTime := time.Now()
+	RecordTerminalAudit("CONNECT_ATTEMPT", user, clientIP, node.Name, targetAddr, fmt.Sprintf("SSH发起连接 (登录账号: %s)", sshUser))
+
+	defer func() {
+		duration := time.Since(startTime).Round(time.Second)
+		RecordTerminalAudit("DISCONNECT", user, clientIP, node.Name, targetAddr, fmt.Sprintf("SSH会话已结束，持续时长: %v", duration))
+	}()
+
 	// TOFU 主机指纹比对机制
 	sshConfig := &ssh.ClientConfig{
 		User: sshUser,
@@ -257,6 +331,7 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 
 	client, err := ssh.Dial("tcp", addr, sshConfig)
 	if err != nil {
+		RecordTerminalAudit("CONNECT_FAILED", user, clientIP, node.Name, targetAddr, fmt.Sprintf("握手失败: %v", err))
 		_ = ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[31m[ERROR] SSH 连接建立失败: %v\x1b[0m\r\n", err)))
 		return
 	}
@@ -264,6 +339,7 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 
 	session, err := client.NewSession()
 	if err != nil {
+		RecordTerminalAudit("CONNECT_FAILED", user, clientIP, node.Name, targetAddr, fmt.Sprintf("创建 Session 失败: %v", err))
 		_ = ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[31m[ERROR] 创建 SSH Session 失败: %v\x1b[0m\r\n", err)))
 		return
 	}
@@ -298,10 +374,12 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 	}
 
 	if err := session.Shell(); err != nil {
+		RecordTerminalAudit("CONNECT_FAILED", user, clientIP, node.Name, targetAddr, fmt.Sprintf("启动 Shell 失败: %v", err))
 		_ = ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[31m[ERROR] 启动远端 Shell 失败: %v\x1b[0m\r\n", err)))
 		return
 	}
 
+	RecordTerminalAudit("CONNECTED", user, clientIP, node.Name, targetAddr, "远端 Shell 交互就绪")
 	_ = ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[32m✔ SSH 安全终端建立成功！已连接至 %s (%s)\x1b[0m\r\n\r\n", node.Name, node.Host)))
 
 	var closeOnce sync.Once

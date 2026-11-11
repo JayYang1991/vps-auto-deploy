@@ -3,7 +3,9 @@ package handler
 import (
 	"crypto/subtle"
 	"net/http"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -82,6 +84,7 @@ func UpdatePassword(c *gin.Context) {
 
 	hashedPass, _ := model.GetSetting("admin_password_hash")
 	if err := bcrypt.CompareHashAndPassword([]byte(hashedPass), []byte(req.OldPassword)); err != nil {
+		middleware.RecordFailedLogin(c.ClientIP())
 		c.JSON(http.StatusBadRequest, gin.H{"error": "old password is incorrect"})
 		return
 	}
@@ -93,7 +96,23 @@ func UpdatePassword(c *gin.Context) {
 	}
 
 	_ = model.SetSetting("admin_password_hash", string(newHash))
-	c.JSON(http.StatusOK, gin.H{"message": "password updated successfully"})
+
+	// 会话轮换 (Session Rotation)：废止此前签发的所有旧会话，防范旧凭据被盗用
+	epoch := time.Now().Unix()
+	_ = model.SetSetting("auth_min_issued_at", strconv.FormatInt(epoch, 10))
+
+	// 为当前操作端签发轮换后的全新有效 Token
+	username, _ := c.Get("username")
+	usernameStr, _ := username.(string)
+	if usernameStr == "" {
+		usernameStr, _ = model.GetSetting("admin_username")
+	}
+	newToken, _ := middleware.GenerateJWT(usernameStr)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "password updated successfully, sessions rotated",
+		"token":   newToken,
+	})
 }
 
 func GetSettings(c *gin.Context) {
@@ -121,7 +140,14 @@ func UpdateSettings(c *gin.Context) {
 	}
 
 	if req.SecretPath != "" {
-		_ = model.SetSetting("secret_path", req.SecretPath)
+		trimmedSecret := strings.Trim(strings.TrimSpace(req.SecretPath), "/")
+		if !regexp.MustCompile(`^[a-zA-Z0-9_\-]{1,64}$`).MatchString(trimmedSecret) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "安全入口路径格式不合法 (仅支持1-64位字母、数字、短横线与下划线)"})
+			return
+		}
+		_ = model.SetSetting("secret_path", trimmedSecret)
+		// 安全路径变更，强制废止所有旧会话以防扫描缓存利用
+		_ = model.SetSetting("auth_min_issued_at", strconv.FormatInt(time.Now().Unix(), 10))
 	}
 	if req.PublicIP != "" {
 		_ = model.SetSetting("public_ip", req.PublicIP)

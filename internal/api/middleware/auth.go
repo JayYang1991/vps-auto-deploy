@@ -3,6 +3,7 @@ package middleware
 import (
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -115,17 +116,49 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 	}
 }
 
-// CORSMiddleware 规范化跨域处理
+// SecurityHeadersMiddleware 全局安全防御响应头中间件
+func SecurityHeadersMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		// 抵御点击劫持 (Clickjacking)
+		c.Writer.Header().Set("X-Frame-Options", "DENY")
+		// 抵御 MIME 嗅探注入
+		c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
+		// 启用基础 XSS 防护过滤
+		c.Writer.Header().Set("X-XSS-Protection", "1; mode=block")
+		// 严控 Referrer 泄露系统 Secret 路径
+		c.Writer.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		// 若为 HTTPS 连接，自动启用 HSTS
+		if c.Request.TLS != nil {
+			c.Writer.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		}
+		c.Next()
+	}
+}
+
+// CORSMiddleware 安全跨域处理 (防御任意源反射与敏感凭据泄露)
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
+		host := c.Request.Host
+
+		// 仅当 Origin 为空 (同源非浏览器)，或 Origin 的 Host 与当前请求 Host 一致时放行
+		allowed := false
 		if origin != "" {
-			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
-			c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
-		} else {
-			c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
+			if u, err := url.Parse(origin); err == nil && u.Host != "" {
+				if strings.EqualFold(u.Host, host) {
+					allowed = true
+					c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
+					c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
+				}
+			}
 		}
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization, accept, origin, Cache-Control, X-Requested-With, X-Target-Node-ID")
+
+		if !allowed {
+			// 未经允许的跨域来源，不赋予凭据权限
+			c.Writer.Header().Set("Access-Control-Allow-Origin", "")
+		}
+
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Authorization, X-Requested-With, X-Target-Node-ID")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
 
 		if c.Request.Method == "OPTIONS" {

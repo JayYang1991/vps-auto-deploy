@@ -226,5 +226,41 @@ type ServiceStatus struct {
   - 仓库自动解析 ELF 架构并做持久化缓存；
   - 提供 `[ ⚡ 升级本机节点 ]`（带全屏重连探活浮层）与 `[ 🚀 分发升级纳管集群节点 ]`（支持单个免密升级与全量勾选并发批量升级）。
 
+---
+
+## 六、 网络安全防护、特权审计与凭据轮换规范 (Security Hardening, Audit & Session Rotation)
+
+### 1. 会话轮换与全局失效机制 (Session Rotation & Invalidation)
+- **改密与安全路径变更即轮换**：
+  - 管理员修改登录密码或安全路径时，后端必须原子更新 `auth_min_issued_at`（置为当前 Unix 时间戳），立即在内存与数据库层面废止所有早于该时间戳签发的历史 JWT Token。
+  - 为当前合法改密客户端重新签发轮换后的全新 Token，杜绝并发越权与会话劫持残留。
+- **一键销毁所有活跃会话**：
+  - 提供 `POST /api/auth/revoke-all-sessions` 接口，支持管理员在遭遇异常或设备丢失时一键注销全量客户端。
+
+### 2. 特权二次鉴权与防爆破限流 (Rate Limiting on Step-Up Endpoints)
+- **暴力破解防护**：
+  - 所有涉及特权提权或查看凭据的端点（`POST /nodes/:id/reveal-credentials`、`POST /nodes/:id/terminal-ticket`、`POST /nodes/:id/ssh-credentials`），必须强制挂载 `middleware.LoginRateLimitMiddleware()`。
+  - 校验管理员密码失败时，必须显式调用 `middleware.RecordFailedLogin(c.ClientIP())`，确保 15 分钟内连续 5 次错误立即封禁来源 IP，杜绝撞库字典攻击。
+
+### 3. CSWSH 跨源 WebSocket 劫持防御与同源保护
+- **WebSocket CheckOrigin 强校验**：
+  - 严禁在 `upgrader.CheckOrigin` 中直接无脑返回 `true`。
+  - 必须对客户端请求头 `Origin` 进行域名解析，校验 `strings.EqualFold(u.Host, r.Host)`。当来源跨源且非同源主机名时坚决拒绝升级，彻底杜绝恶意第三方网站通过内网扫描利用浏览器凭据静默拉起交互式 Web 控制台。
+
+### 4. 终端票据脱敏与临时凭据内存绑定 (Zero-Credential in Query)
+- **URL Query 脱敏铁律**：
+  - 严禁在 WebSocket URL Query 或任何 GET 请求中拼接明文密码或私钥（如 `temp_pass`、`temp_key`）。
+  - 用户未持久化 SSH 密码连接控制台时，临时凭据必须在 `POST /nodes/:id/terminal-ticket` 通过加密请求体传入，由后端绑定至带 30 秒有效期的内存 `TerminalTicketInfo` 结构体中。
+  - WebSocket 仅携带单次安全随机 Ticket（`?ticket=...`），握手升级时由后端原子消费（防重放）并在内存中提取凭据。
+
+### 5. 终端运维特权审计日志 (Terminal Audit Logging)
+- **全生命周期可追溯**：
+  - 针对宿主机 Local PTY 与集群节点 Remote SSH 终端会话，后端必须全程追踪并结构化输出审计日志：
+    - `CONNECT` / `CONNECT_ATTEMPT`：记录发起时间、操作用户、来源 IP、目标节点、目标地址与登录身份；
+    - `CONNECTED`：记录终端握手成功与 Shell 就绪；
+    - `CONNECT_FAILED`：记录连接或认证失败原因；
+    - `DISCONNECT`：记录终端断开及会话存续总时长。
+  - 审计日志双轨写入：同步输出到标准系统日志（供 `journalctl` 收集）并追加持久化至 `/etc/vps-auto-deploy/audit.log`（模式 `0600`，仅管理员可读）。
+
 
 

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/bcrypt"
+	"vps-auto-deploy/internal/api/middleware"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/node"
 	"vps-auto-deploy/internal/pkg/crypto"
@@ -18,7 +20,16 @@ var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
 	CheckOrigin: func(r *http.Request) bool {
-		return true // 允许本地与内嵌反代跨源
+		origin := r.Header.Get("Origin")
+		if origin == "" {
+			return true // 允许非浏览器或内联反代客户端连接
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		// 阻断跨源 WebSocket 劫持 (CSWSH)，校验 Host 是否完全匹配
+		return strings.EqualFold(u.Host, r.Host)
 	},
 }
 
@@ -33,13 +44,16 @@ func RequestTerminalTicket(c *gin.Context) {
 
 	var req struct {
 		MasterPassword string `json:"master_password"`
+		TempUser       string `json:"temp_user"`
+		TempPass       string `json:"temp_pass"`
+		TempKey        string `json:"temp_key"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请提供主控端管理员密码进行二次安全校验"})
 		return
 	}
 
-	// 1. 二次鉴权验证主控密码
+	// 1. 二次鉴权验证主控密码 (带防爆破失败计数)
 	masterPassHash, err := model.GetSetting("admin_password_hash")
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取主控安全配置失败"})
@@ -47,6 +61,7 @@ func RequestTerminalTicket(c *gin.Context) {
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(masterPassHash), []byte(req.MasterPassword)); err != nil {
+		middleware.RecordFailedLogin(c.ClientIP())
 		c.JSON(http.StatusForbidden, gin.H{"error": "主控管理员密码错误，二次安全验证失败！"})
 		return
 	}
@@ -58,8 +73,14 @@ func RequestTerminalTicket(c *gin.Context) {
 		return
 	}
 
-	// 3. 签发 30 秒有效的一次性 Ticket
-	ticket := node.IssueTerminalTicket(target.ID, 30*time.Second)
+	usernameVal, _ := c.Get("username")
+	usernameStr, _ := usernameVal.(string)
+	if usernameStr == "" {
+		usernameStr = "admin"
+	}
+
+	// 3. 签发 30 秒有效的一次性 Ticket，并绑定内存临时凭据载荷
+	ticket := node.IssueTerminalTicket(target.ID, usernameStr, c.ClientIP(), req.TempUser, req.TempPass, req.TempKey, 30*time.Second)
 
 	c.JSON(http.StatusOK, gin.H{
 		"ticket":       ticket,
@@ -92,9 +113,10 @@ func SaveNodeSSHCredentials(c *gin.Context) {
 		return
 	}
 
-	// 二次鉴权
+	// 二次鉴权 (防爆破)
 	masterPassHash, _ := model.GetSetting("admin_password_hash")
 	if err := bcrypt.CompareHashAndPassword([]byte(masterPassHash), []byte(req.MasterPassword)); err != nil {
+		middleware.RecordFailedLogin(c.ClientIP())
 		c.JSON(http.StatusForbidden, gin.H{"error": "主控管理员密码错误，二次验证失败！"})
 		return
 	}
@@ -138,7 +160,8 @@ func NodeTerminalWS(c *gin.Context) {
 	}
 
 	ticket := c.Query("ticket")
-	if !node.ValidateAndConsumeTicket(ticket, id) {
+	ticketInfo, ok := node.ValidateAndConsumeTicket(ticket, id)
+	if !ok || ticketInfo == nil {
 		c.String(http.StatusUnauthorized, "invalid or expired terminal ticket")
 		return
 	}
@@ -152,15 +175,10 @@ func NodeTerminalWS(c *gin.Context) {
 	cols, _ := strconv.Atoi(c.DefaultQuery("cols", "110"))
 	rows, _ := strconv.Atoi(c.DefaultQuery("rows", "32"))
 
-	// 临时单次凭据 (针对用户未保存持久化凭据时的连接)
-	tempUser := c.Query("temp_user")
-	tempPass := c.Query("temp_pass")
-	tempKey := c.Query("temp_key")
-
 	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		return
 	}
 
-	node.HandleTerminalSession(ws, target, cols, rows, tempUser, tempPass, tempKey)
+	node.HandleTerminalSession(ws, target, cols, rows, ticketInfo)
 }

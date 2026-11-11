@@ -386,9 +386,20 @@ async function startTerminalSession(masterPassword?: string) {
   }
 
   try {
-    const resp = await api.post(`/nodes/${props.node.id}/terminal-ticket`, {
+    const ticketPayload: Record<string, any> = {
       master_password: pass,
-    })
+    }
+    if (!props.node.is_master && !props.node.has_ssh_auth) {
+      if (sshForm.user) ticketPayload.temp_user = sshForm.user
+      if (sshForm.authType === 'password' && sshForm.password) {
+        ticketPayload.temp_pass = sshForm.password
+      }
+      if (sshForm.authType === 'key' && sshForm.privateKey) {
+        ticketPayload.temp_key = sshForm.privateKey
+      }
+    }
+
+    const resp = await api.post(`/nodes/${props.node.id}/terminal-ticket`, ticketPayload)
 
     const { ticket, is_master, has_ssh_auth } = resp.data
     emit('authenticated', pass)
@@ -464,17 +475,7 @@ function connectWebSocket(ticket: string) {
   const cols = term?.cols || 110
   const rows = term?.rows || 32
 
-  let url = `${protocol}//${window.location.host}/${secret}/api/nodes/${props.node.id}/terminal?ticket=${ticket}&cols=${cols}&rows=${rows}`
-  if (!props.node.is_master && !props.node.has_ssh_auth) {
-    // 传递临时凭据
-    if (sshForm.user) url += `&temp_user=${encodeURIComponent(sshForm.user)}`
-    if (sshForm.authType === 'password' && sshForm.password) {
-      url += `&temp_pass=${encodeURIComponent(sshForm.password)}`
-    }
-    if (sshForm.authType === 'key' && sshForm.privateKey) {
-      url += `&temp_key=${encodeURIComponent(sshForm.privateKey)}`
-    }
-  }
+  const url = `${protocol}//${window.location.host}/${secret}/api/nodes/${props.node.id}/terminal?ticket=${ticket}&cols=${cols}&rows=${rows}`
 
   socket = new WebSocket(url)
   socket.binaryType = 'arraybuffer'
