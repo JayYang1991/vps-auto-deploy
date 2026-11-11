@@ -162,6 +162,9 @@
             <div>
               <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.35rem;">监听端口</label>
               <input v-model.number="form.port" type="number" class="input" required placeholder="443" />
+              <div style="font-size: 0.72rem; color: #94a3b8; margin-top: 0.25rem;">
+                🛡️ 节点启用时将自动探测并放行主机防火墙端口 (UFW / Firewalld / iptables)
+              </div>
             </div>
           </div>
 

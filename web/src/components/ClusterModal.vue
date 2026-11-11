@@ -138,6 +138,15 @@
               <span v-else class="active-notice">✓ 当前正在管理此节点</span>
 
               <button
+                class="btn-action btn-terminal"
+                @click="openTerminalModal(item)"
+                type="button"
+                title="开启交互式 SSH / 控制台 Web 终端"
+              >
+                <span>💻 控制台</span>
+              </button>
+
+              <button
                 class="btn-action btn-prefix"
                 @click="openPrefixModal(item)"
                 type="button"
@@ -876,6 +885,14 @@
       </div>
     </div>
   </div>
+
+  <!-- Web 交互式 SSH 控制台组件 -->
+  <WebTerminal
+    v-model="showTerminal"
+    :node="terminalNode"
+    :cached-master-password="cachedMasterPassword"
+    @authenticated="handleAuthenticated"
+  />
 </template>
 
 <script setup lang="ts">
@@ -886,6 +903,7 @@ import { useToast, copyToClipboard } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
 import { getToken } from '../utils/auth'
 import VultrProvisioner from './VultrProvisioner.vue'
+import WebTerminal from './WebTerminal.vue'
 
 const props = defineProps<{
   modelValue: boolean
@@ -1329,6 +1347,20 @@ async function handleImport() {
   }
 }
 
+// ==================== Web 控制台 / SSH 终端 ====================
+const showTerminal = ref(false)
+const terminalNode = ref<any>(null)
+const cachedMasterPassword = ref('')
+
+function openTerminalModal(item: any) {
+  terminalNode.value = item
+  showTerminal.value = true
+}
+
+function handleAuthenticated(pass: string) {
+  cachedMasterPassword.value = pass
+}
+
 // ==================== 二次鉴权查看凭据 (Reveal) ====================
 const revealModalVisible = ref(false)
 const targetRevealNode = ref<NodeItem | null>(null)
@@ -1366,6 +1398,7 @@ async function submitReveal() {
       master_password: masterVerifyPassword.value,
     })
     revealedData.value = res.data
+    cachedMasterPassword.value = masterVerifyPassword.value
     toast.success('身份验证通过，凭据已解密')
 
     // 开启 60 秒倒计时自动锁定
@@ -1987,6 +2020,17 @@ onUnmounted(() => {
 }
 .btn-ping:hover {
   background: #475569;
+}
+
+.btn-terminal {
+  background: rgba(56, 189, 248, 0.15);
+  color: #38bdf8;
+  border-color: rgba(56, 189, 248, 0.35);
+}
+.btn-terminal:hover {
+  background: rgba(56, 189, 248, 0.28);
+  color: #7dd3fc;
+  border-color: #38bdf8;
 }
 
 .btn-prefix {

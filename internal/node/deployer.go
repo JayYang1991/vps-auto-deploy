@@ -570,28 +570,43 @@ WantedBy=multi-user.target
 		return
 	}
 
+	var sshPassEnc, sshKeyEnc string
+	if req.SSHPassword != "" {
+		sshPassEnc, _ = crypto.EncryptAESGCM(req.SSHPassword, key)
+	}
+	if req.SSHPrivateKey != "" {
+		sshKeyEnc, _ = crypto.EncryptAESGCM(req.SSHPrivateKey, key)
+	}
+	sshUser := strings.TrimSpace(req.SSHUser)
+	if sshUser == "" {
+		sshUser = "root"
+	}
+
 	subPrefix := strings.TrimSpace(req.SubPrefix)
 	if subPrefix == "" {
 		subPrefix = strings.TrimSpace(req.Name)
 	}
 
 	newNode := &model.Node{
-		Name:              req.Name,
-		SubPrefix:         subPrefix,
-		Host:              req.Host,
-		SSHPort:           req.SSHPort,
-		PanelPort:         req.PanelPort,
-		SecretPath:        req.SecretPath,
-		Username:          req.AdminUsername,
-		PasswordEncrypted: encryptedPass,
-		APIToken:          token,
-		IsMaster:          false,
-		UseTLS:            enableTLS,
-		CertFingerprint:   certFingerprint,
-		SSHHostKey:        remoteSSHHostKey,
-		Status:            "online",
-		OSInfo:            fmt.Sprintf("Linux (%s)", targetArch),
-		LatencyMs:         pingLatency,
+		Name:                 req.Name,
+		SubPrefix:            subPrefix,
+		Host:                 req.Host,
+		SSHPort:              req.SSHPort,
+		PanelPort:            req.PanelPort,
+		SecretPath:           req.SecretPath,
+		Username:             req.AdminUsername,
+		PasswordEncrypted:    encryptedPass,
+		APIToken:             token,
+		IsMaster:             false,
+		UseTLS:               enableTLS,
+		CertFingerprint:      certFingerprint,
+		SSHHostKey:           remoteSSHHostKey,
+		SSHUser:              sshUser,
+		SSHPasswordEncrypted: sshPassEnc,
+		SSHKeyEncrypted:      sshKeyEnc,
+		Status:               "online",
+		OSInfo:               fmt.Sprintf("Linux (%s)", targetArch),
+		LatencyMs:            pingLatency,
 	}
 
 	nodeID, err := model.CreateNode(newNode)

@@ -13,6 +13,7 @@ import (
 	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/configgen"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/pkg/netutil"
 )
 
 type InboundCreateRequest struct {
@@ -83,7 +84,9 @@ func ToggleInbound(c *gin.Context) {
 	}
 
 	var enabled bool
-	err = model.DB.QueryRow("SELECT enabled FROM inbounds WHERE id = ?", id).Scan(&enabled)
+	var port int
+	var protocol, listen string
+	err = model.DB.QueryRow("SELECT enabled, port, protocol, listen FROM inbounds WHERE id = ?", id).Scan(&enabled, &port, &protocol, &listen)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "inbound not found"})
 		return
@@ -102,6 +105,12 @@ func ToggleInbound(c *gin.Context) {
 		_ = configgen.ApplyAndReload(singbox.GetConfigPath())
 		c.JSON(http.StatusBadRequest, gin.H{"error": "入站状态切换失败，已自动回滚: " + err.Error()})
 		return
+	}
+
+	if newStatus {
+		go func() {
+			_ = netutil.AllowInboundPort(port, protocol, listen)
+		}()
 	}
 
 	c.JSON(http.StatusOK, gin.H{"id": id, "enabled": newStatus, "message": "入站节点状态已切换"})
@@ -210,6 +219,12 @@ func CreateInbound(c *gin.Context) {
 		return
 	}
 
+	if req.Enabled {
+		go func() {
+			_ = netutil.AllowInboundPort(req.Port, req.Protocol, listen)
+		}()
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"id":      id,
 		"message": "inbound created and sing-box updated",
@@ -303,6 +318,12 @@ func UpdateInbound(c *gin.Context) {
 		_ = configgen.ApplyAndReload(singbox.GetConfigPath())
 		c.JSON(http.StatusBadRequest, gin.H{"error": "入站更新后配置生效失败，已自动回滚: " + err.Error()})
 		return
+	}
+
+	if req.Enabled {
+		go func() {
+			_ = netutil.AllowInboundPort(req.Port, req.Protocol, listen)
+		}()
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "inbound updated"})

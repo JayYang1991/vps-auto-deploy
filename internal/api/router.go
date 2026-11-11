@@ -32,6 +32,9 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 		// 登录接口 (挂载防暴力破解限流中间件)
 		secGroup.POST("/api/auth/login", middleware.LoginRateLimitMiddleware(), handler.Login)
 
+		// SSH / 终端全双工 WebSocket (由单次有效的 ?ticket= 校验鉴权)
+		secGroup.GET("/api/nodes/:id/terminal", handler.NodeTerminalWS)
+
 		// 需登录的 API 接口
 		api := secGroup.Group("/api")
 		api.Use(middleware.JWTAuthMiddleware())
@@ -48,6 +51,8 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.PUT("/nodes/:id", handler.UpdateNode)
 			api.DELETE("/nodes/:id", handler.DeleteNode)
 			api.POST("/nodes/:id/reveal-credentials", handler.RevealNodeCredentials)
+			api.POST("/nodes/:id/terminal-ticket", handler.RequestTerminalTicket)
+			api.POST("/nodes/:id/ssh-credentials", handler.SaveNodeSSHCredentials)
 
 			// Vultr 云主机弹性创建与纳管
 			api.GET("/nodes/cloud/vultr/config", handler.GetVultrConfig)
