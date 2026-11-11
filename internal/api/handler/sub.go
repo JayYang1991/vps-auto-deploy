@@ -4,6 +4,9 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"net/url"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -12,6 +15,22 @@ import (
 	"vps-auto-deploy/internal/pkg/netutil"
 	"vps-auto-deploy/internal/subgen"
 )
+
+var safeHeaderFilenameRegex = regexp.MustCompile(`[^a-zA-Z0-9_\-\.]`)
+
+// buildAttachmentHeader 安全构建 Content-Disposition 标头，防御 CRLF 响应头注入并符合 RFC 6266 标准
+func buildAttachmentHeader(baseName, ext string) string {
+	cleanASCII := safeHeaderFilenameRegex.ReplaceAllString(baseName, "_")
+	if cleanASCII == "" {
+		cleanASCII = "sub"
+	}
+	cleanExt := safeHeaderFilenameRegex.ReplaceAllString(ext, "")
+	if cleanExt != "" && !strings.HasPrefix(cleanExt, ".") {
+		cleanExt = "." + cleanExt
+	}
+	encodedName := url.PathEscape(baseName)
+	return fmt.Sprintf(`attachment; filename="%s%s"; filename*=UTF-8''%s%s`, cleanASCII, cleanExt, encodedName, cleanExt)
+}
 
 func ServeSubscription(c *gin.Context) {
 	token := c.Param("token")
@@ -75,7 +94,7 @@ func ServeSubscription(c *gin.Context) {
 	// 2. 若请求的是通用 Base64 / URI 原始链接
 	if clientTarget == "base64" || clientTarget == "uri" || clientTarget == "v2ray" {
 		b64Content := base64.StdEncoding.EncodeToString([]byte(strings.Join(filteredURIs, "\n")))
-		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"sub-%s.txt\"", member.Name))
+		c.Header("Content-Disposition", buildAttachmentHeader(fmt.Sprintf("sub-%s", member.Name), ".txt"))
 		c.Header("Profile-Update-Interval", "24")
 		c.Data(http.StatusOK, "text/plain; charset=utf-8", []byte(b64Content))
 		return
@@ -156,7 +175,12 @@ func ServeSubscription(c *gin.Context) {
 	sourceNodes := strings.Join(subconverterURIs, "|")
 	body, contentType, convErr := ProxySubconverterConvert(clientTarget, sourceNodes, configTemplate, extraParams)
 	if convErr == nil && len(body) > 0 {
-		c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"sub-%s-%s.txt\"", token[:8], clientTarget))
+		tokenPrefix := token
+		if len(tokenPrefix) > 8 {
+			tokenPrefix = tokenPrefix[:8]
+		}
+		cleanTarget := safeHeaderFilenameRegex.ReplaceAllString(clientTarget, "")
+		c.Header("Content-Disposition", buildAttachmentHeader(fmt.Sprintf("sub-%s-%s", tokenPrefix, cleanTarget), ".txt"))
 		c.Header("Profile-Update-Interval", "24")
 		c.Data(http.StatusOK, contentType, body)
 		return
@@ -166,7 +190,7 @@ func ServeSubscription(c *gin.Context) {
 	if engine != "subconverter" {
 		res, genErr := subgen.GenerateSubscription(token, clientTarget, ua)
 		if genErr == nil && res != nil {
-			c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", res.Filename))
+			c.Header("Content-Disposition", buildAttachmentHeader(strings.TrimSuffix(res.Filename, filepath.Ext(res.Filename)), filepath.Ext(res.Filename)))
 			c.Header("Profile-Update-Interval", "24")
 			c.Data(http.StatusOK, res.ContentType, []byte(res.Content))
 			return

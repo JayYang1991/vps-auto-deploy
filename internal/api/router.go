@@ -73,6 +73,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			// 系统监控与日志
 			api.GET("/system/overview", handler.GetSystemOverview)
 			api.POST("/system/bbr", handler.EnableBBR)
+			api.POST("/system/stream-ticket", handler.RequestStreamTicket)
 			api.GET("/system/logs", handler.StreamLogs)
 
 			// 系统自升级与安装包管理

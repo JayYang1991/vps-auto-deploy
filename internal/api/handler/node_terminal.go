@@ -61,7 +61,7 @@ func RequestTerminalTicket(c *gin.Context) {
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(masterPassHash), []byte(req.MasterPassword)); err != nil {
-		middleware.RecordFailedLogin(c.ClientIP())
+		middleware.RecordFailedLogin(middleware.GetRealClientIP(c))
 		c.JSON(http.StatusForbidden, gin.H{"error": "主控管理员密码错误，二次安全验证失败！"})
 		return
 	}
@@ -116,7 +116,7 @@ func SaveNodeSSHCredentials(c *gin.Context) {
 	// 二次鉴权 (防爆破)
 	masterPassHash, _ := model.GetSetting("admin_password_hash")
 	if err := bcrypt.CompareHashAndPassword([]byte(masterPassHash), []byte(req.MasterPassword)); err != nil {
-		middleware.RecordFailedLogin(c.ClientIP())
+		middleware.RecordFailedLogin(middleware.GetRealClientIP(c))
 		c.JSON(http.StatusForbidden, gin.H{"error": "主控管理员密码错误，二次验证失败！"})
 		return
 	}

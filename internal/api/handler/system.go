@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"vps-auto-deploy/internal/api/middleware"
 	"vps-auto-deploy/internal/component"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/pkg/executil"
@@ -57,6 +58,20 @@ func getSelfSHA256() string {
 		return h
 	}
 	return ""
+}
+
+// RequestStreamTicket 签发供 SSE 实时日志连接使用的 30 秒有效单次票据
+func RequestStreamTicket(c *gin.Context) {
+	username, _ := c.Get("username")
+	userStr, _ := username.(string)
+	if userStr == "" {
+		userStr = "admin"
+	}
+	ticket := middleware.IssueStreamTicket(userStr, 30*time.Second)
+	c.JSON(http.StatusOK, gin.H{
+		"ticket":     ticket,
+		"expires_in": 30,
+	})
 }
 
 func GetSystemOverview(c *gin.Context) {

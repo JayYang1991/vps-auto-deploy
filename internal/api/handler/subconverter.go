@@ -596,9 +596,20 @@ func updateIniSettings(existing string, updates map[string]string) string {
 	return strings.Join(outLines, "\n")
 }
 
-// ProxySubconverterConvert 在后端向本机 127.0.0.1:25500 发起请求并透传转换输出
+// ProxySubconverterConvert 在后端向本机 127.0.0.1 发起请求并透传转换输出 (动态感知端口与 API Token 鉴权)
 func ProxySubconverterConvert(target, sourceSubURL, configTemplate string, extraParams map[string]string) ([]byte, string, error) {
-	baseURL := fmt.Sprintf("http://127.0.0.1:%d/sub", subconverter.DefaultPort)
+	port := subconverter.DefaultPort
+	if pStr, err := model.GetSetting("subconverter_port"); err == nil && pStr != "" {
+		if pVal, err := strconv.Atoi(strings.TrimSpace(pStr)); err == nil && pVal > 0 {
+			port = pVal
+		}
+	} else if pPref := subconverter.GetSettingFromPref("port"); pPref != "" {
+		if pVal, err := strconv.Atoi(strings.TrimSpace(pPref)); err == nil && pVal > 0 {
+			port = pVal
+		}
+	}
+
+	baseURL := fmt.Sprintf("http://127.0.0.1:%d/sub", port)
 	u, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, "", err
@@ -613,6 +624,16 @@ func ProxySubconverterConvert(target, sourceSubURL, configTemplate string, extra
 	if configTemplate != "" {
 		q.Set("config", configTemplate)
 	}
+
+	// 若启用了 api_access_token 鉴权保护，自动挂载访问令牌
+	apiToken, _ := model.GetSetting("subconverter_api_token")
+	if apiToken == "" {
+		apiToken = subconverter.GetSettingFromPref("api_access_token")
+	}
+	if apiToken != "" {
+		q.Set("token", strings.TrimSpace(apiToken))
+	}
+
 	for k, v := range extraParams {
 		if v != "" {
 			q.Set(k, v)

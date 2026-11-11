@@ -407,7 +407,10 @@ func extractTarGz(src, destDir string) error {
 			_ = os.MkdirAll(target, 0755)
 		case tar.TypeReg:
 			_ = os.MkdirAll(filepath.Dir(target), 0755)
-			outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, os.FileMode(header.Mode))
+			// 安全清洗权限位，严防 SUID/SGID 特殊权限逃逸与越权
+			safeMode := (os.FileMode(header.Mode) & 0755) &^ (os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
+			safeMode |= 0600
+			outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, safeMode)
 			if err != nil {
 				return err
 			}
@@ -443,7 +446,10 @@ func extractZip(src, destDir string) error {
 		if err != nil {
 			return err
 		}
-		outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, f.Mode())
+		// 安全清洗权限位，剥离 SUID/SGID 特殊位
+		safeMode := (f.Mode() & 0755) &^ (os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
+		safeMode |= 0600
+		outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, safeMode)
 		if err != nil {
 			rc.Close()
 			return err

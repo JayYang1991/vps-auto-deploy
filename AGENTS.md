@@ -262,5 +262,49 @@ type ServiceStatus struct {
     - `DISCONNECT`：记录终端断开及会话存续总时长。
   - 审计日志双轨写入：同步输出到标准系统日志（供 `journalctl` 收集）并追加持久化至 `/etc/vps-auto-deploy/audit.log`（模式 `0600`，仅管理员可读）。
 
+### 6. SSE 实时日志流短效单次票据化 (Zero-JWT in URL Query & Stream Ticket)
+- **禁止在常规 REST 接口透传 Query Token**：
+  - `JWTAuthMiddleware` 严禁在常规 REST API 接口接收 URL query `?token=`，防止管理凭据落盘留存于反向代理日志、CDN 日志及浏览器历史中。
+  - SSE 实时日志流连接（`system/logs`、`deploy-logs`、`install-logs`）统一通过 `POST /system/stream-ticket` 签发 30 秒有效期的单次随机票据（`?ticket=...`），握手升级时原子消费，彻底杜绝长期 JWT 泄露。
+
+### 7. 软件供应链安全与 SHA-256 Checksums 强校验 (Supply-Chain Hardening)
+- **拒绝未验签第三方资产**：
+  - 受管软件（`sing-box`、`cloudflared`、`subconverter`）通过 GitHub Release 或镜像下载时，必须抓取官方 Release Assets 中的校验和清单（`*checksums*.txt`、`*.sha256`）。
+  - 下载文件落地后，驱动在赋予执行权限前必须调用 `component.VerifyFileSHA256` 强校验；若指纹不匹配立即物理销毁临时文件并抛错拦截，彻底防范公共代理镜像投毒与中间人篡改。
+  - 解包 tar/zip 归档时，强制清洗权限位掩码（`& 0755` 且剥离 `setuid/setgid/sticky` 特殊权限位），杜绝恶意解包提权。
+
+### 8. 反向代理真实 IP 判定与本地回环防自封 (Reverse Proxy & Loopback Protection)
+- **智能客户端 IP 提取**：
+  - 限流器统一调用 `middleware.GetRealClientIP(c)`。
+  - 当检测到连接来自本机回环反代（`127.0.0.1`、`::1`）时，自动提取 `CF-Connecting-IP`、`X-Real-IP` 或 `X-Forwarded-For` 中的真实发起方 IP，将爆破攻击精准封禁在来源端。
+  - 对直连回环请求实施白名单豁免保护，防止前置反向代理或本机直连触发误判，造成管理员自我拒绝服务 (DoS)。
+
+### 9. 进程命令行参数脱敏与 Stdin 管道 (Zero-Credential in CLI Flags)
+- **防范 `/proc/<pid>/cmdline` 窥探**：
+  - 严禁将明文密码直接作为命令行 Flag（如 `-reset-password`）传递，避免同一宿主机低权限租户通过 `ps aux` 截获凭据。
+  - 统一支持通过 Stdin 管道安全传输凭据 JSON（`vps-panel -stdin-credentials`）。
+
+### 10. SSRF 与 DNS 重绑定防御 (Anti-DNS-Rebinding Safe HTTP Transport)
+- **连接建立时原子校验**：
+  - 网络拉取外部规则或优选 IP 时，统一采用自定义 `SafeHTTPTransport`。
+  - 在 `DialContext` 执行底层 TCP 连接的瞬间原子解析并比对 IP，拦截所有私网、回环与云厂商元数据（`169.254.169.254`）地址，彻底消除 TOCTOU 时序差导致的 DNS 重绑定绕过。
+  - 集群纳管端未启用自签 TLS 证书时，反代传输层强制挂载 `SafeHTTPTransport`，阻断利用被纳管节点发起的内网与云元数据横向渗透。
+
+### 11. 响应头安全防护与标头注入阻断 (Header Security & Anti-CRLF)
+- **HTTP 响应头注入防护**：
+  - 订阅分发下载（`Content-Disposition`）必须使用安全清洗函数 `buildAttachmentHeader`，过滤 `\r`、`\n`、`"` 与控制字符，防范 HTTP Response Splitting。
+  - 严格遵循 RFC 6266 / RFC 5987 标准（`filename="..."; filename*=UTF-8''...`），保障中文字符与跨平台客户端兼容。
+  - 订阅 Token 截取必须进行切片边界保护，杜绝短 Token 导致运行时 panic。
+- **内容安全策略 (Content-Security-Policy)**：
+  - 全局安全响应头中间件注入严苛 CSP 策略，显式限定 `default-src 'self'`、`connect-src 'self' ws: wss:` 与 `frame-ancestors 'none'`，防御 XSS 与未授权点击劫持。
+- **常数时间路径比对**：
+  - 安全入口 `SecretPathMiddleware` 使用 `subtle.ConstantTimeCompare` 比对，杜绝微秒级时序侧信道推测。
+
+### 12. Subconverter 代理鉴权与动态端口闭环
+- **感知动态配置与安全令牌**：
+  - `ProxySubconverterConvert` 自动动态读取生效端口与 `api_access_token`，在开启访问令牌的高安全模式下自动注入 `&token=...`，确保受管服务在端口变更与凭据保护下的功能闭环。
+
+
+
 
 

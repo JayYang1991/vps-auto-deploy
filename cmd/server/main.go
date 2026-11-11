@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -32,6 +34,7 @@ var (
 	resetUserFlag   = flag.String("reset-username", "", "Reset admin username")
 	resetPassFlag   = flag.String("reset-password", "", "Reset admin password")
 	resetSecretFlag = flag.String("reset-secret", "", "Reset secret path")
+	stdinCredsFlag  = flag.Bool("stdin-credentials", false, "Read credentials JSON from stdin (脱敏安全初始化)")
 	tlsFlag         = flag.Bool("tls", false, "Enable HTTPS with self-signed certificate (Phase 1 MITM protection)")
 	certFlag        = flag.String("cert", "/etc/vps-auto-deploy/cert.pem", "TLS certificate file path")
 	keyFlag         = flag.String("key", "/etc/vps-auto-deploy/key.pem", "TLS private key file path")
@@ -84,6 +87,35 @@ func main() {
 
 	// 2. 处理重置管理员账号、密码与安全路径的 CLI 参数
 	hasReset := false
+	if *stdinCredsFlag {
+		var stdinCreds struct {
+			Username   string `json:"username"`
+			Password   string `json:"password"`
+			SecretPath string `json:"secret_path"`
+		}
+		decoder := json.NewDecoder(os.Stdin)
+		if err := decoder.Decode(&stdinCreds); err == nil {
+			if stdinCreds.Username != "" {
+				_ = model.SetSetting("admin_username", stdinCreds.Username)
+				log.Printf("[CLI] Admin username set from stdin: %s", stdinCreds.Username)
+				hasReset = true
+			}
+			if stdinCreds.Password != "" {
+				hash, _ := bcrypt.GenerateFromPassword([]byte(stdinCreds.Password), bcrypt.DefaultCost)
+				_ = model.SetSetting("admin_password_hash", string(hash))
+				_ = model.SetSetting("initial_admin_password", "")
+				log.Printf("[CLI] Admin password has been securely reset via stdin.")
+				hasReset = true
+			}
+			if stdinCreds.SecretPath != "" {
+				_ = model.SetSetting("secret_path", strings.Trim(stdinCreds.SecretPath, "/"))
+				log.Printf("[CLI] Secret path reset from stdin: /%s/", strings.Trim(stdinCreds.SecretPath, "/"))
+				hasReset = true
+			}
+		} else {
+			log.Fatalf("Failed to decode credentials from stdin: %v", err)
+		}
+	}
 	if *resetUserFlag != "" {
 		_ = model.SetSetting("admin_username", *resetUserFlag)
 		log.Printf("[CLI] Admin username set to: %s", *resetUserFlag)

@@ -81,7 +81,12 @@ func FetchAndSavePreferredIPs() (*FetchResult, error) {
 	}
 	req.Header.Set("User-Agent", DefaultUserAgent)
 
-	client := &http.Client{Timeout: 15 * time.Second}
+	var client *http.Client
+	if skipSSRFValidationForTest {
+		client = &http.Client{Timeout: 15 * time.Second}
+	} else {
+		client = netutil.CreateSafeHTTPClient(15 * time.Second)
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		recordFailure(fmt.Sprintf("连接远端订阅源超时或失败: %v", err))

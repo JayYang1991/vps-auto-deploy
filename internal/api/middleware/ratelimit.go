@@ -2,7 +2,9 @@ package middleware
 
 import (
 	"fmt"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -65,10 +67,47 @@ func cleanupExpiredLimiters() {
 	subLimiterMu.Unlock()
 }
 
+// GetRealClientIP 智能获取客户端真实 IP：
+// 1. 若连接来自本机回环 (127.0.0.1, ::1)，说明前置存在反向代理 (Nginx/Cloudflare Tunnel/Caddy)，
+//    优先解析 CF-Connecting-IP, X-Real-IP 或 X-Forwarded-For，精准识别真实来源，防止误封 127.0.0.1。
+// 2. 否则严格使用 c.ClientIP() / RemoteAddr，杜绝外网客户端伪造 X-Forwarded-For。
+func GetRealClientIP(c *gin.Context) string {
+	remoteIP := c.ClientIP()
+	if host, _, err := net.SplitHostPort(c.Request.RemoteAddr); err == nil && host != "" {
+		remoteIP = host
+	}
+
+	isLoopback := remoteIP == "127.0.0.1" || remoteIP == "::1" || strings.HasPrefix(remoteIP, "127.")
+	if isLoopback {
+		if cfIP := strings.TrimSpace(c.GetHeader("CF-Connecting-IP")); cfIP != "" && net.ParseIP(cfIP) != nil {
+			return cfIP
+		}
+		if realIP := strings.TrimSpace(c.GetHeader("X-Real-IP")); realIP != "" && net.ParseIP(realIP) != nil {
+			return realIP
+		}
+		if xff := c.GetHeader("X-Forwarded-For"); xff != "" {
+			parts := strings.Split(xff, ",")
+			if len(parts) > 0 {
+				first := strings.TrimSpace(parts[0])
+				if net.ParseIP(first) != nil {
+					return first
+				}
+			}
+		}
+	}
+	return c.ClientIP()
+}
+
 // LoginRateLimitMiddleware 针对登录接口的防暴力破解中间件（基于客户端真实 IP）
 func LoginRateLimitMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ip := c.ClientIP()
+		ip := GetRealClientIP(c)
+
+		// 本地回环直接访问保护：若确系本机直连未携带反代头，豁免锁定，防止自断管理连接 (DoS)
+		if ip == "127.0.0.1" || ip == "::1" {
+			c.Next()
+			return
+		}
 
 		loginLimiterMu.Lock()
 		attempt, exists := loginAttempts[ip]
@@ -95,6 +134,11 @@ func LoginRateLimitMiddleware() gin.HandlerFunc {
 
 // RecordFailedLogin 记录一次登录失败
 func RecordFailedLogin(ip string) {
+	// 回环地址豁免锁定，防止自断管理连接
+	if ip == "127.0.0.1" || ip == "::1" {
+		return
+	}
+
 	loginLimiterMu.Lock()
 	defer loginLimiterMu.Unlock()
 
@@ -124,10 +168,10 @@ func ResetLoginAttempts(ip string) {
 	delete(loginAttempts, ip)
 }
 
-// SubscriptionRateLimitMiddleware 针对公开订阅接口的防扫描与防压测限流中间件 (单 IP 每分钟最多 60 次)
+// SubscriptionRateLimitMiddleware 针对公开订阅接口的防扫描与防压测限流中间件 (单真实 IP 每分钟最多 60 次)
 func SubscriptionRateLimitMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ip := c.ClientIP()
+		ip := GetRealClientIP(c)
 		now := time.Now()
 
 		subLimiterMu.Lock()

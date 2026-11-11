@@ -374,7 +374,7 @@ func DeleteVultrInstance(c *gin.Context) {
 
 	masterPassHash, err := model.GetSetting("admin_password_hash")
 	if err != nil || bcrypt.CompareHashAndPassword([]byte(masterPassHash), []byte(strings.TrimSpace(req.MasterPassword))) != nil {
-		middleware.RecordFailedLogin(c.ClientIP())
+		middleware.RecordFailedLogin(middleware.GetRealClientIP(c))
 		c.JSON(http.StatusForbidden, gin.H{"error": "主控管理员密码错误，二次安全验证失败！拒绝销毁云主机"})
 		return
 	}

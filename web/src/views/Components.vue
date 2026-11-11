@@ -305,7 +305,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute } from 'vue-router'
-import api, { getSecretPath } from '../api'
+import api, { getSecretPath, getStreamTicket } from '../api'
 import { useToast, copyToClipboard } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
 import { getToken } from '../utils/auth'
@@ -417,10 +417,11 @@ async function startInstall(c: ServiceStatus) {
     return
   }
 
-  // 建立 SSE 流接收安装日志
+  // 建立 SSE 流接收安装日志 (优先使用一次性脱敏 Stream Ticket)
   const secret = getSecretPath()
-  const token = getToken() || ''
-  const sseUrl = `/${secret}/api/components/${c.name}/install-logs?token=${token}`
+  const ticket = await getStreamTicket()
+  const authParam = ticket ? `ticket=${ticket}` : `token=${getToken() || ''}`
+  const sseUrl = `/${secret}/api/components/${c.name}/install-logs?${authParam}`
 
   if (installModal.eventSource) {
     installModal.eventSource.close()
@@ -528,15 +529,16 @@ async function componentAction(name: string, action: string) {
   }
 }
 
-function openLogs(unit: string) {
+async function openLogs(unit: string) {
   logModal.unit = unit
   logModal.lines = []
   logModal.show = true
 
   const secret = getSecretPath()
-  const token = getToken() || ''
+  const ticket = await getStreamTicket()
+  const authParam = ticket ? `ticket=${ticket}` : `token=${getToken() || ''}`
   const activeNodeId = localStorage.getItem('active_node_id') || '1'
-  let url = `/${secret}/api/system/logs?unit=${unit}&token=${token}`
+  let url = `/${secret}/api/system/logs?unit=${unit}&${authParam}`
   if (activeNodeId !== '1') {
     url += `&node_id=${activeNodeId}`
   }

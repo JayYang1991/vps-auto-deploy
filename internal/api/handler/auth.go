@@ -49,13 +49,13 @@ func Login(c *gin.Context) {
 	passErr := bcrypt.CompareHashAndPassword([]byte(hashedPass), []byte(req.Password))
 
 	if !userMatches || passErr != nil {
-		middleware.RecordFailedLogin(c.ClientIP())
+		middleware.RecordFailedLogin(middleware.GetRealClientIP(c))
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "incorrect username or password"})
 		return
 	}
 
 	// 认证通过，重置该 IP 失败尝试记录
-	middleware.ResetLoginAttempts(c.ClientIP())
+	middleware.ResetLoginAttempts(middleware.GetRealClientIP(c))
 
 	// 根据是否勾选“记住我”决定 JWT 签发生命周期 (未勾选 24 小时，勾选 7 天)
 	duration := 24 * time.Hour
@@ -95,7 +95,7 @@ func UpdatePassword(c *gin.Context) {
 
 	hashedPass, _ := model.GetSetting("admin_password_hash")
 	if err := bcrypt.CompareHashAndPassword([]byte(hashedPass), []byte(req.OldPassword)); err != nil {
-		middleware.RecordFailedLogin(c.ClientIP())
+		middleware.RecordFailedLogin(middleware.GetRealClientIP(c))
 		c.JSON(http.StatusBadRequest, gin.H{"error": "old password is incorrect"})
 		return
 	}

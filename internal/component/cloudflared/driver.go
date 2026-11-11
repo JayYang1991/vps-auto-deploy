@@ -106,14 +106,22 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 		return fmt.Errorf("asset %s not found in release %s", targetName, rel.TagName)
 	}
 
+	// 抓取并解析 Release 官方 Checksums (防软件供应链投毒)
+	logFn("正在获取官方 Release 校验和清单...")
+	checksums := component.FetchReleaseChecksums(rel)
+	expectedHash := checksums[targetName]
+	if expectedHash != "" {
+		logFn(fmt.Sprintf("已识别到官方 SHA-256 签名: %s...", expectedHash[:16]))
+	}
+
 	tmpBinary := filepath.Join(os.TempDir(), fmt.Sprintf("cloudflared-%s", rel.TagName))
 	defer os.Remove(tmpBinary)
 
-	logFn(fmt.Sprintf("开始下载资产: %s", downloadURL))
-	if err := component.DownloadFile(downloadURL, tmpBinary); err != nil {
-		return fmt.Errorf("download failed: %w", err)
+	logFn(fmt.Sprintf("开始下载资产并强校验哈希: %s", downloadURL))
+	if err := component.DownloadFileWithChecksum(downloadURL, tmpBinary, expectedHash); err != nil {
+		return fmt.Errorf("download/verify failed: %w", err)
 	}
-	logFn("资产下载完成，开始安装...")
+	logFn("资产下载并完成供应链完整性校验，开始安装...")
 
 	targetBinary := component.GetDefaultBinaryPath(DriverName)
 	_ = os.MkdirAll(filepath.Dir(targetBinary), 0755)

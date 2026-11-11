@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 )
@@ -108,6 +109,44 @@ func init() {
 	}
 }
 
+// IsSafePublicIP 检查单个 IP 是否为安全的公网 IP (拦截回环、私网、云元数据及受限保留地址)
+func IsSafePublicIP(ip net.IP, isLiteralIP bool) error {
+	if os.Getenv("ALLOW_PRIVATE_IP") == "1" {
+		return nil
+	}
+
+	// IPv4-mapped IPv6 规整化 (例如 ::ffff:127.0.0.1 规整为 127.0.0.1)
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+
+	if ip.IsLoopback() {
+		return fmt.Errorf("【SSRF拦截】禁止访问回环地址 (127.0.0.0/8, ::1)")
+	}
+	if ip.IsPrivate() {
+		return fmt.Errorf("【SSRF拦截】禁止访问局域网/私有地址 (RFC 1918 / RFC 4193)")
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return fmt.Errorf("【SSRF拦截】禁止访问链路本地/云元数据地址 (169.254.0.0/16, fe80::/10)")
+	}
+	if ip.IsUnspecified() || ip.IsMulticast() {
+		return fmt.Errorf("【SSRF拦截】禁止访问未指定或多播地址")
+	}
+
+	for _, cidr := range blockedCIDRs {
+		if cidr.Contains(ip) {
+			// 针对 198.18.0.0/15 (RFC 2544)，在开发或生产环境使用透明代理 (如 Clash/sing-box Fake-IP 模式) 时，
+			// DNS 会将所有公网域名解析为 198.18.x.x。
+			// 为保障透明代理环境兼容性，仅在输入为显式字面量 IP (isLiteralIP) 时拦截，域名解析出的 Fake-IP 予以豁免。
+			if benchmarkCIDR != nil && benchmarkCIDR.String() == cidr.String() && !isLiteralIP {
+				continue
+			}
+			return fmt.Errorf("【SSRF拦截】目标 IP (%s) 命中了受限地址块 (%s)", ip.String(), cidr.String())
+		}
+	}
+	return nil
+}
+
 // ValidatePublicURL 验证 URL 是否为合法的公网 Web 地址，拦截私网/内网/回环/元数据等 SSRF 敏感地址
 func ValidatePublicURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
@@ -146,38 +185,80 @@ func ValidatePublicURL(rawURL string) error {
 	}
 
 	for _, ip := range ips {
-		// IPv4-mapped IPv6 规整化 (例如 ::ffff:127.0.0.1 规整为 127.0.0.1)
-		if v4 := ip.To4(); v4 != nil {
-			ip = v4
-		}
-
-		if ip.IsLoopback() {
-			return fmt.Errorf("【SSRF拦截】禁止访问回环地址 (127.0.0.0/8, ::1)")
-		}
-		if ip.IsPrivate() {
-			return fmt.Errorf("【SSRF拦截】禁止访问局域网/私有地址 (RFC 1918 / RFC 4193)")
-		}
-		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			return fmt.Errorf("【SSRF拦截】禁止访问链路本地/云元数据地址 (169.254.0.0/16, fe80::/10)")
-		}
-		if ip.IsUnspecified() || ip.IsMulticast() {
-			return fmt.Errorf("【SSRF拦截】禁止访问未指定或多播地址")
-		}
-
-		for _, cidr := range blockedCIDRs {
-			if cidr.Contains(ip) {
-				// 针对 198.18.0.0/15 (RFC 2544)，在开发或生产环境使用透明代理 (如 Clash/sing-box Fake-IP 模式) 时，
-				// DNS 会将所有公网域名解析为 198.18.x.x。
-				// 为保障透明代理环境兼容性，仅在输入为显式字面量 IP (isLiteralIP) 时拦截，域名解析出的 Fake-IP 予以豁免。
-				if benchmarkCIDR != nil && benchmarkCIDR.String() == cidr.String() && !isLiteralIP {
-					continue
-				}
-				return fmt.Errorf("【SSRF拦截】目标 IP (%s) 命中了受限地址块 (%s)", ip.String(), cidr.String())
-			}
+		if err := IsSafePublicIP(ip, isLiteralIP); err != nil {
+			return err
 		}
 	}
 
 	return nil
+}
+
+// CreateSafeHTTPTransport 创建原生免疫 DNS 重绑定 (Anti-DNS-Rebinding) 的安全 HTTP Transport：
+// 在底层建立 TCP 握手的瞬时原子解析并校验目标 IP，杜绝 TOCTOU 时序差逃逸
+func CreateSafeHTTPTransport(timeout time.Duration) *http.Transport {
+	dialer := &net.Dialer{
+		Timeout:   timeout,
+		KeepAlive: 30 * time.Second,
+	}
+
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+
+			// 敏感主机名过滤
+			lowerHost := strings.ToLower(host)
+			if lowerHost == "localhost" || strings.HasSuffix(lowerHost, ".localhost") || strings.HasSuffix(lowerHost, ".local") {
+				return nil, fmt.Errorf("【SSRF拦截】禁止访问本地主机: %s", host)
+			}
+
+			isLiteralIP := false
+			var ips []net.IP
+			if parsed := net.ParseIP(host); parsed != nil {
+				isLiteralIP = true
+				ips = []net.IP{parsed}
+			} else {
+				resolved, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+				if err != nil {
+					return nil, fmt.Errorf("解析域名失败: %w", err)
+				}
+				ips = resolved
+			}
+
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("未找到可用的 IP 地址")
+			}
+
+			// 遍历并连接首个经合规性验证通过的公网 IP (消灭 DNS 重绑定窗口)
+			var dialErr error
+			for _, ip := range ips {
+				if err := IsSafePublicIP(ip, isLiteralIP); err != nil {
+					return nil, fmt.Errorf("【SSRF DNS Rebinding拦截】%w", err)
+				}
+				targetAddr := net.JoinHostPort(ip.String(), port)
+				conn, err := dialer.DialContext(ctx, network, targetAddr)
+				if err == nil {
+					return conn, nil
+				}
+				dialErr = err
+			}
+			return nil, dialErr
+		},
+		ResponseHeaderTimeout: timeout,
+		TLSHandshakeTimeout:   10 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          100,
+	}
+}
+
+// CreateSafeHTTPClient 创建原生抵御 SSRF 与 DNS 重绑定的安全 HTTP 客户端
+func CreateSafeHTTPClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Transport: CreateSafeHTTPTransport(timeout),
+		Timeout:   timeout,
+	}
 }
 
 

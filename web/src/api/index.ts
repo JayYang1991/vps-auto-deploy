@@ -50,5 +50,15 @@ api.interceptors.response.use(
   }
 )
 
+// 快速获取单次有效的 SSE 实时日志流票据 (脱敏，防止 URL 暴露长期 JWT)
+export async function getStreamTicket(): Promise<string> {
+  try {
+    const res = await api.post('/system/stream-ticket')
+    return res.data?.ticket || ''
+  } catch {
+    return ''
+  }
+}
+
 export default api
 

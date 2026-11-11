@@ -1,17 +1,74 @@
 package middleware
 
 import (
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/golang-jwt/jwt/v5"
 	"vps-auto-deploy/internal/model"
 )
+
+type streamTicketInfo struct {
+	Username  string
+	ExpiresAt time.Time
+}
+
+var (
+	streamTicketMu sync.RWMutex
+	streamTickets  = make(map[string]streamTicketInfo)
+)
+
+// IssueStreamTicket 签发 30 秒单次有效的 SSE 实时日志流临时 Ticket (消除 URL 中的长期 JWT 泄露隐患)
+func IssueStreamTicket(username string, ttl time.Duration) string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	ticket := hex.EncodeToString(b)
+
+	streamTicketMu.Lock()
+	defer streamTicketMu.Unlock()
+
+	now := time.Now()
+	for k, v := range streamTickets {
+		if now.After(v.ExpiresAt) {
+			delete(streamTickets, k)
+		}
+	}
+
+	streamTickets[ticket] = streamTicketInfo{
+		Username:  username,
+		ExpiresAt: now.Add(ttl),
+	}
+	return ticket
+}
+
+// ValidateAndConsumeStreamTicket 验证并单次消费 SSE Stream Ticket (防重放)
+func ValidateAndConsumeStreamTicket(ticket string) (string, bool) {
+	if ticket == "" {
+		return "", false
+	}
+	streamTicketMu.Lock()
+	defer streamTicketMu.Unlock()
+
+	info, exists := streamTickets[ticket]
+	if !exists {
+		return "", false
+	}
+	delete(streamTickets, ticket)
+
+	if time.Now().After(info.ExpiresAt) {
+		return "", false
+	}
+	return info.Username, true
+}
 
 type Claims struct {
 	Username string `json:"username"`
@@ -42,12 +99,12 @@ func GenerateJWTWithDuration(username string, duration time.Duration) (string, e
 	return token.SignedString([]byte(secret))
 }
 
-// SecretPathMiddleware 验证 URL 第一级目录是否匹配系统安全入口路径
+// SecretPathMiddleware 验证 URL 第一级目录是否匹配系统安全入口路径 (常数时间比对，防时序侧信道攻击)
 func SecretPathMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		reqSecret := c.Param("secret")
 		actualSecret, err := model.GetSetting("secret_path")
-		if err != nil || reqSecret != actualSecret {
+		if err != nil || actualSecret == "" || subtle.ConstantTimeCompare([]byte(reqSecret), []byte(actualSecret)) != 1 {
 			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
@@ -55,9 +112,21 @@ func SecretPathMiddleware() gin.HandlerFunc {
 	}
 }
 
-// JWTAuthMiddleware 验证 Bearer Token (支持 Authorization Header 或 URL Query 中的 token 参数)
+// JWTAuthMiddleware 验证 Bearer Token (支持 Authorization Header、一次性 Stream Ticket 或限流白名单 SSE Query Token)
 func JWTAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		// 1. 优先校验单次有效短期的 Stream Ticket (针对 SSE 实时日志流，杜绝 URL 暴露长期 JWT)
+		if ticket := c.Query("ticket"); ticket != "" {
+			if username, ok := ValidateAndConsumeStreamTicket(ticket); ok {
+				c.Set("username", username)
+				c.Next()
+				return
+			}
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired stream ticket"})
+			return
+		}
+
+		// 2. 从 Authorization Header 提取 Bearer Token
 		tokenStr := ""
 		authHeader := c.GetHeader("Authorization")
 		if authHeader != "" {
@@ -67,13 +136,24 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 			}
 		}
 
-		// 若 Header 中无 Token，允许从 URL query 中的 token 参数获取 (针对 EventSource / SSE 场景)
+		// 3. 若 Header 中无 Token，仅严格限制在 SSE 实时流白名单端点允许读取 URL query 中的 token 参数作为向后兼容
 		if tokenStr == "" {
-			tokenStr = c.Query("token")
+			tokenQuery := c.Query("token")
+			if tokenQuery != "" {
+				reqPath := c.Request.URL.Path
+				isAllowedSSE := strings.Contains(reqPath, "logs") || strings.Contains(reqPath, "sse")
+				if !isAllowedSSE {
+					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+						"error": "安全拦截：禁止在常规 REST API 中通过 URL Query 传递 Token，请使用 Authorization 请求头或申请 Stream Ticket",
+					})
+					return
+				}
+				tokenStr = tokenQuery
+			}
 		}
 
 		if tokenStr == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authorization header or token query required"})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "authorization header or stream ticket required"})
 			return
 		}
 
@@ -127,6 +207,8 @@ func SecurityHeadersMiddleware() gin.HandlerFunc {
 		c.Writer.Header().Set("X-XSS-Protection", "1; mode=block")
 		// 严控 Referrer 泄露系统 Secret 路径
 		c.Writer.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		// 注入严苛内容安全策略 (CSP)，防范 XSS、未授权脚本与恶意跨站嵌入
+		c.Writer.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none';")
 		// 若为 HTTPS 连接，自动启用 HSTS
 		if c.Request.TLS != nil {
 			c.Writer.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")

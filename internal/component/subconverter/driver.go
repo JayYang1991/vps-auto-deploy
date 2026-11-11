@@ -160,10 +160,11 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 		return fmt.Errorf("unsupported arch for subconverter: %s", arch)
 	}
 
-	var downloadURL string
+	var downloadURL, targetAssetName string
 	for _, asset := range rel.Assets {
 		if strings.Contains(asset.Name, pattern) {
 			downloadURL = asset.BrowserDownloadURL
+			targetAssetName = asset.Name
 			break
 		}
 	}
@@ -171,14 +172,22 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 		return fmt.Errorf("asset for arch %s (pattern %s) not found in release %s", arch, pattern, rel.TagName)
 	}
 
+	// 抓取并解析 Release 官方 Checksums (防软件供应链投毒)
+	logFn("正在获取官方 Release 校验和清单...")
+	checksums := component.FetchReleaseChecksums(rel)
+	expectedHash := checksums[targetAssetName]
+	if expectedHash != "" {
+		logFn(fmt.Sprintf("已识别到官方 SHA-256 签名: %s...", expectedHash[:16]))
+	}
+
 	tmpArchive := filepath.Join(os.TempDir(), fmt.Sprintf("subconverter-%s.tar.gz", rel.TagName))
 	defer os.Remove(tmpArchive)
 
-	logFn(fmt.Sprintf("开始下载 Subconverter 资产包: %s", downloadURL))
-	if err := component.DownloadFile(downloadURL, tmpArchive); err != nil {
-		return fmt.Errorf("download failed: %w", err)
+	logFn(fmt.Sprintf("开始安全下载资产: %s", downloadURL))
+	if err := component.DownloadFileWithChecksum(downloadURL, tmpArchive, expectedHash); err != nil {
+		return fmt.Errorf("download/verify failed: %w", err)
 	}
-	logFn("资产包下载完成，正在停止现有服务以释放文件锁并解压资产...")
+	logFn("资产包下载并完成供应链完整性校验，正在停止现有服务以释放文件锁并解压资产...")
 	_ = d.systemd.Stop()
 
 	compDir := GetComponentDir()
@@ -556,7 +565,10 @@ func extractTarGzToDir(archivePath, destDir string) error {
 			}
 
 			tmpPath := targetPath + ".tmp"
-			outFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, header.FileInfo().Mode())
+			// 安全清洗权限位，严防 SUID/SGID 特殊权限位继承
+			safeMode := (header.FileInfo().Mode() & 0755) &^ (os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
+			safeMode |= 0600
+			outFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, safeMode)
 			if err != nil {
 				return err
 			}

@@ -460,19 +460,30 @@ func RunDeploySSH(task *DeployTask, req DeploySSHRequest) {
 		task.AddLog("跨架构二进制下载完成")
 	}
 
-	// 5. 初始化远端管理员账号、密码及安全路径
-	task.AddLog("初始化被纳管节点的凭据与安全入口...")
-	initCmd := fmt.Sprintf(
-		"/usr/local/bin/vps-panel -reset-username '%s' -reset-password '%s' -reset-secret '%s'",
-		strings.ReplaceAll(req.AdminUsername, "'", `'\''`),
-		strings.ReplaceAll(req.AdminPassword, "'", `'\''`),
-		strings.ReplaceAll(req.SecretPath, "'", `'\''`),
-	)
-	if out, err := runSSHCmd(initCmd); err != nil {
-		task.Status = "failed"
-		task.Error = fmt.Sprintf("初始化远端凭据失败: %v (%s)", err, out)
-		task.AddLog("[ERROR] " + task.Error)
-		return
+	// 5. 初始化远端管理员账号、密码及安全路径 (通过 Stdin 管道传输，严防 /proc 进程树暴露密码)
+	task.AddLog("初始化被纳管节点的凭据与安全入口 (安全 Stdin 管道模式)...")
+	credsJSON, _ := json.Marshal(map[string]string{
+		"username":    req.AdminUsername,
+		"password":    req.AdminPassword,
+		"secret_path": req.SecretPath,
+	})
+	stdinInitCmd := fmt.Sprintf("cat <<'EOF' | /usr/local/bin/vps-panel -stdin-credentials\n%s\nEOF\n", string(credsJSON))
+	out, err := runSSHCmd(stdinInitCmd)
+	if err != nil {
+		// 优雅向后兼容：若远端二进制版本过低不支持 -stdin-credentials，降级为参数模式
+		task.AddLog("远端版本可能暂未启用 -stdin-credentials，降级兼容处理...")
+		fallbackCmd := fmt.Sprintf(
+			"/usr/local/bin/vps-panel -reset-username '%s' -reset-password '%s' -reset-secret '%s'",
+			strings.ReplaceAll(req.AdminUsername, "'", `'\''`),
+			strings.ReplaceAll(req.AdminPassword, "'", `'\''`),
+			strings.ReplaceAll(req.SecretPath, "'", `'\''`),
+		)
+		if fbOut, fbErr := runSSHCmd(fallbackCmd); fbErr != nil {
+			task.Status = "failed"
+			task.Error = fmt.Sprintf("初始化远端凭据失败: %v (%s / %s)", fbErr, out, fbOut)
+			task.AddLog("[ERROR] " + task.Error)
+			return
+		}
 	}
 	task.AddLog(fmt.Sprintf("远端管理员账号已置为: %s, 安全入口: /%s/", req.AdminUsername, req.SecretPath))
 

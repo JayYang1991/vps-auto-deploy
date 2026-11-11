@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -100,6 +101,99 @@ func TestJWTAuthQueryToken(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected 200 OK via query token, got %d", w.Code)
+	}
+
+	// 2. 常规 REST 端点禁止通过 URL Query 传递 Token
+	r.GET("/protected-api/nodes", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"status": "ok"})
+	})
+	wRest := httptest.NewRecorder()
+	reqRest, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/protected-api/nodes?token=%s", token), nil)
+	r.ServeHTTP(wRest, reqRest)
+	if wRest.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for REST endpoint with query token, got %d", wRest.Code)
+	}
+
+	// 3. 单次有效的 Stream Ticket 能够成功鉴权并防重放
+	ticket := IssueStreamTicket("stream_user", 10*time.Second)
+	wTicket := httptest.NewRecorder()
+	reqTicket, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/protected-sse?ticket=%s", ticket), nil)
+	r.ServeHTTP(wTicket, reqTicket)
+	if wTicket.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK via stream ticket, got %d", wTicket.Code)
+	}
+
+	// 再次消费已作废的 ticket 必须失败 (防重放)
+	wReplay := httptest.NewRecorder()
+	reqReplay, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/protected-sse?ticket=%s", ticket), nil)
+	r.ServeHTTP(wReplay, reqReplay)
+	if wReplay.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for replayed stream ticket, got %d", wReplay.Code)
+	}
+}
+
+func TestSecretPathMiddlewareAndCSP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dbPath := setupAuthTestDB(t)
+	defer os.Remove(dbPath)
+
+	_ = model.SetSetting("secret_path", "sec_portal_888")
+
+	r := gin.New()
+	r.Use(SecurityHeadersMiddleware())
+	sec := r.Group("/:secret")
+	sec.Use(SecretPathMiddleware())
+	sec.GET("/ping", func(c *gin.Context) {
+		c.String(http.StatusOK, "pong")
+	})
+
+	// 1. 正确的安全路径 -> 200 OK + CSP 标头
+	w1 := httptest.NewRecorder()
+	req1, _ := http.NewRequest(http.MethodGet, "/sec_portal_888/ping", nil)
+	r.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", w1.Code)
+	}
+	csp := w1.Header().Get("Content-Security-Policy")
+	if csp == "" || !strings.Contains(csp, "default-src 'self'") || !strings.Contains(csp, "frame-ancestors 'none'") {
+		t.Fatalf("expected strict CSP header, got: %s", csp)
+	}
+
+	// 2. 错误的安全路径 -> 404 Not Found
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest(http.MethodGet, "/wrong_secret_123/ping", nil)
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 Not Found for wrong secret path, got %d", w2.Code)
+	}
+}
+
+func TestSubscriptionRateLimitWithRealClientIP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	r := gin.New()
+	r.Use(SubscriptionRateLimitMiddleware())
+	r.GET("/sub/:token", func(c *gin.Context) {
+		c.String(http.StatusOK, "sub content")
+	})
+
+	// 模拟来自反向代理 (127.0.0.1) 但携带不同真实客户端 IP 的请求
+	w1 := httptest.NewRecorder()
+	req1, _ := http.NewRequest(http.MethodGet, "/sub/tok1", nil)
+	req1.RemoteAddr = "127.0.0.1:54321"
+	req1.Header.Set("CF-Connecting-IP", "203.0.113.199")
+	r.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for subscriber 1, got %d", w1.Code)
+	}
+
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest(http.MethodGet, "/sub/tok2", nil)
+	req2.RemoteAddr = "127.0.0.1:54321"
+	req2.Header.Set("CF-Connecting-IP", "203.0.113.200")
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for subscriber 2, got %d", w2.Code)
 	}
 }
 

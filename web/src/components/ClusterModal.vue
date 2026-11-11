@@ -897,7 +897,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, watch, nextTick, onUnmounted, computed } from 'vue'
-import api, { getSecretPath } from '../api'
+import api, { getSecretPath, getStreamTicket } from '../api'
 import { useNodeContext, NodeItem } from '../composables/useNodeContext'
 import { useToast, copyToClipboard } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
@@ -1199,10 +1199,11 @@ async function startDeploy() {
     const res = await api.post('/nodes/deploy', deployReq)
     const taskId = res.data.task_id
 
-    // 建立 SSE 日志连接
+    // 建立 SSE 日志连接 (优先使用脱敏单次 Stream Ticket)
     const secret = getSecretPath()
-    const token = getToken() || ''
-    const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&token=${token}`
+    const ticket = await getStreamTicket()
+    const authParam = ticket ? `ticket=${ticket}` : `token=${getToken() || ''}`
+    const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&${authParam}`
 
     if (eventSource) {
       eventSource.close()
@@ -1607,8 +1608,9 @@ async function startUpgrade() {
     const taskId = res.data.task_id
 
     const secret = getSecretPath()
-    const token = getToken() || ''
-    const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&token=${token}`
+    const ticket = await getStreamTicket()
+    const authParam = ticket ? `ticket=${ticket}` : `token=${getToken() || ''}`
+    const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&${authParam}`
 
     if (upgradeEventSource) {
       upgradeEventSource.close()

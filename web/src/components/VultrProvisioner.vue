@@ -734,7 +734,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
-import api, { getSecretPath } from '../api'
+import api, { getSecretPath, getStreamTicket } from '../api'
 import { useToast } from '../composables/useToast'
 import { useNodeContext } from '../composables/useNodeContext'
 import { getToken } from '../utils/auth'
@@ -1064,11 +1064,12 @@ function getLineClass(line: string) {
   return ''
 }
 
-// 订阅部署日志流
-function subscribeDeployLogs(taskId: string) {
+// 订阅部署日志流 (优先使用脱敏 Stream Ticket)
+async function subscribeDeployLogs(taskId: string) {
   const secret = getSecretPath()
-  const token = getToken() || ''
-  const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&token=${token}`
+  const ticket = await getStreamTicket()
+  const authParam = ticket ? `ticket=${ticket}` : `token=${getToken() || ''}`
+  const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&${authParam}`
 
   if (eventSource) eventSource.close()
   eventSource = new EventSource(streamURL)

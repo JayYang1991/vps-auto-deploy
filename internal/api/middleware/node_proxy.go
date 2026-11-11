@@ -16,6 +16,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/pkg/crypto"
+	"vps-auto-deploy/internal/pkg/netutil"
 )
 
 var (
@@ -109,6 +110,9 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 		// 防中间人攻击 (Phase 1)：若启用 TLS，注入带有硬件证书指纹锁定的长连接 Transport
 		if targetNode.UseTLS {
 			proxy.Transport = getPinnedTransport(targetNode.ID, targetNode.CertFingerprint)
+		} else {
+			// 防内网与云元数据 SSRF 探测：非 TLS 节点注入安全 Transport，阻断回环与私网探测
+			proxy.Transport = netutil.CreateSafeHTTPTransport(30 * time.Second)
 		}
 
 		// 代理响应后置处理：节点在线自愈与系统概览 IP 兜底补齐

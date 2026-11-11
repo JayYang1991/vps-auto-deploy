@@ -204,11 +204,12 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 	}
 
 	// 匹配类似 sing-box-1.11.0-linux-amd64.tar.gz
-	var downloadURL string
+	var downloadURL, targetAssetName string
 	pattern := fmt.Sprintf("linux-%s.tar.gz", arch)
 	for _, asset := range rel.Assets {
 		if strings.Contains(asset.Name, pattern) {
 			downloadURL = asset.BrowserDownloadURL
+			targetAssetName = asset.Name
 			break
 		}
 	}
@@ -217,14 +218,22 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 		return fmt.Errorf("asset for arch %s not found in release %s", arch, rel.TagName)
 	}
 
+	// 获取并比对 Release 官方 SHA-256 Checksums (防软件供应链投毒与镜像劫持)
+	logFn("正在获取官方 Release 校验和清单...")
+	checksums := component.FetchReleaseChecksums(rel)
+	expectedHash := checksums[targetAssetName]
+	if expectedHash != "" {
+		logFn(fmt.Sprintf("已识别到官方 SHA-256 签名: %s...", expectedHash[:16]))
+	}
+
 	tmpArchive := filepath.Join(os.TempDir(), fmt.Sprintf("singbox-%s.tar.gz", rel.TagName))
 	defer os.Remove(tmpArchive)
 
-	logFn(fmt.Sprintf("开始下载资产: %s", downloadURL))
-	if err := component.DownloadFile(downloadURL, tmpArchive); err != nil {
-		return fmt.Errorf("download failed: %w", err)
+	logFn(fmt.Sprintf("开始安全下载资产: %s", downloadURL))
+	if err := component.DownloadFileWithChecksum(downloadURL, tmpArchive, expectedHash); err != nil {
+		return fmt.Errorf("download/verify failed: %w", err)
 	}
-	logFn("资产下载完成，开始解压与校验...")
+	logFn("资产下载并完成供应链完整性校验，开始解压...")
 
 	tmpBinary, err := extractBinary(tmpArchive, "sing-box")
 	if err != nil {
