@@ -11,12 +11,15 @@ import (
 	"time"
 
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/pkg/netutil"
 )
 
 const (
 	DefaultSubURL   = "https://sub.19910417.xyz/sub?host={host}&uuid={uuid}"
 	DefaultUserAgent = "v2rayN/edgetunnel (https://github.com/cmliu/edgetunnel)"
 )
+
+var skipSSRFValidationForTest = false
 
 type FetchResult struct {
 	Count     int       `json:"count"`
@@ -62,6 +65,14 @@ func FetchAndSavePreferredIPs() (*FetchResult, error) {
 	reqURL := subURLTpl
 	reqURL = strings.ReplaceAll(reqURL, "{host}", url.QueryEscape(host))
 	reqURL = strings.ReplaceAll(reqURL, "{uuid}", url.QueryEscape(uuidStr))
+
+	// SSRF 防御拦截：校验是否为合法的公网地址
+	if !skipSSRFValidationForTest {
+		if err := netutil.ValidatePublicURL(reqURL); err != nil {
+			recordFailure(fmt.Sprintf("优选 IP 订阅源 URL 安全拦截: %v", err))
+			return nil, fmt.Errorf("SSRF 校验未通过: %w", err)
+		}
+	}
 
 	req, err := http.NewRequest("GET", reqURL, nil)
 	if err != nil {

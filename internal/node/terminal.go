@@ -255,8 +255,7 @@ func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int, user, cli
 
 // handleRemoteSSHSession 建立至远程纳管节点的 SSH PTY 会话
 func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, initRows int, user, clientIP, tempUser, tempPass, tempKey string) {
-	jwtSecret, _ := model.GetSetting("jwt_secret")
-	key := crypto.DeriveKey(jwtSecret)
+	key := model.GetEncryptionKey()
 
 	sshUser := node.SSHUser
 	if sshUser == "" {
@@ -320,6 +319,10 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 			currentFP := ssh.FingerprintSHA256(key)
 			if node.SSHHostKey != "" && currentFP != node.SSHHostKey {
 				return fmt.Errorf("【安全拦截】SSH 主机指纹不匹配！已记录: %s, 实际: %s (防中间人冒充)", node.SSHHostKey, currentFP)
+			}
+			if node.SSHHostKey == "" {
+				node.SSHHostKey = currentFP
+				_ = model.UpdateNodeSSHHostKey(node.ID, currentFP)
 			}
 			return nil
 		},

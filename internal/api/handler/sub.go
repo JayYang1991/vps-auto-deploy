@@ -114,6 +114,16 @@ func ServeSubscription(c *gin.Context) {
 		if configTemplate == "config/custom_rules.ini" {
 			_ = EnsureCustomRulesFile()
 		}
+
+		if strings.HasPrefix(configTemplate, "http://") || strings.HasPrefix(configTemplate, "https://") {
+			if err := netutil.ValidatePublicURL(configTemplate); err != nil {
+				c.String(http.StatusBadRequest, "Invalid config template: %v", err)
+				return
+			}
+		} else if !IsSafeLocalTemplate(configTemplate) {
+			c.String(http.StatusBadRequest, "Invalid config template: 仅支持公网 HTTP/HTTPS 远程链接或受管本地分流规则模板 (如 config/custom_rules.ini)")
+			return
+		}
 	}
 
 	extraParams := make(map[string]string)

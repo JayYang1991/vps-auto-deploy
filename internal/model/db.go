@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -38,6 +39,7 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	}
 
 	DB = db
+	ClearSettingsCache()
 
 	if err := migrate(); err != nil {
 		return nil, fmt.Errorf("migrate db error: %w", err)
@@ -197,20 +199,29 @@ func migrate() error {
 }
 
 func initDefaults() error {
-	// 1. 初始化 JWT 密钥
+	// 1. 初始化 JWT 传输密钥与静态敏感数据加密密钥（密钥隔离体系 Key Separation）
 	if _, err := GetSetting("jwt_secret"); err != nil {
 		b := make([]byte, 32)
 		rand.Read(b)
 		SetSetting("jwt_secret", hex.EncodeToString(b))
 	}
+	if _, err := GetSetting("data_encryption_key"); err != nil {
+		b := make([]byte, 32)
+		rand.Read(b)
+		SetSetting("data_encryption_key", hex.EncodeToString(b))
+	}
 
-	// 2. 初始化管理员账号（默认 admin / admin888，提示用户首次登录修改）
+	// 2. 初始化管理员账号（初次生成高强随机密码，杜绝默认弱口令风险）
 	if _, err := GetSetting("admin_username"); err != nil {
 		SetSetting("admin_username", "admin")
 	}
 	if _, err := GetSetting("admin_password_hash"); err != nil {
-		hash, _ := bcrypt.GenerateFromPassword([]byte("admin888"), bcrypt.DefaultCost)
+		b := make([]byte, 8)
+		rand.Read(b)
+		initPass := "admin_" + hex.EncodeToString(b)
+		hash, _ := bcrypt.GenerateFromPassword([]byte(initPass), bcrypt.DefaultCost)
 		SetSetting("admin_password_hash", string(hash))
+		SetSetting("initial_admin_password", initPass)
 	}
 
 	// 3. 初始化安全访问入口 (Secret Base Path)
@@ -488,10 +499,44 @@ func UpdateNodeToken(id int64, token string) error {
 	return err
 }
 
+// UpdateNodeSSHHostKey 首次建立连接时持久化记录目标主机 SSH 指纹 (TOFU 防冒充)
+func UpdateNodeSSHHostKey(id int64, hostKey string) error {
+	_, err := DB.Exec("UPDATE nodes SET ssh_host_key = ?, updated_at = ? WHERE id = ?", hostKey, time.Now(), id)
+	return err
+}
+
 // DeleteNode 删除节点（主控本机禁止删除）
 func DeleteNode(id int64) error {
 	_, err := DB.Exec("DELETE FROM nodes WHERE id = ? AND is_master = 0", id)
 	return err
+}
+
+var (
+	settingsCacheMu sync.RWMutex
+	settingsCache   = make(map[string]string)
+)
+
+// ClearSettingsCache 清空配置内存缓存（支持测试用例与重新初始化）
+func ClearSettingsCache() {
+	settingsCacheMu.Lock()
+	settingsCache = make(map[string]string)
+	settingsCacheMu.Unlock()
+}
+
+// GetEncryptionKey 获取数据静态加密 (Data-at-Rest) 专用的 AES-256 密钥
+// 严格遵循密钥隔离体系 (NIST SP 800-57)，将静态敏感凭据主密钥与 JWT 会话传输签名密钥彻底解耦
+func GetEncryptionKey() []byte {
+	keyHex, err := GetSetting("data_encryption_key")
+	if err == nil && keyHex != "" {
+		if b, err := hex.DecodeString(keyHex); err == nil && len(b) == 32 {
+			return b
+		}
+	}
+	// 兼容老版本已有数据：若尚未独立生成，基于已有 jwt_secret 派生并安全持久化
+	jwtSecret, _ := GetSetting("jwt_secret")
+	derived := crypto.DeriveKey(jwtSecret)
+	_ = SetSetting("data_encryption_key", hex.EncodeToString(derived))
+	return derived
 }
 
 // GetVultrAPIKey 获取解密后的 Vultr API Token
@@ -500,15 +545,13 @@ func GetVultrAPIKey() (string, error) {
 	if err != nil || enc == "" {
 		return "", err
 	}
-	jwtSecret, _ := GetSetting("jwt_secret")
-	key := crypto.DeriveKey(jwtSecret)
+	key := GetEncryptionKey()
 	return crypto.DecryptAESGCM(enc, key)
 }
 
 // SetVultrAPIKey 加密存储 Vultr API Token
 func SetVultrAPIKey(apiKey string) error {
-	jwtSecret, _ := GetSetting("jwt_secret")
-	key := crypto.DeriveKey(jwtSecret)
+	key := GetEncryptionKey()
 	enc, err := crypto.EncryptAESGCM(apiKey, key)
 	if err != nil {
 		return err
@@ -516,19 +559,35 @@ func SetVultrAPIKey(apiKey string) error {
 	return SetSetting("vultr_api_key_encrypted", enc)
 }
 
-// GetSetting 获取单个配置
+// GetSetting 获取单个配置（集成内存缓存，消除热点请求对 SQLite 锁的高频争用）
 func GetSetting(key string) (string, error) {
-	var val string
-	err := DB.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&val)
+	settingsCacheMu.RLock()
+	val, ok := settingsCache[key]
+	settingsCacheMu.RUnlock()
+	if ok {
+		return val, nil
+	}
+
+	var dbVal string
+	err := DB.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&dbVal)
 	if err != nil {
 		return "", err
 	}
-	return val, nil
+
+	settingsCacheMu.Lock()
+	settingsCache[key] = dbVal
+	settingsCacheMu.Unlock()
+	return dbVal, nil
 }
 
-// SetSetting 写入或更新配置
+// SetSetting 写入或更新配置并同步刷新内存缓存
 func SetSetting(key, val string) error {
 	_, err := DB.Exec("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, val)
+	if err == nil {
+		settingsCacheMu.Lock()
+		settingsCache[key] = val
+		settingsCacheMu.Unlock()
+	}
 	return err
 }
 

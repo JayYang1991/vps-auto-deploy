@@ -1,11 +1,13 @@
 package cfpref
 
 import (
+	"fmt"
 	"log"
 	"strings"
 	"time"
 
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/pkg/netutil"
 )
 
 var lastDailyRunDate string
@@ -157,6 +159,13 @@ func SaveSettings(settings map[string]interface{}) error {
 
 		switch k {
 		case "sub_url":
+			if valStr != "" {
+				testURL := strings.ReplaceAll(valStr, "{host}", "cloudflare.com")
+				testURL = strings.ReplaceAll(testURL, "{uuid}", "00000000-0000-0000-0000-000000000000")
+				if err := netutil.ValidatePublicURL(testURL); err != nil {
+					return fmt.Errorf("优选订阅源 URL 不合法或触发安全拦截: %w", err)
+				}
+			}
 			_ = model.SetSetting("cf_pref_sub_url", valStr)
 		case "host":
 			_ = model.SetSetting("cf_pref_host", valStr)

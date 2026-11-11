@@ -12,6 +12,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 	"vps-auto-deploy/internal/api"
+	"vps-auto-deploy/internal/api/middleware"
 	"vps-auto-deploy/internal/cfpref"
 	"vps-auto-deploy/internal/component"
 	"vps-auto-deploy/internal/component/cloudflared"
@@ -139,6 +140,16 @@ func main() {
 	// 6. 启动 Cloudflare 优选 IP 定时拉取与调度协程
 	cfpref.StartWorker()
 
+	// 7. 注册集群透明反向代理 Token 失效自愈刷新器
+	middleware.NodeTokenRefresher = func(targetNode *model.Node, rawPass string) (string, error) {
+		newToken, err := node.LoginNode(targetNode.Host, targetNode.PanelPort, targetNode.SecretPath, targetNode.Username, rawPass, targetNode.UseTLS, targetNode.CertFingerprint)
+		if err == nil && newToken != "" {
+			_ = model.UpdateNodeToken(targetNode.ID, newToken)
+			targetNode.APIToken = newToken
+		}
+		return newToken, err
+	}
+
 	r := api.SetupRouter(WebFS)
 
 	addr := fmt.Sprintf(":%d", *portFlag)
@@ -164,7 +175,11 @@ func main() {
 	fmt.Printf(" [!] Access URL:   %s://%s:%d/%s/\n", protocol, publicIP, *portFlag, secretPath)
 	fmt.Printf(" [!] Local URL:    %s://127.0.0.1:%d/%s/\n", protocol, *portFlag, secretPath)
 	fmt.Printf(" [!] Admin User:   %s\n", adminUser)
-	if isDefaultPass {
+	initialPass, _ := model.GetSetting("initial_admin_password")
+	if initialPass != "" {
+		fmt.Printf(" [!] [ALERT] 系统初次部署，已生成高强度随机初始密码: %s\n", initialPass)
+		fmt.Printf(" [!]         请妥善保存该密码，并登录后台前往「设置」修改！\n")
+	} else if isDefaultPass {
 		fmt.Printf(" [!] [ALERT] 当前仍在使用默认弱密码: admin888 (请立即在后台修改!)\n")
 	} else {
 		fmt.Printf(" [!] Admin Pass:   [CONFIGURED & PROTECTED]\n")

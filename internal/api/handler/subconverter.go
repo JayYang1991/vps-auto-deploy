@@ -17,6 +17,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"vps-auto-deploy/internal/component/subconverter"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/pkg/netutil"
 	"vps-auto-deploy/internal/subgen"
 )
 
@@ -202,6 +203,18 @@ func SaveSubconverterConfig(c *gin.Context) {
 	if req.Port < 0 || req.Port > 65535 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "监听端口必须在 1 ~ 65535 之间"})
 		return
+	}
+
+	if defCfg := strings.TrimSpace(req.DefaultConfig); defCfg != "" {
+		if strings.HasPrefix(defCfg, "http://") || strings.HasPrefix(defCfg, "https://") {
+			if err := netutil.ValidatePublicURL(defCfg); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "外部规则配置 URL 安全校验失败: " + err.Error()})
+				return
+			}
+		} else if !IsSafeLocalTemplate(defCfg) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "非法的受管规则模板路径: 仅支持受管本地模板 (如 config/custom_rules.ini) 或公网 URL"})
+			return
+		}
 	}
 
 	if strings.TrimSpace(req.RawContent) != "" {
@@ -473,6 +486,23 @@ func SaveSubconverterPreferences(c *gin.Context) {
 	}
 	if req.Template == "" {
 		req.Template = "config/ACL4SSR_Online.ini"
+	}
+
+	// SSRF 防御校验：当选用自定义模板或外部 URL 时，必须验证目标为合法公网地址
+	if req.Template == "custom" || strings.HasPrefix(req.Template, "http://") || strings.HasPrefix(req.Template, "https://") {
+		targetURL := strings.TrimSpace(req.CustomTemplateURL)
+		if req.Template != "custom" {
+			targetURL = strings.TrimSpace(req.Template)
+		}
+		if targetURL != "" {
+			if err := netutil.ValidatePublicURL(targetURL); err != nil {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "自定义模板 URL 安全校验失败: " + err.Error()})
+				return
+			}
+		}
+	} else if !IsSafeLocalTemplate(req.Template) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "非法的受管规则模板路径: 仅支持受管本地模板 (如 config/custom_rules.ini) 或公网 URL"})
+		return
 	}
 
 	_ = model.SetSetting("subconverter_pref_target", req.Target)
@@ -777,9 +807,21 @@ func IsSafeLocalTemplate(tpl string) bool {
 		return false
 	}
 
-	// 如果请求的是 custom_rules.ini，确保其落地存在
-	if clean == "config/custom_rules.ini" {
-		_ = EnsureCustomRulesFile()
+	// 官方受管预设规则模板集合（即使用户尚未安装组件到宿主机磁盘，业务层亦可安全引用）
+	knownPresets := map[string]bool{
+		"config/custom_rules.ini":                    true,
+		"config/ACL4SSR_Online.ini":                  true,
+		"config/ACL4SSR_Online_Full.ini":             true,
+		"config/ACL4SSR_Online_Mini.ini":             true,
+		"config/ACL4SSR_Online_Full_AdblockPlus.ini": true,
+		"config/ACL4SSR_Online_NoAuto.ini":           true,
+		"config/ACL4SSR_Online_MultiCountry.ini":     true,
+	}
+	if knownPresets[clean] {
+		if clean == "config/custom_rules.ini" {
+			_ = EnsureCustomRulesFile()
+		}
+		return true
 	}
 
 	fi, err := os.Stat(fullPath)

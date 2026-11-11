@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -183,6 +185,16 @@ func CreateInbound(c *gin.Context) {
 		return
 	}
 
+	if req.Port < 1 || req.Port > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "入站端口必须在 1 ~ 65535 之间"})
+		return
+	}
+	req.Tag = strings.TrimSpace(req.Tag)
+	if !regexp.MustCompile(`^[a-zA-Z0-9_\-\.]{1,64}$`).MatchString(req.Tag) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "入站 Tag 格式不合法 (仅支持1-64位字母、数字、点号、短横线与下划线)"})
+		return
+	}
+
 	listen := req.Listen
 	if listen == "" {
 		if req.Protocol == "vless-ws" || req.Protocol == "socks" || req.Protocol == "mixed" || req.Protocol == "http" {
@@ -242,6 +254,16 @@ func UpdateInbound(c *gin.Context) {
 	var req InboundCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.Port < 1 || req.Port > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "入站端口必须在 1 ~ 65535 之间"})
+		return
+	}
+	req.Tag = strings.TrimSpace(req.Tag)
+	if !regexp.MustCompile(`^[a-zA-Z0-9_\-\.]{1,64}$`).MatchString(req.Tag) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "入站 Tag 格式不合法 (仅支持1-64位字母、数字、点号、短横线与下划线)"})
 		return
 	}
 
@@ -413,6 +435,40 @@ func ApplySingboxConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "sing-box configuration verified and reloaded successfully"})
 }
 
+// isAllowedSingboxConfigPath 校验 sing-box 配置文件路径是否安全合法，防止任意系统敏感文件探测或破坏性覆盖
+func isAllowedSingboxConfigPath(p string) bool {
+	clean := filepath.Clean(strings.TrimSpace(p))
+	if clean == "" || strings.Contains(clean, "..") {
+		return false
+	}
+	if strings.ToLower(filepath.Ext(clean)) != ".json" {
+		return false
+	}
+	defaultPath := filepath.Clean(singbox.GetConfigPath())
+	if clean == defaultPath {
+		return true
+	}
+
+	allowedDirs := []string{
+		"/etc/vps-auto-deploy",
+		"/etc/sing-box",
+		"/usr/local/etc/sing-box",
+		filepath.Dir(defaultPath),
+		os.TempDir(),
+	}
+	if home := os.Getenv("HOME"); home != "" {
+		allowedDirs = append(allowedDirs, filepath.Join(home, ".config/vps-auto-deploy"))
+		allowedDirs = append(allowedDirs, filepath.Join(home, ".config/sing-box"))
+	}
+	for _, dir := range allowedDirs {
+		cleanDir := filepath.Clean(dir)
+		if clean == cleanDir || strings.HasPrefix(clean, cleanDir+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
 // ImportExistingInbounds 从宿主机已有 sing-box 配置文件一键导入节点与用户
 func ImportExistingInbounds(c *gin.Context) {
 	cfgPath := singbox.GetConfigPath()
@@ -420,8 +476,12 @@ func ImportExistingInbounds(c *gin.Context) {
 		Path string `json:"path"`
 	}
 	_ = c.ShouldBindJSON(&req)
-	if strings.TrimSpace(req.Path) != "" {
-		cfgPath = strings.TrimSpace(req.Path)
+	if customPath := strings.TrimSpace(req.Path); customPath != "" {
+		if !isAllowedSingboxConfigPath(customPath) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "非法配置文件路径，仅支持受管目录下的 .json 配置文件"})
+			return
+		}
+		cfgPath = customPath
 	}
 
 	if _, err := os.Stat(cfgPath); err != nil {

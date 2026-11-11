@@ -17,14 +17,15 @@ import (
 func SetupRouter(webFS fs.FS) *gin.Engine {
 	gin.SetMode(gin.ReleaseMode)
 	r := gin.New()
+	_ = r.SetTrustedProxies(nil) // 严防未信任代理导致 X-Forwarded-For 伪造真实客户端 IP
 	r.RedirectTrailingSlash = false
 	r.RedirectFixedPath = false
 	r.Use(gin.Recovery())
 	r.Use(middleware.SecurityHeadersMiddleware())
 	r.Use(middleware.CORSMiddleware())
 
-	// 1. 公开免认证订阅接口
-	r.GET("/sub/:token", handler.ServeSubscription)
+	// 1. 公开免认证订阅接口 (挂载防频度压测与扫描中间件)
+	r.GET("/sub/:token", middleware.SubscriptionRateLimitMiddleware(), handler.ServeSubscription)
 
 	// 2. 带安全路径前缀的 API 区域 /:secret/api/...
 	secGroup := r.Group("/:secret")

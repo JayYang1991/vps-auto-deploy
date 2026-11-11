@@ -1,9 +1,11 @@
 package cloudflared
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -149,13 +151,35 @@ func (d *Driver) ConfigureService(mode, token string, localPort int, protocol st
 		bin = component.GetDefaultBinaryPath(DriverName)
 	}
 
+	cleanMode := strings.ToLower(strings.TrimSpace(mode))
+	if cleanMode != "token" && cleanMode != "quick" {
+		cleanMode = "quick"
+	}
+
+	cleanProto := strings.ToLower(strings.TrimSpace(protocol))
+	if cleanProto == "" {
+		cleanProto = "auto"
+	}
+	if cleanProto != "auto" && cleanProto != "quic" && cleanProto != "http2" {
+		return fmt.Errorf("非法 protocol 传输协议: %s (仅允许 auto, quic, http2)", protocol)
+	}
+
+	if localPort <= 0 || localPort > 65535 {
+		return fmt.Errorf("非法本地端口: %d", localPort)
+	}
+
 	var execArgs string
-	if mode == "token" && token != "" {
-		protoArg := ""
-		if protocol != "" && protocol != "auto" {
-			protoArg = fmt.Sprintf("--protocol %s ", protocol)
+	if cleanMode == "token" && token != "" {
+		cleanToken := strings.TrimSpace(token)
+		// 阻断换行或控制字符，防止 Systemd Unit 文件注入
+		if !regexp.MustCompile(`^[A-Za-z0-9_\-\.]{10,512}$`).MatchString(cleanToken) {
+			return errors.New("非法 Cloudflared Tunnel Token 格式 (仅允许字母、数字、短横线、下划线与点)")
 		}
-		execArgs = fmt.Sprintf("tunnel %srun --token %s", protoArg, token)
+		protoArg := ""
+		if cleanProto != "auto" {
+			protoArg = fmt.Sprintf("--protocol %s ", cleanProto)
+		}
+		execArgs = fmt.Sprintf("tunnel %srun --token %s", protoArg, cleanToken)
 	} else {
 		execArgs = fmt.Sprintf("tunnel --url http://127.0.0.1:%d --no-autoupdate", localPort)
 	}

@@ -81,6 +81,18 @@ func TestNodeCRUD(t *testing.T) {
 		t.Fatalf("GetVultrAPIKey failed: got %s, err: %v", apiKey, err)
 	}
 
+	// Test Key Separation & Settings Cache
+	encKey1 := GetEncryptionKey()
+	if len(encKey1) != 32 {
+		t.Fatalf("expected 32 bytes encryption key, got %d", len(encKey1))
+	}
+	// Verify cache hits
+	_ = SetSetting("cache_test_key", "hello_cache")
+	cachedVal, err := GetSetting("cache_test_key")
+	if err != nil || cachedVal != "hello_cache" {
+		t.Fatalf("expected cached val hello_cache, got %s, err: %v", cachedVal, err)
+	}
+
 	// Update status
 	_ = UpdateNodeStatus(id, "offline", 999)
 	fetched, _ = GetNode(id)

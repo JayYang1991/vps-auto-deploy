@@ -34,6 +34,16 @@ vless://uuid-1@104.238.148.149:443?encryption=none#HK-Test
 	_ = model.SetSetting("cf_pref_host", "test.com")
 	_ = model.SetSetting("cf_pref_uuid", "uuid-1")
 
+	// 1. 验证默认 SSRF 拦截生效 (ts.URL 为 127.0.0.1 回环地址)
+	_, errSSRF := FetchAndSavePreferredIPs()
+	if errSSRF == nil {
+		t.Fatalf("expected SSRF block for %s, but passed", ts.URL)
+	}
+
+	// 2. 豁免 SSRF 后验证解析逻辑
+	skipSSRFValidationForTest = true
+	defer func() { skipSSRFValidationForTest = false }()
+
 	res, err := FetchAndSavePreferredIPs()
 	if err != nil {
 		t.Fatalf("FetchAndSavePreferredIPs failed: %v", err)

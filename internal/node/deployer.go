@@ -181,8 +181,7 @@ func PingNode(node *model.Node) (int64, error) {
 	// 若 Token 失效 (401)，尝试使用保存的加密密码重新登录刷新 Token
 	if err == nil && resp.StatusCode == http.StatusUnauthorized {
 		resp.Body.Close()
-		jwtSecret, _ := model.GetSetting("jwt_secret")
-		rawPass, decErr := crypto.DecryptAESGCM(node.PasswordEncrypted, crypto.DeriveKey(jwtSecret))
+		rawPass, decErr := crypto.DecryptAESGCM(node.PasswordEncrypted, model.GetEncryptionKey())
 		if decErr == nil && rawPass != "" {
 			newToken, logErr := LoginNode(node.Host, node.PanelPort, node.SecretPath, node.Username, rawPass, node.UseTLS, node.CertFingerprint)
 			if logErr == nil && newToken != "" {
@@ -585,9 +584,8 @@ WantedBy=multi-user.target
 	}
 	task.AddLog(fmt.Sprintf("远端握手成功！获取到集群通信 Token，网络延迟: %d ms", pingLatency))
 
-	// 9. AES-256-GCM 加密被纳管节点的登录密码并持久化入库
-	jwtSecret, _ := model.GetSetting("jwt_secret")
-	key := crypto.DeriveKey(jwtSecret)
+	// 9. AES-256-GCM 加密被纳管节点的登录密码并持久化入库 (使用独立数据加密密钥)
+	key := model.GetEncryptionKey()
 	encryptedPass, err := crypto.EncryptAESGCM(req.AdminPassword, key)
 	if err != nil {
 		task.Status = "failed"
@@ -777,8 +775,7 @@ func RunUpgradeAPI(task *DeployTask, req UpgradeRequest) {
 		} else if ovResp.StatusCode == http.StatusUnauthorized && targetNode.PasswordEncrypted != "" {
 			ovResp.Body.Close()
 			task.AddLog("目标节点 API Token 已过期，正在使用主控密钥解密凭据刷新 Token...")
-			jwtSecret, _ := model.GetSetting("jwt_secret")
-			rawPass, decErr := crypto.DecryptAESGCM(targetNode.PasswordEncrypted, crypto.DeriveKey(jwtSecret))
+			rawPass, decErr := crypto.DecryptAESGCM(targetNode.PasswordEncrypted, model.GetEncryptionKey())
 			if decErr == nil && rawPass != "" {
 				newToken, logErr := LoginNode(targetNode.Host, targetNode.PanelPort, targetNode.SecretPath, targetNode.Username, rawPass, targetNode.UseTLS, targetNode.CertFingerprint)
 				if logErr == nil && newToken != "" {

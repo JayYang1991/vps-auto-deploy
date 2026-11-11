@@ -2,9 +2,49 @@ package node
 
 import (
 	"os"
+	"strings"
 	"testing"
 	"time"
+
+	"vps-auto-deploy/internal/model"
 )
+
+func TestEnsureMasterSSHKeyPairEncrypted(t *testing.T) {
+	_, err := model.InitDB(":memory:")
+	if err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+
+	privPEM, pubAuth, err := EnsureMasterSSHKeyPair()
+	if err != nil {
+		t.Fatalf("EnsureMasterSSHKeyPair failed: %v", err)
+	}
+	if !strings.Contains(privPEM, "OPENSSH PRIVATE KEY") {
+		t.Errorf("expected valid OpenSSH private key PEM")
+	}
+	if !strings.Contains(pubAuth, "ssh-ed25519") {
+		t.Errorf("expected valid ssh-ed25519 public key")
+	}
+
+	// 验证私钥在数据库中被加密，明文键被清空
+	encPriv, errEnc := model.GetSetting("cloud_ssh_private_key_encrypted")
+	if errEnc != nil || encPriv == "" {
+		t.Fatalf("expected encrypted private key to be saved in db")
+	}
+	if encPriv == privPEM {
+		t.Fatalf("private key was saved in plaintext!")
+	}
+	legacyPriv, _ := model.GetSetting("cloud_ssh_private_key")
+	if legacyPriv != "" {
+		t.Errorf("legacy plaintext cloud_ssh_private_key should be empty, got: %s", legacyPriv)
+	}
+
+	// 再次调用，能够正确解密还原原私钥
+	priv2, pub2, err := EnsureMasterSSHKeyPair()
+	if err != nil || priv2 != privPEM || pub2 != pubAuth {
+		t.Errorf("expected idempotent decrypted key retrieval")
+	}
+}
 
 func TestDeployTaskPubSub(t *testing.T) {
 	task := CreateDeployTask("Node 1", "192.168.1.100")

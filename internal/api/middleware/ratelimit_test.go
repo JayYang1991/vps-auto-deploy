@@ -53,3 +53,34 @@ func TestLoginRateLimitMiddleware(t *testing.T) {
 		t.Fatalf("expected 200 after reset, got %d", wAfterReset.Code)
 	}
 }
+
+func TestSubscriptionRateLimitMiddleware(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	r := gin.New()
+	r.GET("/sub/:token", SubscriptionRateLimitMiddleware(), func(c *gin.Context) {
+		c.String(http.StatusOK, "subscription content")
+	})
+
+	testIP := "198.51.100.1"
+
+	// 模拟请求直到达到上限
+	for i := 1; i <= subMaxPerMinute; i++ {
+		req := httptest.NewRequest(http.MethodGet, "/sub/test-token", nil)
+		req.RemoteAddr = testIP + ":54321"
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("request %d expected 200, got %d", i, w.Code)
+		}
+	}
+
+	// 超过上限应返回 429
+	reqOver := httptest.NewRequest(http.MethodGet, "/sub/test-token", nil)
+	reqOver.RemoteAddr = testIP + ":54321"
+	wOver := httptest.NewRecorder()
+	r.ServeHTTP(wOver, reqOver)
+	if wOver.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429 after exceeding limit, got %d", wOver.Code)
+	}
+}

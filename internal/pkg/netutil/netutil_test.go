@@ -17,7 +17,7 @@ func TestValidatePublicURL(t *testing.T) {
 		}
 	}
 
-	// 2. 内网、回环、元数据、非法协议应该被拦截
+	// 2. 内网、回环、元数据、非法协议、CGNAT、保留段应该被拦截
 	invalidURLs := []string{
 		"http://127.0.0.1:20888/api",
 		"http://localhost:25500/sub",
@@ -25,6 +25,13 @@ func TestValidatePublicURL(t *testing.T) {
 		"http://10.0.0.1:8080/admin",
 		"http://192.168.1.1/",
 		"http://172.16.0.1/status",
+		"http://100.64.0.1/cgnat",
+		"http://198.18.0.1/benchmark",
+		"http://0.0.0.0/test",
+		"http://[::1]/test",
+		"http://[fc00::1]/test",
+		"http://[fe80::1]/test",
+		"http://[::ffff:127.0.0.1]/test",
 		"ftp://example.com/test",
 		"file:///etc/passwd",
 		"://bad-url",

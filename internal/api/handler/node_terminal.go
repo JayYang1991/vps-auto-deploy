@@ -127,8 +127,7 @@ func SaveNodeSSHCredentials(c *gin.Context) {
 		return
 	}
 
-	jwtSecret, _ := model.GetSetting("jwt_secret")
-	key := crypto.DeriveKey(jwtSecret)
+	key := model.GetEncryptionKey()
 
 	var passEnc, keyEnc string
 	if req.SSHPassword != "" {

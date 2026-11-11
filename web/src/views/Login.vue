@@ -15,7 +15,7 @@
 
         <div>
           <label style="display: block; font-size: 0.875rem; color: #cbd5e1; margin-bottom: 0.5rem;">密码</label>
-          <input v-model="password" class="input" type="password" placeholder="默认 admin888" required />
+          <input v-model="password" class="input" type="password" placeholder="请输入管理员密码" required />
         </div>
 
         <div style="display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; color: #94a3b8; user-select: none;">

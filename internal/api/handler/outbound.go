@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -88,6 +89,16 @@ func CreateOutbound(c *gin.Context) {
 		return
 	}
 
+	if req.ServerPort < 0 || req.ServerPort > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "出站服务器端口必须在 0 ~ 65535 之间"})
+		return
+	}
+	req.Tag = strings.TrimSpace(req.Tag)
+	if !regexp.MustCompile(`^[a-zA-Z0-9_\-\.]{1,64}$`).MatchString(req.Tag) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "出站 Tag 格式不合法 (仅支持1-64位字母、数字、点号、短横线与下划线)"})
+		return
+	}
+
 	specStr := string(req.Spec)
 	if specStr == "" || specStr == "null" {
 		specStr = "{}"
@@ -136,6 +147,16 @@ func UpdateOutbound(c *gin.Context) {
 	var req OutboundRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.ServerPort < 0 || req.ServerPort > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "出站服务器端口必须在 0 ~ 65535 之间"})
+		return
+	}
+	req.Tag = strings.TrimSpace(req.Tag)
+	if !regexp.MustCompile(`^[a-zA-Z0-9_\-\.]{1,64}$`).MatchString(req.Tag) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "出站 Tag 格式不合法 (仅支持1-64位字母、数字、点号、短横线与下划线)"})
 		return
 	}
 
@@ -420,8 +441,12 @@ func LoadSingboxFromDisk(c *gin.Context) {
 		Path string `json:"path"`
 	}
 	_ = c.ShouldBindJSON(&req)
-	if strings.TrimSpace(req.Path) != "" {
-		cfgPath = strings.TrimSpace(req.Path)
+	if customPath := strings.TrimSpace(req.Path); customPath != "" {
+		if !isAllowedSingboxConfigPath(customPath) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "非法配置文件路径，仅支持受管目录下的 .json 配置文件"})
+			return
+		}
+		cfgPath = customPath
 	}
 
 	if _, err := os.Stat(cfgPath); err != nil {

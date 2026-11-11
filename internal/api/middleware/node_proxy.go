@@ -21,6 +21,9 @@ import (
 var (
 	proxyTransportMutex sync.RWMutex
 	proxyTransports     = make(map[string]*http.Transport)
+
+	// NodeTokenRefresher 供外部注册在远端节点 Token 过期返回 401 时自动重登刷新 Token
+	NodeTokenRefresher func(targetNode *model.Node, rawPass string) (string, error)
 )
 
 func getPinnedTransport(nodeID int64, fingerprint string) *http.Transport {
@@ -113,6 +116,16 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 			// 若远端正常响应 (非 5xx 宕机)，自动自愈纠正节点在线状态
 			if resp.StatusCode < 500 && targetNode.Status != "online" {
 				_ = model.UpdateNodeStatus(targetNode.ID, "online", 50)
+			}
+
+			// 若远端返回 401 Token 失效且保存有凭据，异步触发平滑自愈刷新
+			if resp.StatusCode == http.StatusUnauthorized && targetNode.PasswordEncrypted != "" && NodeTokenRefresher != nil {
+				go func() {
+					rawPass, decErr := crypto.DecryptAESGCM(targetNode.PasswordEncrypted, model.GetEncryptionKey())
+					if decErr == nil && rawPass != "" {
+						_, _ = NodeTokenRefresher(targetNode, rawPass)
+					}
+				}()
 			}
 
 			// 当请求系统概览时，若远端检测到的公网 IP 为空或 127.0.0.1，自动补齐为已知节点的直连 Host

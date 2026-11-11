@@ -3,9 +3,9 @@ package upgrade
 import (
 	"archive/tar"
 	"archive/zip"
-	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
+	"debug/buildinfo"
 	"debug/elf"
 	"encoding/hex"
 	"encoding/json"
@@ -87,34 +87,34 @@ func ParseELFArch(filePath string) (string, error) {
 	}
 }
 
-// ExtractVersionFromBinary 尝试执行二进制 -version 提取版本号
+// ExtractVersionFromBinary 静态分析二进制提取版本号（纯静态读取，绝不被动执行未受信任的可执行文件）
 func ExtractVersionFromBinary(filePath string) string {
-	_ = os.Chmod(filePath, 0755)
-	cmd := exec.Command(filePath, "-version")
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stdout
+	// 1. 首选 Go 原生 buildinfo 静态读取
+	if bi, err := buildinfo.ReadFile(filePath); err == nil {
+		if bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+			return bi.Main.Version
+		}
+		for _, s := range bi.Settings {
+			if s.Key == "vcs.revision" && len(s.Value) >= 7 {
+				return "git-" + s.Value[:7]
+			}
+		}
+	}
 
-	// 限制 2 秒超时
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Run()
-	}()
-
-	select {
-	case err := <-done:
-		if err == nil {
-			out := stdout.String()
+	// 2. 备选方案：从文件前 4MB 静态扫描语义化版本正则
+	f, err := os.Open(filePath)
+	if err == nil {
+		defer f.Close()
+		buf := make([]byte, 4*1024*1024)
+		n, _ := io.ReadFull(f, buf)
+		if n > 0 {
 			re := regexp.MustCompile(`v[0-9]+\.[0-9]+(\.[0-9]+)?(-[a-zA-Z0-9.]+)?`)
-			if m := re.FindString(out); m != "" {
+			if m := re.FindString(string(buf[:n])); m != "" {
 				return m
 			}
 		}
-	case <-time.After(2 * time.Second):
-		if cmd.Process != nil {
-			_ = cmd.Process.Kill()
-		}
 	}
+
 	return "未知版本"
 }
 
@@ -398,7 +398,7 @@ func extractTarGz(src, destDir string) error {
 			return err
 		}
 		target := filepath.Join(destDir, header.Name)
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)) {
+		if !isPathSafe(destDir, target) {
 			continue // 防 Zip Slip 路径穿透
 		}
 
@@ -431,8 +431,8 @@ func extractZip(src, destDir string) error {
 
 	for _, f := range r.File {
 		target := filepath.Join(destDir, f.Name)
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)) {
-			continue
+		if !isPathSafe(destDir, target) {
+			continue // 防 Zip Slip 路径穿透
 		}
 		if f.FileInfo().IsDir() {
 			_ = os.MkdirAll(target, 0755)
@@ -457,4 +457,19 @@ func extractZip(src, destDir string) error {
 	}
 	return nil
 }
+
+// isPathSafe 严密检查目标路径是否完全限定在目标目录之内（防御 Zip Slip / Tar Slip 穿越）
+func isPathSafe(destDir, targetPath string) bool {
+	cleanDest := filepath.Clean(destDir)
+	cleanTarget := filepath.Clean(targetPath)
+	rel, err := filepath.Rel(cleanDest, cleanTarget)
+	if err != nil {
+		return false
+	}
+	if rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return true
+}
+
 

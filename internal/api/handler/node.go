@@ -214,9 +214,8 @@ func ImportNode(c *gin.Context) {
 		return
 	}
 
-	// 加密凭据
-	jwtSecret, _ := model.GetSetting("jwt_secret")
-	key := crypto.DeriveKey(jwtSecret)
+	// 加密凭据 (使用专用的静态数据加密主密钥)
+	key := model.GetEncryptionKey()
 	encryptedPass, err := crypto.EncryptAESGCM(req.Password, key)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "加密凭据失败: " + err.Error()})
@@ -440,8 +439,7 @@ func RevealNodeCredentials(c *gin.Context) {
 	}
 
 	// 3. 解密远程节点密码
-	jwtSecret, _ := model.GetSetting("jwt_secret")
-	key := crypto.DeriveKey(jwtSecret)
+	key := model.GetEncryptionKey()
 	decryptedPass, err := crypto.DecryptAESGCM(target.PasswordEncrypted, key)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "解密凭据失败: " + err.Error()})

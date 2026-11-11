@@ -68,6 +68,46 @@ func IsPortAvailable(port int) bool {
 	return true
 }
 
+var (
+	blockedCIDRs  []*net.IPNet
+	benchmarkCIDR *net.IPNet
+)
+
+func init() {
+	_, benchmarkCIDR, _ = net.ParseCIDR("198.18.0.0/15")
+
+	rawCIDRs := []string{
+		"0.0.0.0/8",          // Current network (RFC 1122)
+		"10.0.0.0/8",         // Private network (RFC 1918)
+		"100.64.0.0/10",      // Shared Address Space / CGNAT (RFC 6598)
+		"127.0.0.0/8",        // Loopback (RFC 1122)
+		"169.254.0.0/16",     // Link-Local / Cloud Metadata (RFC 3927)
+		"172.16.0.0/12",      // Private network (RFC 1918)
+		"192.0.0.0/24",       // IETF Protocol Assignments (RFC 6890)
+		"192.0.2.0/24",       // Documentation TEST-NET-1 (RFC 5737)
+		"192.168.0.0/16",     // Private network (RFC 1918)
+		"198.18.0.0/15",      // Benchmarking (RFC 2544)
+		"198.51.100.0/24",    // Documentation TEST-NET-2 (RFC 5737)
+		"203.0.113.0/24",     // Documentation TEST-NET-3 (RFC 5737)
+		"224.0.0.0/4",        // Multicast (RFC 5771)
+		"240.0.0.0/4",        // Reserved / Class E (RFC 1112)
+		"255.255.255.255/32", // Limited Broadcast (RFC 919)
+		"::/128",             // Unspecified IPv6
+		"::1/128",            // Loopback IPv6
+		"100::/64",           // Discard-Only Address Block (RFC 6666)
+		"2001:db8::/32",      // Documentation IPv6 (RFC 3849)
+		"fc00::/7",           // Unique Local Address / ULA (RFC 4193)
+		"fe80::/10",          // Link-Local IPv6 (RFC 4291)
+		"ff00::/8",           // Multicast IPv6 (RFC 4291)
+	}
+	for _, cidr := range rawCIDRs {
+		_, ipNet, err := net.ParseCIDR(cidr)
+		if err == nil {
+			blockedCIDRs = append(blockedCIDRs, ipNet)
+		}
+	}
+}
+
 // ValidatePublicURL 验证 URL 是否为合法的公网 Web 地址，拦截私网/内网/回环/元数据等 SSRF 敏感地址
 func ValidatePublicURL(rawURL string) error {
 	u, err := url.Parse(rawURL)
@@ -92,17 +132,25 @@ func ValidatePublicURL(rawURL string) error {
 	}
 
 	// 解析 IP 地址
-	ips, err := net.LookupIP(hostname)
-	if err != nil {
-		// 如果是直接填写的 IP 格式
-		if ip := net.ParseIP(hostname); ip != nil {
-			ips = []net.IP{ip}
-		} else {
+	isLiteralIP := false
+	var ips []net.IP
+	if parsed := net.ParseIP(hostname); parsed != nil {
+		isLiteralIP = true
+		ips = []net.IP{parsed}
+	} else {
+		resolved, err := net.LookupIP(hostname)
+		if err != nil {
 			return fmt.Errorf("无法解析目标主机名: %w", err)
 		}
+		ips = resolved
 	}
 
 	for _, ip := range ips {
+		// IPv4-mapped IPv6 规整化 (例如 ::ffff:127.0.0.1 规整为 127.0.0.1)
+		if v4 := ip.To4(); v4 != nil {
+			ip = v4
+		}
+
 		if ip.IsLoopback() {
 			return fmt.Errorf("【SSRF拦截】禁止访问回环地址 (127.0.0.0/8, ::1)")
 		}
@@ -110,10 +158,22 @@ func ValidatePublicURL(rawURL string) error {
 			return fmt.Errorf("【SSRF拦截】禁止访问局域网/私有地址 (RFC 1918 / RFC 4193)")
 		}
 		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			return fmt.Errorf("【SSRF拦截】禁止访问链路本地/云元数据地址 (169.254.0.0/16)")
+			return fmt.Errorf("【SSRF拦截】禁止访问链路本地/云元数据地址 (169.254.0.0/16, fe80::/10)")
 		}
 		if ip.IsUnspecified() || ip.IsMulticast() {
 			return fmt.Errorf("【SSRF拦截】禁止访问未指定或多播地址")
+		}
+
+		for _, cidr := range blockedCIDRs {
+			if cidr.Contains(ip) {
+				// 针对 198.18.0.0/15 (RFC 2544)，在开发或生产环境使用透明代理 (如 Clash/sing-box Fake-IP 模式) 时，
+				// DNS 会将所有公网域名解析为 198.18.x.x。
+				// 为保障透明代理环境兼容性，仅在输入为显式字面量 IP (isLiteralIP) 时拦截，域名解析出的 Fake-IP 予以豁免。
+				if benchmarkCIDR != nil && benchmarkCIDR.String() == cidr.String() && !isLiteralIP {
+					continue
+				}
+				return fmt.Errorf("【SSRF拦截】目标 IP (%s) 命中了受限地址块 (%s)", ip.String(), cidr.String())
+			}
 		}
 	}
 

@@ -40,8 +40,7 @@ func TestNodeHandlers(t *testing.T) {
 	setupTestDB(t)
 
 	// Insert remote test node with encrypted password
-	jwtSecret, _ := model.GetSetting("jwt_secret")
-	key := crypto.DeriveKey(jwtSecret)
+	key := model.GetEncryptionKey()
 	encPass, _ := crypto.EncryptAESGCM("RemotePass@999", key)
 
 	nodeID, err := model.CreateNode(&model.Node{

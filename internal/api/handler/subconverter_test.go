@@ -88,6 +88,7 @@ func TestSaveSubconverterConfigValidation(t *testing.T) {
 }
 
 func TestCustomRulesHandler(t *testing.T) {
+	_, _ = model.InitDB(":memory:")
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
 	r.GET("/subconverter/custom-rules", GetSubconverterCustomRules)

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"crypto/subtle"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -82,6 +83,16 @@ func UpdatePassword(c *gin.Context) {
 		return
 	}
 
+	newPwd := strings.TrimSpace(req.NewPassword)
+	if len(newPwd) < 8 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "新密码长度不能少于 8 位"})
+		return
+	}
+	if len(newPwd) > 128 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "新密码长度不能超过 128 位"})
+		return
+	}
+
 	hashedPass, _ := model.GetSetting("admin_password_hash")
 	if err := bcrypt.CompareHashAndPassword([]byte(hashedPass), []byte(req.OldPassword)); err != nil {
 		middleware.RecordFailedLogin(c.ClientIP())
@@ -96,6 +107,7 @@ func UpdatePassword(c *gin.Context) {
 	}
 
 	_ = model.SetSetting("admin_password_hash", string(newHash))
+	_ = model.SetSetting("initial_admin_password", "")
 
 	// 会话轮换 (Session Rotation)：废止此前签发的所有旧会话，防范旧凭据被盗用
 	epoch := time.Now().Unix()
@@ -141,8 +153,8 @@ func UpdateSettings(c *gin.Context) {
 
 	if req.SecretPath != "" {
 		trimmedSecret := strings.Trim(strings.TrimSpace(req.SecretPath), "/")
-		if !regexp.MustCompile(`^[a-zA-Z0-9_\-]{1,64}$`).MatchString(trimmedSecret) {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "安全入口路径格式不合法 (仅支持1-64位字母、数字、短横线与下划线)"})
+		if !regexp.MustCompile(`^[a-zA-Z0-9_\-]{4,64}$`).MatchString(trimmedSecret) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "安全入口路径格式不合法 (仅支持4-64位字母、数字、短横线与下划线)"})
 			return
 		}
 		_ = model.SetSetting("secret_path", trimmedSecret)
@@ -150,7 +162,15 @@ func UpdateSettings(c *gin.Context) {
 		_ = model.SetSetting("auth_min_issued_at", strconv.FormatInt(time.Now().Unix(), 10))
 	}
 	if req.PublicIP != "" {
-		_ = model.SetSetting("public_ip", req.PublicIP)
+		trimmedIP := strings.TrimSpace(req.PublicIP)
+		if net.ParseIP(trimmedIP) == nil {
+			domainRegex := regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`)
+			if !domainRegex.MatchString(trimmedIP) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "公网 IP/域名格式不合法，请输入合法的 IP 地址或域名"})
+				return
+			}
+		}
+		_ = model.SetSetting("public_ip", trimmedIP)
 	}
 	if req.SessionIdleTimeout != nil {
 		if *req.SessionIdleTimeout >= 0 {

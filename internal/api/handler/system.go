@@ -113,12 +113,24 @@ func EnableBBR(c *gin.Context) {
 
 // StreamLogs SSE 实时推送 journalctl 实时日志
 func StreamLogs(c *gin.Context) {
-	unit := c.Query("unit")
+	unit := strings.TrimSpace(c.Query("unit"))
 	if unit == "" {
 		unit = "sing-box"
 	}
 	if !strings.HasSuffix(unit, ".service") {
 		unit += ".service"
+	}
+
+	// 白名单校验：严格限制仅允许查阅当前系统受管服务的运行日志
+	allowedUnits := map[string]bool{
+		"sing-box.service":     true,
+		"cloudflared.service":  true,
+		"subconverter.service": true,
+		"vps-panel.service":    true,
+	}
+	if !allowedUnits[unit] {
+		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("未受管的服务单元: %s，仅允许查询 sing-box, cloudflared, subconverter 或 vps-panel 日志", unit)})
+		return
 	}
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")

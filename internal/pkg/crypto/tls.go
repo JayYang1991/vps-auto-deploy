@@ -5,6 +5,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -163,7 +164,7 @@ func CreatePinnedTLSConfig(pinnedFingerprint string) *tls.Config {
 			}
 
 			cleanCurrent := strings.ToLower(strings.ReplaceAll(currentFP, ":", ""))
-			if cleanExpected != cleanCurrent {
+			if subtle.ConstantTimeCompare([]byte(cleanExpected), []byte(cleanCurrent)) != 1 {
 				return fmt.Errorf("【安全拦截】检测到中间人攻击风险！远端证书指纹不匹配 (预期: %s, 实际: %s)", pinnedFingerprint, currentFP)
 			}
 			return nil

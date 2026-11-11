@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -65,14 +66,36 @@ func CreateTunnel(c *gin.Context) {
 		return
 	}
 
+	if req.TargetPort <= 0 || req.TargetPort > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "目标端口必须介于 1 ~ 65535 之间"})
+		return
+	}
+
+	cleanMode := strings.ToLower(strings.TrimSpace(req.Mode))
+	if cleanMode != "token" && cleanMode != "quick" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "隧道模式仅支持 quick (临时试用) 或 token (持久命名)"})
+		return
+	}
+
 	token := extractToken(req.Token)
-	edgeIP := req.EdgeIPVersion
+	if cleanMode == "token" {
+		if token == "" || !regexp.MustCompile(`^[A-Za-z0-9_\-\.]{10,512}$`).MatchString(token) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Token 格式无效，请填写 Cloudflare 控制台给出的合法 Tunnel Token"})
+			return
+		}
+	}
+
+	edgeIP := strings.ToLower(strings.TrimSpace(req.EdgeIPVersion))
 	if edgeIP == "" {
 		edgeIP = "auto"
 	}
-	proto := req.Protocol
+	proto := strings.ToLower(strings.TrimSpace(req.Protocol))
 	if proto == "" {
 		proto = "auto"
+	}
+	if proto != "auto" && proto != "quic" && proto != "http2" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "传输协议仅支持 auto, quic 或 http2"})
+		return
 	}
 
 	now := time.Now()

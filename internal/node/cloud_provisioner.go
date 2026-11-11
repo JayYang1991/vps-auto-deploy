@@ -13,6 +13,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"vps-auto-deploy/internal/cloud/vultr"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/pkg/crypto"
 )
 
 // ProvisionVultrRequest 云实例弹性创建并纳管请求
@@ -33,15 +34,31 @@ type ProvisionVultrRequest struct {
 	EnableTLS     *bool  `json:"enable_tls"`
 }
 
-// EnsureMasterSSHKeyPair 确保主控端拥有专用的 ED25519 云部署 SSH 密钥对
+// EnsureMasterSSHKeyPair 确保主控端拥有专用的 ED25519 云部署 SSH 密钥对（私钥密文落地持久化）
 func EnsureMasterSSHKeyPair() (string, string, error) {
-	privPEM, errPriv := model.GetSetting("cloud_ssh_private_key")
+	encKey := model.GetEncryptionKey()
 	pubAuth, errPub := model.GetSetting("cloud_ssh_public_key")
-	if errPriv == nil && errPub == nil && privPEM != "" && pubAuth != "" {
-		return privPEM, pubAuth, nil
+
+	// 1. 优先读取已加密的私钥
+	encPriv, errEnc := model.GetSetting("cloud_ssh_private_key_encrypted")
+	if errEnc == nil && encPriv != "" && errPub == nil && pubAuth != "" {
+		decrypted, errDec := crypto.DecryptAESGCM(encPriv, encKey)
+		if errDec == nil && decrypted != "" {
+			return decrypted, pubAuth, nil
+		}
 	}
 
-	// 自动生成高强度 ED25519 密钥对
+	// 2. 兼容并自动迁移历史未加密的私钥
+	legacyPriv, errPriv := model.GetSetting("cloud_ssh_private_key")
+	if errPriv == nil && legacyPriv != "" && errPub == nil && pubAuth != "" {
+		if encrypted, err := crypto.EncryptAESGCM(legacyPriv, encKey); err == nil {
+			_ = model.SetSetting("cloud_ssh_private_key_encrypted", encrypted)
+			_ = model.SetSetting("cloud_ssh_private_key", "") // 清除明文私钥
+		}
+		return legacyPriv, pubAuth, nil
+	}
+
+	// 3. 首次创建：自动生成高强度 ED25519 密钥对
 	pubKey, privKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		return "", "", fmt.Errorf("生成 ED25519 密钥对失败: %w", err)
@@ -57,9 +74,16 @@ func EnsureMasterSSHKeyPair() (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("编码 SSH 私钥失败: %w", err)
 	}
-	privPEM = string(pem.EncodeToMemory(privBlock))
+	privPEM := string(pem.EncodeToMemory(privBlock))
 
-	_ = model.SetSetting("cloud_ssh_private_key", privPEM)
+	// 使用 AES-256-GCM 加密存储私钥
+	encPrivPEM, err := crypto.EncryptAESGCM(privPEM, encKey)
+	if err != nil {
+		return "", "", fmt.Errorf("私钥加密落盘失败: %w", err)
+	}
+
+	_ = model.SetSetting("cloud_ssh_private_key_encrypted", encPrivPEM)
+	_ = model.SetSetting("cloud_ssh_private_key", "")
 	_ = model.SetSetting("cloud_ssh_public_key", pubAuth)
 
 	return privPEM, pubAuth, nil
