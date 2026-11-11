@@ -1107,7 +1107,7 @@ async function submitCloudDelete() {
   try {
     const nodeId = targetDeleteNode.value.id
     await api.delete(`/nodes/${nodeId}`, {
-      params: {
+      data: {
         destroy_cloud: destroyCloudInstance.value,
         master_password: deleteMasterPassword.value,
       },

@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -284,6 +285,63 @@ func TestStreamDeployLogs(t *testing.T) {
 	}
 	if !strings.Contains(body, "[SUCCESS]") {
 		t.Errorf("Expected body to contain '[SUCCESS]', got: %s", body)
+	}
+}
+
+func TestDeleteNodeValidation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupTestDB(t)
+
+	r := gin.New()
+	r.DELETE("/api/nodes/:id", DeleteNode)
+
+	// Create a node to delete
+	nodeID, _ := model.CreateNode(&model.Node{
+		Name:     "Delete-Test-Node",
+		Host:     "1.2.3.4",
+		IsMaster: false,
+	})
+
+	// Case 1: Master node ID=1 cannot be deleted
+	req, _ := http.NewRequest(http.MethodDelete, "/api/nodes/1", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when deleting master node, got %d", w.Code)
+	}
+
+	// Case 2: destroy_cloud=true but no master_password in body -> 400
+	req, _ = http.NewRequest(http.MethodDelete, fmt.Sprintf("/api/nodes/%d?destroy_cloud=true", nodeID), nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when destroying cloud without password, got %d", w.Code)
+	}
+
+	// Case 3: master_password in query param only -> rejected with 400
+	req, _ = http.NewRequest(http.MethodDelete, fmt.Sprintf("/api/nodes/%d?destroy_cloud=true&master_password=master_pass_123", nodeID), nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when password passed via query, got %d", w.Code)
+	}
+
+	// Case 4: wrong password in body -> 403
+	body, _ := json.Marshal(map[string]any{"destroy_cloud": true, "master_password": "wrong_password"})
+	req, _ = http.NewRequest(http.MethodDelete, fmt.Sprintf("/api/nodes/%d", nodeID), bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for wrong master password, got %d", w.Code)
+	}
+
+	// Case 5: normal delete without cloud destroy -> 200
+	req, _ = http.NewRequest(http.MethodDelete, fmt.Sprintf("/api/nodes/%d", nodeID), nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for normal delete, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

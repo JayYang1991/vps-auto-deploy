@@ -101,7 +101,7 @@ func CreateTunnel(c *gin.Context) {
 	now := time.Now()
 	res, err := model.DB.Exec(
 		"INSERT INTO tunnels (name, mode, token, domain, target_port, edge_ip_version, protocol, status, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'stopped', 1, ?, ?)",
-		req.Name, req.Mode, token, req.Domain, req.TargetPort, edgeIP, proto, now, now,
+		req.Name, cleanMode, token, req.Domain, req.TargetPort, edgeIP, proto, now, now,
 	)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -114,11 +114,11 @@ func CreateTunnel(c *gin.Context) {
 	drv := cloudflared.NewDriver()
 	ver, _ := drv.GetInstalledVersion()
 	if ver != "" {
-		_ = drv.ConfigureService(req.Mode, token, req.TargetPort, proto)
+		_ = drv.ConfigureService(cleanMode, token, req.TargetPort, proto)
 		_ = drv.Start()
 
 		// 若为 quick 模式，异步从日志中提取 trycloudflare 域名
-		if req.Mode == "quick" {
+		if cleanMode == "quick" {
 			go captureQuickTunnelDomain(id)
 		}
 	}

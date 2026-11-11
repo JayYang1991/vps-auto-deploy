@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -235,5 +236,46 @@ func TestSyncMembersToNodeMock(t *testing.T) {
 
 	if len(receivedMembers) != 1 || receivedMembers[0].Name != "Test-Alice" {
 		t.Fatalf("received members mismatch: %+v", receivedMembers)
+	}
+}
+
+func TestCleanMemberNameAndValidation(t *testing.T) {
+	os.Setenv("SKIP_SERVICE_RELOAD", "1")
+	defer os.Unsetenv("SKIP_SERVICE_RELOAD")
+
+	gin.SetMode(gin.TestMode)
+	setupTestDB(t)
+
+	r := gin.New()
+	r.POST("/api/members", CreateMember)
+
+	// Case 1: Empty or whitespace-only name rejected
+	body, _ := json.Marshal(map[string]any{"name": "   ", "enabled": true})
+	req := httptest.NewRequest(http.MethodPost, "/api/members", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty name, got %d", w.Code)
+	}
+
+	// Case 2: Name with CRLF control characters should be cleaned
+	body, _ = json.Marshal(map[string]any{"name": "Alice\r\nUser", "enabled": true})
+	req = httptest.NewRequest(http.MethodPost, "/api/members", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for CRLF name, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var created struct {
+		ID int64 `json:"id"`
+	}
+	_ = json.Unmarshal(w.Body.Bytes(), &created)
+	var storedName string
+	_ = model.DB.QueryRow("SELECT name FROM members WHERE id = ?", created.ID).Scan(&storedName)
+	if storedName != "AliceUser" {
+		t.Fatalf("expected CRLF to be stripped to 'AliceUser', got %q", storedName)
 	}
 }

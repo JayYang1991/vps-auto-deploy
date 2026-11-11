@@ -137,5 +137,15 @@ func TestCloudVultrHandlers(t *testing.T) {
 			t.Fatalf("Expected 403 Forbidden with wrong master password, got %d", w.Code)
 		}
 	}
+
+	// 8. DeleteVultrInstance with password in query parameter only -> 400 Bad Request
+	{
+		req, _ := http.NewRequest(http.MethodDelete, "/api/nodes/cloud/vultr/instances/inst-123?master_password=master_pass_123", nil)
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("Expected 400 Bad Request when password provided via query, got %d", w.Code)
+		}
+	}
 }
 

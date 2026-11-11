@@ -118,7 +118,10 @@ var defaultRuleSetURLs = map[string]string{
 func getRuleSetURL(tag string, custom map[string]string) string {
 	if custom != nil {
 		if u, ok := custom[tag]; ok && strings.TrimSpace(u) != "" {
-			return strings.TrimSpace(u)
+			trimmedURL := strings.TrimSpace(u)
+			if err := netutil.ValidatePublicURL(trimmedURL); err == nil {
+				return trimmedURL
+			}
 		}
 	}
 	if u, ok := defaultRuleSetURLs[tag]; ok {

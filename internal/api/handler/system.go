@@ -99,8 +99,15 @@ func GetSystemOverview(c *gin.Context) {
 
 // EnableBBR 一键开启 BBR 拥塞控制算法
 func EnableBBR(c *gin.Context) {
+	content, err := os.ReadFile("/etc/sysctl.conf")
+	if err == nil && strings.Contains(string(content), "net.ipv4.tcp_congestion_control=bbr") {
+		_, _ = executil.RunCommand(3*time.Second, "sysctl", "-p")
+		c.JSON(http.StatusOK, gin.H{"message": "BBR is already configured and active"})
+		return
+	}
+
 	bbrConf := "\nnet.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr\n"
-	f, err := os.OpenFile("/etc/sysctl.conf", os.O_APPEND|os.O_WRONLY, 0644)
+	f, err := os.OpenFile("/etc/sysctl.conf", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 	if err == nil {
 		_, _ = f.WriteString(bbrConf)
 		f.Close()
@@ -189,6 +196,9 @@ func StreamLogs(c *gin.Context) {
 
 // UploadUpgradePackage 上传并校验新版安装包 (二进制或 tar.gz/zip)
 func UploadUpgradePackage(c *gin.Context) {
+	// 限制最大上传 100MB
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 100*1024*1024)
+
 	file, header, err := c.Request.FormFile("package")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请选择要上传的安装包文件: " + err.Error()})

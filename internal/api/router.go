@@ -51,7 +51,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.POST("/nodes/import", handler.ImportNode)
 			api.POST("/nodes/:id/ping", handler.PingNode)
 			api.PUT("/nodes/:id", handler.UpdateNode)
-			api.DELETE("/nodes/:id", handler.DeleteNode)
+			api.DELETE("/nodes/:id", middleware.LoginRateLimitMiddleware(), handler.DeleteNode)
 			api.POST("/nodes/:id/reveal-credentials", middleware.LoginRateLimitMiddleware(), handler.RevealNodeCredentials)
 			api.POST("/nodes/:id/terminal-ticket", middleware.LoginRateLimitMiddleware(), handler.RequestTerminalTicket)
 			api.POST("/nodes/:id/ssh-credentials", middleware.LoginRateLimitMiddleware(), handler.SaveNodeSSHCredentials)
@@ -62,7 +62,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.GET("/nodes/cloud/vultr/catalog", handler.GetVultrCatalog)
 			api.GET("/nodes/cloud/vultr/instances", handler.ListVultrInstances)
 			api.POST("/nodes/cloud/vultr/provision", handler.ProvisionVultrNode)
-			api.DELETE("/nodes/cloud/vultr/instances/:id", handler.DeleteVultrInstance)
+			api.DELETE("/nodes/cloud/vultr/instances/:id", middleware.LoginRateLimitMiddleware(), handler.DeleteVultrInstance)
 
 			// 设置与密码
 			api.POST("/auth/password", handler.UpdatePassword)

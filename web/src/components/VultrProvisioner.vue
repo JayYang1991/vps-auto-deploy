@@ -1316,9 +1316,6 @@ async function submitDestroyInstance() {
       data: {
         master_password: destroyMasterPassword.value,
       },
-      params: {
-        master_password: destroyMasterPassword.value,
-      },
     })
 
     toast.success(res.data.message || 'Vultr 云主机已成功销毁并终止计费')

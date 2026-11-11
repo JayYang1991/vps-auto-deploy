@@ -3,6 +3,7 @@ package handler
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"log"
 	"net/http"
 	"strconv"
@@ -28,6 +29,21 @@ type MemberUpdateRequest struct {
 	Enabled *bool  `json:"enabled"`
 }
 
+func cleanMemberName(raw string) (string, error) {
+	name := strings.TrimSpace(raw)
+	name = strings.ReplaceAll(name, "\r", "")
+	name = strings.ReplaceAll(name, "\n", "")
+	name = strings.ReplaceAll(name, "\t", " ")
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", errors.New("成员名称不能为空")
+	}
+	if len(name) > 64 {
+		return "", errors.New("成员名称长度不能超过 64 个字符")
+	}
+	return name, nil
+}
+
 func ListMembers(c *gin.Context) {
 	list, err := model.ListMembers()
 	if err != nil {
@@ -47,6 +63,12 @@ func CreateMember(c *gin.Context) {
 		return
 	}
 
+	name, err := cleanMemberName(req.Name)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
 	subBytes := make([]byte, 8)
 	_, _ = rand.Read(subBytes)
 	subToken := hex.EncodeToString(subBytes)
@@ -56,7 +78,7 @@ func CreateMember(c *gin.Context) {
 
 	res, err := model.DB.Exec(
 		"INSERT INTO members (name, uuid, sub_token, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-		req.Name, newUUID, subToken, req.Enabled, now, now,
+		name, newUUID, subToken, req.Enabled, now, now,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -132,7 +154,12 @@ func UpdateMember(c *gin.Context) {
 
 	name := existing.Name
 	if strings.TrimSpace(req.Name) != "" {
-		name = strings.TrimSpace(req.Name)
+		cleaned, err := cleanMemberName(req.Name)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		name = cleaned
 	}
 
 	u := existing.UUID

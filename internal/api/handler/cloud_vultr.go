@@ -7,6 +7,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
+	"vps-auto-deploy/internal/api/middleware"
 	"vps-auto-deploy/internal/cloud/vultr"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/node"
@@ -362,21 +363,18 @@ func DeleteVultrInstance(c *gin.Context) {
 		return
 	}
 
-	// 二次验证主控管理员密码
+	// 二次验证主控管理员密码 (严格从请求体获取，禁止从 URL 查询参数接收)
 	var req struct {
 		MasterPassword string `json:"master_password"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.MasterPassword) == "" {
-		req.MasterPassword = c.Query("master_password")
-	}
-
-	if strings.TrimSpace(req.MasterPassword) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "彻底销毁云端实例需提供主控管理员密码进行二次安全校验"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "彻底销毁云端实例需在请求体中提供主控管理员密码进行二次安全校验"})
 		return
 	}
 
 	masterPassHash, err := model.GetSetting("admin_password_hash")
-	if err != nil || bcrypt.CompareHashAndPassword([]byte(masterPassHash), []byte(req.MasterPassword)) != nil {
+	if err != nil || bcrypt.CompareHashAndPassword([]byte(masterPassHash), []byte(strings.TrimSpace(req.MasterPassword))) != nil {
+		middleware.RecordFailedLogin(c.ClientIP())
 		c.JSON(http.StatusForbidden, gin.H{"error": "主控管理员密码错误，二次安全验证失败！拒绝销毁云主机"})
 		return
 	}

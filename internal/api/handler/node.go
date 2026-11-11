@@ -346,24 +346,23 @@ func DeleteNode(c *gin.Context) {
 	}
 
 	// 检查是否要求同时销毁云端实例
-	destroyCloud := c.Query("destroy_cloud") == "true" || c.Query("destroy_cloud") == "1"
-	if destroyCloud {
-		masterPassword := c.Query("master_password")
-		if masterPassword == "" {
-			var body struct {
-				MasterPassword string `json:"master_password"`
-			}
-			_ = c.ShouldBindJSON(&body)
-			masterPassword = body.MasterPassword
-		}
+	var req struct {
+		DestroyCloud   bool   `json:"destroy_cloud"`
+		MasterPassword string `json:"master_password"`
+	}
+	_ = c.ShouldBindJSON(&req)
 
+	destroyCloud := req.DestroyCloud || c.Query("destroy_cloud") == "true" || c.Query("destroy_cloud") == "1"
+	if destroyCloud {
+		masterPassword := strings.TrimSpace(req.MasterPassword)
 		if masterPassword == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "彻底销毁云端实例需提供主控管理员密码进行二次安全校验"})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "彻底销毁云端实例需在请求体中提供主控管理员密码进行二次安全校验"})
 			return
 		}
 
 		masterPassHash, err := model.GetSetting("admin_password_hash")
 		if err != nil || bcrypt.CompareHashAndPassword([]byte(masterPassHash), []byte(masterPassword)) != nil {
+			middleware.RecordFailedLogin(c.ClientIP())
 			c.JSON(http.StatusForbidden, gin.H{"error": "主控管理员密码错误，二次安全验证失败！拒绝销毁云主机"})
 			return
 		}

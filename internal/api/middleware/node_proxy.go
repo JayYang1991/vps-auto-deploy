@@ -68,7 +68,7 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 		basePrefix := "/" + secret + "/api"
 		if strings.HasPrefix(reqPath, basePrefix+"/nodes") ||
 			strings.HasPrefix(reqPath, basePrefix+"/settings") ||
-			strings.HasPrefix(reqPath, basePrefix+"/auth/password") ||
+			strings.HasPrefix(reqPath, basePrefix+"/auth") ||
 			strings.HasPrefix(reqPath, basePrefix+"/members") ||
 			strings.HasPrefix(reqPath, basePrefix+"/cluster") ||
 			strings.HasPrefix(reqPath, basePrefix+"/system/upgrade") {

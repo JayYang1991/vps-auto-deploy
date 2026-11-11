@@ -124,3 +124,74 @@ func TestRouteCRUDAndReorder(t *testing.T) {
 		t.Fatalf("delete route failed: %d, body: %s", w.Code, w.Body.String())
 	}
 }
+
+func TestRouteRuleSetURLsValidation(t *testing.T) {
+	os.Setenv("SKIP_SERVICE_RELOAD", "1")
+	defer os.Unsetenv("SKIP_SERVICE_RELOAD")
+
+	gin.SetMode(gin.TestMode)
+	dbPath := setupRouteTestDB(t)
+	defer os.Remove(dbPath)
+
+	r := gin.New()
+	r.POST("/routes", CreateRoute)
+
+	// Case 1: SSRF loopback URL should be rejected with 400
+	ssrfRule := RouteRequest{
+		Name:        "SSRF测试规则",
+		OutboundTag: "direct",
+		RuleSetURLs: "malicious=http://127.0.0.1:8080/srs",
+	}
+	body, _ := json.Marshal(ssrfRule)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/routes", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for loopback SSRF URL, got %d", w.Code)
+	}
+
+	// Case 2: Cloud metadata SSRF URL should be rejected with 400
+	metaRule := RouteRequest{
+		Name:        "Metadata测试规则",
+		OutboundTag: "direct",
+		RuleSetURLs: "meta=http://169.254.169.254/latest/meta-data",
+	}
+	body, _ = json.Marshal(metaRule)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest(http.MethodPost, "/routes", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for cloud metadata SSRF URL, got %d", w.Code)
+	}
+
+	// Case 3: Empty name should be rejected with 400
+	emptyNameRule := RouteRequest{
+		Name:        "   ",
+		OutboundTag: "direct",
+	}
+	body, _ = json.Marshal(emptyNameRule)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest(http.MethodPost, "/routes", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for empty name, got %d", w.Code)
+	}
+
+	// Case 4: Valid public URL should pass
+	validRule := RouteRequest{
+		Name:        "合法规则集",
+		OutboundTag: "direct",
+		RuleSetURLs: "my-rules=https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-cn.srs",
+	}
+	body, _ = json.Marshal(validRule)
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest(http.MethodPost, "/routes", bytes.NewBuffer(body))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for valid public URL, got %d: %s", w.Code, w.Body.String())
+	}
+}

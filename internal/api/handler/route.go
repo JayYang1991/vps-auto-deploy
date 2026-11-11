@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/configgen"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/pkg/netutil"
 )
 
 type RouteRequest struct {
@@ -66,11 +68,54 @@ func GetRoute(c *gin.Context) {
 	c.JSON(http.StatusOK, r)
 }
 
+// validateRuleSetURLs 校验自定义规则集每行 tag=url 的格式，并阻止内部 IP 与回环地址 SSRF
+func validateRuleSetURLs(ruleSetURLs string) error {
+	trimmed := strings.TrimSpace(ruleSetURLs)
+	if trimmed == "" {
+		return nil
+	}
+	lines := strings.Split(trimmed, "\n")
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+			continue
+		}
+		idx := strings.Index(line, "=")
+		if idx <= 0 || idx == len(line)-1 {
+			return fmt.Errorf("第 %d 行格式错误，需符合 tag=https://... 规范", i+1)
+		}
+		tag := strings.TrimSpace(line[:idx])
+		rawURL := strings.TrimSpace(line[idx+1:])
+		if tag == "" {
+			return fmt.Errorf("第 %d 行缺少 tag 名称", i+1)
+		}
+		if !regexp.MustCompile(`^[a-zA-Z0-9_\-\.]{1,64}$`).MatchString(tag) {
+			return fmt.Errorf("第 %d 行 tag [%s] 格式不合法 (仅支持1-64位字母、数字、点号、短横线与下划线)", i+1, tag)
+		}
+		if err := netutil.ValidatePublicURL(rawURL); err != nil {
+			return fmt.Errorf("第 %d 行 URL 不合法: %w", i+1, err)
+		}
+	}
+	return nil
+}
+
 // CreateRoute 新建路由规则
 func CreateRoute(c *gin.Context) {
 	var req RouteRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "参数校验失败: " + err.Error()})
+		return
+	}
+
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "路由规则名称不能为空"})
+		return
+	}
+
+	ruleSetURLs := strings.TrimSpace(req.RuleSetURLs)
+	if err := validateRuleSetURLs(ruleSetURLs); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "自定义规则集校验失败: " + err.Error()})
 		return
 	}
 
@@ -93,7 +138,7 @@ func CreateRoute(c *gin.Context) {
 	}
 
 	rule := &model.RouteRule{
-		Name:          strings.TrimSpace(req.Name),
+		Name:          name,
 		Action:        action,
 		OutboundTag:   outboundTag,
 		InboundTags:   strings.TrimSpace(req.InboundTags),
@@ -106,7 +151,7 @@ func CreateRoute(c *gin.Context) {
 		PortRange:     strings.TrimSpace(req.PortRange),
 		Protocol:      strings.TrimSpace(req.Protocol),
 		RuleSet:       strings.TrimSpace(req.RuleSet),
-		RuleSetURLs:   strings.TrimSpace(req.RuleSetURLs),
+		RuleSetURLs:   ruleSetURLs,
 		Invert:        req.Invert,
 		Priority:      priority,
 		Enabled:       req.Enabled,
@@ -151,6 +196,18 @@ func UpdateRoute(c *gin.Context) {
 		return
 	}
 
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "路由规则名称不能为空"})
+		return
+	}
+
+	ruleSetURLs := strings.TrimSpace(req.RuleSetURLs)
+	if err := validateRuleSetURLs(ruleSetURLs); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "自定义规则集校验失败: " + err.Error()})
+		return
+	}
+
 	outboundTag := strings.TrimSpace(req.OutboundTag)
 	if outboundTag == "" {
 		outboundTag = "direct"
@@ -171,7 +228,7 @@ func UpdateRoute(c *gin.Context) {
 
 	newRule := &model.RouteRule{
 		ID:            id,
-		Name:          strings.TrimSpace(req.Name),
+		Name:          name,
 		Action:        action,
 		OutboundTag:   outboundTag,
 		InboundTags:   strings.TrimSpace(req.InboundTags),
@@ -184,7 +241,7 @@ func UpdateRoute(c *gin.Context) {
 		PortRange:     strings.TrimSpace(req.PortRange),
 		Protocol:      strings.TrimSpace(req.Protocol),
 		RuleSet:       strings.TrimSpace(req.RuleSet),
-		RuleSetURLs:   strings.TrimSpace(req.RuleSetURLs),
+		RuleSetURLs:   ruleSetURLs,
 		Invert:        req.Invert,
 		Priority:      priority,
 		Enabled:       req.Enabled,
