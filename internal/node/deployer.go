@@ -181,7 +181,7 @@ func PingNode(node *model.Node) (int64, error) {
 	// 若 Token 失效 (401)，尝试使用保存的加密密码重新登录刷新 Token
 	if err == nil && resp.StatusCode == http.StatusUnauthorized {
 		resp.Body.Close()
-		rawPass, decErr := crypto.DecryptAESGCM(node.PasswordEncrypted, model.GetEncryptionKey())
+		rawPass, decErr := model.DecryptSensitiveData(node.PasswordEncrypted)
 		if decErr == nil && rawPass != "" {
 			newToken, logErr := LoginNode(node.Host, node.PanelPort, node.SecretPath, node.Username, rawPass, node.UseTLS, node.CertFingerprint)
 			if logErr == nil && newToken != "" {
@@ -775,7 +775,7 @@ func RunUpgradeAPI(task *DeployTask, req UpgradeRequest) {
 		} else if ovResp.StatusCode == http.StatusUnauthorized && targetNode.PasswordEncrypted != "" {
 			ovResp.Body.Close()
 			task.AddLog("目标节点 API Token 已过期，正在使用主控密钥解密凭据刷新 Token...")
-			rawPass, decErr := crypto.DecryptAESGCM(targetNode.PasswordEncrypted, model.GetEncryptionKey())
+			rawPass, decErr := model.DecryptSensitiveData(targetNode.PasswordEncrypted)
 			if decErr == nil && rawPass != "" {
 				newToken, logErr := LoginNode(targetNode.Host, targetNode.PanelPort, targetNode.SecretPath, targetNode.Username, rawPass, targetNode.UseTLS, targetNode.CertFingerprint)
 				if logErr == nil && newToken != "" {

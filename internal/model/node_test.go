@@ -1,9 +1,12 @@
 package model
 
 import (
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"vps-auto-deploy/internal/pkg/crypto"
 )
 
 func TestNodeCRUD(t *testing.T) {
@@ -115,6 +118,74 @@ func TestNodeCRUD(t *testing.T) {
 	_, err = GetNode(id)
 	if err == nil {
 		t.Fatalf("Node %d should have been deleted", id)
+	}
+}
+
+func TestMigrateLegacyEncryptedData(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "migrate_test_*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "migrate.db")
+	_, err = InitDB(dbPath)
+	if err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+
+	jwtSecret, _ := GetSetting("jwt_secret")
+	legacyKey := crypto.DeriveKey(jwtSecret)
+
+	// 模拟老版本：使用 legacyKey 加密 SSH 密码与节点密码
+	origPass := "MySecretSSHPassword123!"
+	legacySSHPwdEnc, err := crypto.EncryptAESGCM(origPass, legacyKey)
+	if err != nil {
+		t.Fatalf("Encrypt error: %v", err)
+	}
+
+	remoteNode := &Node{
+		Name:                 "Legacy Node",
+		Host:                 "8.8.8.8",
+		SSHPort:              22,
+		PanelPort:            20888,
+		SecretPath:           "legacy-entry",
+		Username:             "admin",
+		PasswordEncrypted:    legacySSHPwdEnc,
+		SSHUser:              "root",
+		SSHPasswordEncrypted: legacySSHPwdEnc,
+		Status:               "online",
+	}
+	nodeID, err := CreateNode(remoteNode)
+	if err != nil {
+		t.Fatalf("CreateNode failed: %v", err)
+	}
+
+	// 模拟升级场景：生成了一个全新的独立 data_encryption_key
+	newRandomKey := []byte("12345678901234567890123456789012")
+	_ = SetSetting("data_encryption_key", hex.EncodeToString(newRandomKey))
+	ClearSettingsCache()
+
+	// 1. 验证 DecryptSensitiveData 能够平滑回退解密老数据
+	decryptedBeforeMigration, err := DecryptSensitiveData(legacySSHPwdEnc)
+	if err != nil || decryptedBeforeMigration != origPass {
+		t.Fatalf("expected fallback decryption to recover origPass, got %s (err: %v)", decryptedBeforeMigration, err)
+	}
+
+	// 2. 执行自动无缝数据迁移
+	if err := MigrateLegacyEncryptedData(); err != nil {
+		t.Fatalf("MigrateLegacyEncryptedData failed: %v", err)
+	}
+
+	// 3. 验证数据库中节点记录已被自动重加密为新密钥
+	migratedNode, err := GetNode(nodeID)
+	if err != nil {
+		t.Fatalf("GetNode failed: %v", err)
+	}
+	// 此时使用 newRandomKey 直接解密应当成功
+	decryptedDirectlyWithNewKey, err := crypto.DecryptAESGCM(migratedNode.SSHPasswordEncrypted, newRandomKey)
+	if err != nil || decryptedDirectlyWithNewKey != origPass {
+		t.Fatalf("expected migrated ciphertext to be decryptable by newKey, got: %s (err: %v)", decryptedDirectlyWithNewKey, err)
 	}
 }
 

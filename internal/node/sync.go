@@ -72,7 +72,7 @@ func SyncMembersToNode(node *model.Node, members []model.Member) error {
 	// 若 Token 偶发失效 (401)，尝试自愈解密密码重新登录刷新 Token
 	if resp.StatusCode == http.StatusUnauthorized && node.PasswordEncrypted != "" {
 		resp.Body.Close()
-		rawPass, decErr := crypto.DecryptAESGCM(node.PasswordEncrypted, model.GetEncryptionKey())
+		rawPass, decErr := model.DecryptSensitiveData(node.PasswordEncrypted)
 		if decErr == nil && rawPass != "" {
 			newToken, logErr := LoginNode(node.Host, node.PanelPort, node.SecretPath, node.Username, rawPass, node.UseTLS, node.CertFingerprint)
 			if logErr == nil && newToken != "" {

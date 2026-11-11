@@ -42,7 +42,7 @@ func EnsureMasterSSHKeyPair() (string, string, error) {
 	// 1. 优先读取已加密的私钥
 	encPriv, errEnc := model.GetSetting("cloud_ssh_private_key_encrypted")
 	if errEnc == nil && encPriv != "" && errPub == nil && pubAuth != "" {
-		decrypted, errDec := crypto.DecryptAESGCM(encPriv, encKey)
+		decrypted, errDec := model.DecryptSensitiveData(encPriv)
 		if errDec == nil && decrypted != "" {
 			return decrypted, pubAuth, nil
 		}

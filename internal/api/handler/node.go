@@ -439,8 +439,7 @@ func RevealNodeCredentials(c *gin.Context) {
 	}
 
 	// 3. 解密远程节点密码
-	key := model.GetEncryptionKey()
-	decryptedPass, err := crypto.DecryptAESGCM(target.PasswordEncrypted, key)
+	decryptedPass, err := model.DecryptSensitiveData(target.PasswordEncrypted)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "解密凭据失败: " + err.Error()})
 		return

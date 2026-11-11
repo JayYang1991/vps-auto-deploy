@@ -121,7 +121,7 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 			// 若远端返回 401 Token 失效且保存有凭据，异步触发平滑自愈刷新
 			if resp.StatusCode == http.StatusUnauthorized && targetNode.PasswordEncrypted != "" && NodeTokenRefresher != nil {
 				go func() {
-					rawPass, decErr := crypto.DecryptAESGCM(targetNode.PasswordEncrypted, model.GetEncryptionKey())
+					rawPass, decErr := model.DecryptSensitiveData(targetNode.PasswordEncrypted)
 					if decErr == nil && rawPass != "" {
 						_, _ = NodeTokenRefresher(targetNode, rawPass)
 					}

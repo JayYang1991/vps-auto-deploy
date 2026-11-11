@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -48,6 +49,8 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	if err := initDefaults(); err != nil {
 		return nil, fmt.Errorf("init defaults error: %w", err)
 	}
+
+	_ = MigrateLegacyEncryptedData()
 
 	return db, nil
 }
@@ -206,9 +209,16 @@ func initDefaults() error {
 		SetSetting("jwt_secret", hex.EncodeToString(b))
 	}
 	if _, err := GetSetting("data_encryption_key"); err != nil {
-		b := make([]byte, 32)
-		rand.Read(b)
-		SetSetting("data_encryption_key", hex.EncodeToString(b))
+		jwtSecret, _ := GetSetting("jwt_secret")
+		if jwtSecret != "" {
+			// 若已有系统升级，基于已有 jwt_secret 派生，确保历史数据解密 100% 兼容无感
+			derived := crypto.DeriveKey(jwtSecret)
+			SetSetting("data_encryption_key", hex.EncodeToString(derived))
+		} else {
+			b := make([]byte, 32)
+			rand.Read(b)
+			SetSetting("data_encryption_key", hex.EncodeToString(b))
+		}
 	}
 
 	// 2. 初始化管理员账号（初次生成高强随机密码，杜绝默认弱口令风险）
@@ -539,14 +549,149 @@ func GetEncryptionKey() []byte {
 	return derived
 }
 
+// DecryptSensitiveData 统一敏感数据解密入口：
+// 优先使用当前数据加密主密钥解密，失败时自动平滑回退至历史基于 jwt_secret 派生的主控密钥解密
+func DecryptSensitiveData(cipherText string) (string, error) {
+	cipherText = strings.TrimSpace(cipherText)
+	if cipherText == "" {
+		return "", nil
+	}
+
+	// 1. 尝试当前专属静态加密主密钥
+	primaryKey := GetEncryptionKey()
+	plain, err := crypto.DecryptAESGCM(cipherText, primaryKey)
+	if err == nil {
+		return plain, nil
+	}
+
+	// 2. 平滑回退：尝试历史基于 jwt_secret 派生的主控密钥
+	jwtSecret, errJWT := GetSetting("jwt_secret")
+	if errJWT == nil && jwtSecret != "" {
+		legacyKey := crypto.DeriveKey(jwtSecret)
+		plainLegacy, errLegacy := crypto.DecryptAESGCM(cipherText, legacyKey)
+		if errLegacy == nil {
+			return plainLegacy, nil
+		}
+	}
+
+	return "", err
+}
+
+// MigrateLegacyEncryptedData 检查并自动将所有基于老版本 jwt_secret 加密的节点凭据无缝平滑迁移至新主密钥
+func MigrateLegacyEncryptedData() error {
+	jwtSecret, errJWT := GetSetting("jwt_secret")
+	if errJWT != nil || jwtSecret == "" {
+		return nil
+	}
+	legacyKey := crypto.DeriveKey(jwtSecret)
+	newKey := GetEncryptionKey()
+
+	// 若两个密钥相同（如由 jwt_secret 派生），则无需重复迁移
+	if bytes.Equal(legacyKey, newKey) {
+		return nil
+	}
+
+	rows, err := DB.Query("SELECT id, password_encrypted, ssh_password_encrypted, ssh_key_encrypted FROM nodes")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	type nodeUpdate struct {
+		id         int64
+		passEnc    string
+		sshPassEnc string
+		sshKeyEnc  string
+	}
+	var updates []nodeUpdate
+
+	for rows.Next() {
+		var id int64
+		var passEnc, sshPassEnc, sshKeyEnc sql.NullString
+		if err := rows.Scan(&id, &passEnc, &sshPassEnc, &sshKeyEnc); err != nil {
+			continue
+		}
+		item := nodeUpdate{id: id, passEnc: passEnc.String, sshPassEnc: sshPassEnc.String, sshKeyEnc: sshKeyEnc.String}
+		changed := false
+
+		// 检查并重加密 password_encrypted
+		if item.passEnc != "" {
+			if _, err := crypto.DecryptAESGCM(item.passEnc, newKey); err != nil {
+				if plain, err := crypto.DecryptAESGCM(item.passEnc, legacyKey); err == nil {
+					if reEnc, err := crypto.EncryptAESGCM(plain, newKey); err == nil {
+						item.passEnc = reEnc
+						changed = true
+					}
+				}
+			}
+		}
+
+		// 检查并重加密 ssh_password_encrypted
+		if item.sshPassEnc != "" {
+			if _, err := crypto.DecryptAESGCM(item.sshPassEnc, newKey); err != nil {
+				if plain, err := crypto.DecryptAESGCM(item.sshPassEnc, legacyKey); err == nil {
+					if reEnc, err := crypto.EncryptAESGCM(plain, newKey); err == nil {
+						item.sshPassEnc = reEnc
+						changed = true
+					}
+				}
+			}
+		}
+
+		// 检查并重加密 ssh_key_encrypted
+		if item.sshKeyEnc != "" {
+			if _, err := crypto.DecryptAESGCM(item.sshKeyEnc, newKey); err != nil {
+				if plain, err := crypto.DecryptAESGCM(item.sshKeyEnc, legacyKey); err == nil {
+					if reEnc, err := crypto.EncryptAESGCM(plain, newKey); err == nil {
+						item.sshKeyEnc = reEnc
+						changed = true
+					}
+				}
+			}
+		}
+
+		if changed {
+			updates = append(updates, item)
+		}
+	}
+
+	for _, u := range updates {
+		_, _ = DB.Exec("UPDATE nodes SET password_encrypted = ?, ssh_password_encrypted = ?, ssh_key_encrypted = ?, updated_at = ? WHERE id = ?",
+			u.passEnc, u.sshPassEnc, u.sshKeyEnc, time.Now(), u.id)
+	}
+
+	// 同样检查 vultr_api_key_encrypted
+	if vultrEnc, err := GetSetting("vultr_api_key_encrypted"); err == nil && vultrEnc != "" {
+		if _, err := crypto.DecryptAESGCM(vultrEnc, newKey); err != nil {
+			if plain, err := crypto.DecryptAESGCM(vultrEnc, legacyKey); err == nil {
+				if reEnc, err := crypto.EncryptAESGCM(plain, newKey); err == nil {
+					_ = SetSetting("vultr_api_key_encrypted", reEnc)
+				}
+			}
+		}
+	}
+
+	// 同样检查 cloud_ssh_private_key_encrypted
+	if cloudSSH, err := GetSetting("cloud_ssh_private_key_encrypted"); err == nil && cloudSSH != "" {
+		if _, err := crypto.DecryptAESGCM(cloudSSH, newKey); err != nil {
+			if plain, err := crypto.DecryptAESGCM(cloudSSH, legacyKey); err == nil {
+				if reEnc, err := crypto.EncryptAESGCM(plain, newKey); err == nil {
+					_ = SetSetting("cloud_ssh_private_key_encrypted", reEnc)
+				}
+			}
+		}
+	}
+
+	return nil
+}
+
 // GetVultrAPIKey 获取解密后的 Vultr API Token
 func GetVultrAPIKey() (string, error) {
 	enc, err := GetSetting("vultr_api_key_encrypted")
 	if err != nil || enc == "" {
 		return "", err
 	}
-	key := GetEncryptionKey()
-	return crypto.DecryptAESGCM(enc, key)
+	return DecryptSensitiveData(enc)
 }
 
 // SetVultrAPIKey 加密存储 Vultr API Token

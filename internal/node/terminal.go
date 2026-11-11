@@ -19,7 +19,6 @@ import (
 	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/ssh"
 	"vps-auto-deploy/internal/model"
-	"vps-auto-deploy/internal/pkg/crypto"
 )
 
 // TerminalTicketInfo 包含一次性终端令牌绑定的元数据与凭据载荷
@@ -255,8 +254,6 @@ func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int, user, cli
 
 // handleRemoteSSHSession 建立至远程纳管节点的 SSH PTY 会话
 func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, initRows int, user, clientIP, tempUser, tempPass, tempKey string) {
-	key := model.GetEncryptionKey()
-
 	sshUser := node.SSHUser
 	if sshUser == "" {
 		sshUser = "root"
@@ -270,15 +267,22 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 	// 优先使用传入的临时凭据或解密已持久化的凭据
 	rawPass := tempPass
 	if rawPass == "" && node.SSHPasswordEncrypted != "" {
-		if dec, err := crypto.DecryptAESGCM(node.SSHPasswordEncrypted, key); err == nil {
+		if dec, err := model.DecryptSensitiveData(node.SSHPasswordEncrypted); err == nil && dec != "" {
 			rawPass = dec
 		}
 	}
 
 	rawKey := tempKey
 	if rawKey == "" && node.SSHKeyEncrypted != "" {
-		if dec, err := crypto.DecryptAESGCM(node.SSHKeyEncrypted, key); err == nil {
+		if dec, err := model.DecryptSensitiveData(node.SSHKeyEncrypted); err == nil && dec != "" {
 			rawKey = dec
+		}
+	}
+
+	// 智能备选回退：若未单独设置 SSH 专用密码，尝试使用该节点的面板管理密码作为 SSH 密码尝试
+	if rawPass == "" && rawKey == "" && node.PasswordEncrypted != "" {
+		if dec, err := model.DecryptSensitiveData(node.PasswordEncrypted); err == nil && dec != "" {
+			rawPass = dec
 		}
 	}
 
