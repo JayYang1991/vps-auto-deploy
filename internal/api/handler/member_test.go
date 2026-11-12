@@ -197,6 +197,9 @@ func TestSyncMembersToNodeMock(t *testing.T) {
 	}))
 	defer mockServer.Close()
 
+	os.Setenv("ALLOW_PRIVATE_IP", "1")
+	defer os.Unsetenv("ALLOW_PRIVATE_IP")
+
 	// 从 mockServer.URL 解析 host 与 port
 	host, portStr, err := net.SplitHostPort(mockServer.Listener.Addr().String())
 	if err != nil {

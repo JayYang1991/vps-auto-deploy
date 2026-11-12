@@ -159,9 +159,14 @@ func WriteServiceUnit(unitName, content string) error {
 
 	path := GetSystemdUnitPath(unitName)
 	_ = os.MkdirAll(filepath.Dir(path), 0755)
-	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+	perm := os.FileMode(0644)
+	if strings.Contains(content, "TUNNEL_TOKEN") || strings.Contains(content, "Password") || strings.Contains(content, "Secret") {
+		perm = 0600
+	}
+	if err := os.WriteFile(path, []byte(content), perm); err != nil {
 		return fmt.Errorf("write systemd unit error: %w", err)
 	}
+	_ = os.Chmod(path, perm)
 	return DaemonReload()
 }
 

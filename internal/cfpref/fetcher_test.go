@@ -66,3 +66,35 @@ vless://uuid-1@104.238.148.149:443?encryption=none#HK-Test
 	}
 }
 
+func TestSaveSettingsValidation(t *testing.T) {
+	_, err := model.InitDB(":memory:")
+	if err != nil {
+		t.Fatalf("InitDB error: %v", err)
+	}
+
+	// 1. 测试合法参数
+	validSettings := map[string]interface{}{
+		"cron_interval": "6h",
+		"cron_time":     "04:30",
+	}
+	if err := SaveSettings(validSettings); err != nil {
+		t.Fatalf("expected valid settings to pass, got error: %v", err)
+	}
+
+	// 2. 测试非法 interval (小于 10m 或格式错误)
+	invalidInterval := map[string]interface{}{
+		"cron_interval": "5m",
+	}
+	if err := SaveSettings(invalidInterval); err == nil {
+		t.Fatalf("expected interval 5m to be rejected, but passed")
+	}
+
+	// 3. 测试非法 cron_time 格式
+	invalidTime := map[string]interface{}{
+		"cron_time": "25:00",
+	}
+	if err := SaveSettings(invalidTime); err == nil {
+		t.Fatalf("expected time 25:00 to be rejected, but passed")
+	}
+}
+

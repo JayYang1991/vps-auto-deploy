@@ -104,7 +104,8 @@ func GetSubconverterConfig(c *gin.Context) {
 		if dbRaw, _ := model.GetSetting("subconverter_raw_ini"); dbRaw != "" {
 			rawBytes = []byte(dbRaw)
 			_ = os.MkdirAll(filepath.Dir(configPath), 0755)
-			_ = os.WriteFile(configPath, rawBytes, 0644)
+			_ = os.WriteFile(configPath, rawBytes, 0600)
+			_ = os.Chmod(configPath, 0600)
 		} else {
 			// 尝试读取 example
 			examplePath := filepath.Join(subconverter.GetComponentDir(), "pref.example.ini")
@@ -139,7 +140,8 @@ func GetSubconverterConfig(c *gin.Context) {
 		}
 	}
 	if dirty {
-		_ = os.WriteFile(configPath, []byte(rawContent), 0644)
+		_ = os.WriteFile(configPath, []byte(rawContent), 0600)
+		_ = os.Chmod(configPath, 0600)
 	}
 
 	port := subconverter.DefaultPort
@@ -177,7 +179,8 @@ func GetSubconverterConfig(c *gin.Context) {
 
 func rollbackSubconverter(configPath string, oldConfig []byte, drv *subconverter.Driver) {
 	if len(oldConfig) > 0 {
-		_ = os.WriteFile(configPath, oldConfig, 0644)
+		_ = os.WriteFile(configPath, oldConfig, 0600)
+		_ = os.Chmod(configPath, 0600)
 	} else {
 		_ = os.Remove(configPath)
 	}
@@ -271,10 +274,11 @@ func SaveSubconverterConfig(c *gin.Context) {
 	}
 
 	// 3. 写入新配置到 pref.ini
-	if err := os.WriteFile(configPath, []byte(contentToWrite), 0644); err != nil {
+	if err := os.WriteFile(configPath, []byte(contentToWrite), 0600); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "写入配置文件失败: " + err.Error()})
 		return
 	}
+	_ = os.Chmod(configPath, 0600)
 
 	// 4. 解析生效设置并持久化到 SQLite 数据库（单一真相源，防重新升级或重启丢失配置）
 	finalSettings := parseIniKeyValues(contentToWrite)
@@ -522,7 +526,8 @@ func SaveSubconverterPreferences(c *gin.Context) {
 		updated := updateIniSettings(string(existing), map[string]string{
 			"default_external_config": effectiveTpl,
 		})
-		_ = os.WriteFile(configPath, []byte(updated), 0644)
+		_ = os.WriteFile(configPath, []byte(updated), 0600)
+		_ = os.Chmod(configPath, 0600)
 	}
 
 	c.JSON(http.StatusOK, gin.H{

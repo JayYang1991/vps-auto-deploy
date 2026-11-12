@@ -177,6 +177,7 @@ func (d *Driver) ConfigureService(mode, token string, localPort int, protocol st
 	}
 
 	var execArgs string
+	var envLine string
 	if cleanMode == "token" && token != "" {
 		cleanToken := strings.TrimSpace(token)
 		// 阻断换行或控制字符，防止 Systemd Unit 文件注入
@@ -187,7 +188,9 @@ func (d *Driver) ConfigureService(mode, token string, localPort int, protocol st
 		if cleanProto != "auto" {
 			protoArg = fmt.Sprintf("--protocol %s ", cleanProto)
 		}
-		execArgs = fmt.Sprintf("tunnel %srun --token %s", protoArg, cleanToken)
+		// 使用环境变量传递 Token，避免在命令行 /proc 进程树中暴露凭据
+		envLine = fmt.Sprintf("Environment=\"TUNNEL_TOKEN=%s\"\n", cleanToken)
+		execArgs = fmt.Sprintf("tunnel %srun", protoArg)
 	} else {
 		execArgs = fmt.Sprintf("tunnel --url http://127.0.0.1:%d --no-autoupdate", localPort)
 	}
@@ -199,13 +202,13 @@ After=network.target network-online.target
 [Service]
 TimeoutStartSec=0
 Type=notify
-ExecStart=%s %s
+%sExecStart=%s %s
 Restart=on-failure
 RestartSec=5s
 
 [Install]
 WantedBy=multi-user.target
-`, bin, execArgs)
+`, envLine, bin, strings.TrimSpace(execArgs))
 
 	if err := component.WriteServiceUnit(UnitName, unitContent); err != nil {
 		return err

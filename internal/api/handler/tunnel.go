@@ -24,6 +24,14 @@ type TunnelCreateRequest struct {
 	Protocol      string `json:"protocol"`
 }
 
+func maskToken(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if len(raw) <= 8 {
+		return "******"
+	}
+	return raw[:4] + "..." + raw[len(raw)-4:]
+}
+
 func ListTunnels(c *gin.Context) {
 	rows, err := model.DB.Query("SELECT id, name, mode, token, domain, target_port, edge_ip_version, protocol, status, enabled, created_at, updated_at FROM tunnels ORDER BY id DESC")
 	if err != nil {
@@ -41,6 +49,9 @@ func ListTunnels(c *gin.Context) {
 			t.Enabled = enabledInt == 1
 			t.CreatedAt = model.ParseTime(createdAtRaw)
 			t.UpdatedAt = model.ParseTime(updatedAtRaw)
+			if t.Token != "" {
+				t.Token = maskToken(t.Token)
+			}
 			list = append(list, t)
 		}
 	}

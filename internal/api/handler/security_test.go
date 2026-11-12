@@ -3,6 +3,7 @@ package handler
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -54,5 +55,46 @@ func TestIsValidListenAddress(t *testing.T) {
 		if isValidListenAddress(inv) {
 			t.Errorf("expected %q to be invalid listen address, but got valid", inv)
 		}
+	}
+}
+
+func TestValidateIPCIDRAndPorts(t *testing.T) {
+	validCIDRs := []string{"", "192.168.1.0/24", "10.0.0.0/8, 172.16.0.0/12", "1.1.1.1", "2001:db8::/32"}
+	for _, c := range validCIDRs {
+		if err := validateIPCIDR(c); err != nil {
+			t.Errorf("expected %q to be valid CIDR, but got error: %v", c, err)
+		}
+	}
+
+	invalidCIDRs := []string{"1.2.3.4/99", "invalid", "10.0.0.1; DROP TABLE", "999.999.999.999/24"}
+	for _, c := range invalidCIDRs {
+		if err := validateIPCIDR(c); err == nil {
+			t.Errorf("expected %q to be invalid CIDR, but got nil error", c)
+		}
+	}
+
+	validPorts := []string{"", "80", "443, 8080", "1, 65535"}
+	for _, p := range validPorts {
+		if err := validatePorts(p); err != nil {
+			t.Errorf("expected %q to be valid port list, but got error: %v", p, err)
+		}
+	}
+
+	invalidPorts := []string{"0", "-1", "65536", "abc", "80; rm"}
+	for _, p := range invalidPorts {
+		if err := validatePorts(p); err == nil {
+			t.Errorf("expected %q to be invalid port list, but got nil error", p)
+		}
+	}
+}
+
+func TestMaskToken(t *testing.T) {
+	if maskToken("short") != "******" {
+		t.Fatalf("expected ****** for short token, got %s", maskToken("short"))
+	}
+	longToken := "eyJhGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.abcdef"
+	masked := maskToken(longToken)
+	if !strings.HasPrefix(masked, "eyJh...") || !strings.HasSuffix(masked, "cdef") {
+		t.Fatalf("unexpected masked token format: %s", masked)
 	}
 }

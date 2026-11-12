@@ -343,6 +343,23 @@ type ServiceStatus struct {
 - **系统架构与命令行参数严格清洗**：
   - 跨节点通过 SSH 自动化部署与升级时，对于远端系统返回的架构标识（`uname -m`）必须强制执行 `[a-zA-Z0-9_\-]` 白名单字符校验，严防伪造或受控主机返回含命令分隔符的字符串导致 Shell 命令注入逃逸。
 
+### 20. 核心配置文件权限固化与私钥防护 (0600 File Permissions for Core Configs)
+- **私钥与凭据配置文件权限收紧**：
+  - Sing-box 核心配置文件（`/etc/sing-box/config.json`）及 Subconverter 配置文件（`pref.ini`）包含 Reality 私钥、UUID、订阅访问令牌与代理节点凭据，严禁以系统默认 `0644` 权限落盘。
+  - 写入配置与重载应用时，必须显式传递 `0600` 权限（`os.WriteFile(path, data, 0600)`），并显式调用 `os.Chmod(path, 0600)` 固化权限，杜绝宿主机其他普通用户及受限进程窥视敏感密钥。
+
+### 21. 守护进程凭据隔离与进程树参数脱敏 (Environment Variable Credential Isolation)
+- **进程树命令行脱敏**：
+  - Systemd 服务注册及 CLI 启动时，严禁将高危凭据（如 Cloudflared Tunnel Token）以命令行参数形式传递，防止宿主机非 root 用户通过 `ps aux`、`/proc/<pid>/cmdline` 窥视令牌。
+  - 必须通过 Systemd 单元文件中的 `Environment="TUNNEL_TOKEN=..."` 环境变量传递；且凡包含敏感密钥环境变量或凭据路径的 Systemd service unit 文件必须以 `0600` 权限落盘与收紧。
+  - 运维与状态查询接口（如隧道列表 API）对敏感 Token 统一执行脱敏掩码（保留前 6 后 4 位），防止日常查看与接口抓包时意外泄露完整令牌。
+
+### 22. 跨节点通信 SSRF 防御与网络规则入参预校验 (Safe Transport & Network Rule Validation)
+- **跨节点后台请求全面接入 SSRF 防护**：
+  - 节点纳管后台异步任务（`LoginNode`、`PingNode`、`SyncMembersToNode`）在非 TLS 通信或初始化阶段，必须强制使用 `netutil.CreateSafeHTTPTransport`，对目标地址执行严格的私有网段与云厂商元数据地址（`169.254.169.254` 等）拦截与 DNS Rebinding 防护。
+  - 针对分流规则等入参在写入配置前强制执行前置校验：`ip_cidr` 严格执行 `net.ParseCIDR` / `net.ParseIP` 合法性检查，`port` 严格限定在 1~65535 端口范围及端口段语法，杜绝非法入参污染底层配置文件引发核心组件启动崩溃。
+
+
 
 
 

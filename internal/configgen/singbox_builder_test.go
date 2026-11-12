@@ -258,3 +258,28 @@ func TestGenerateServerConfig_Singbox114Routes(t *testing.T) {
 	}
 }
 
+func TestApplyAndReloadConfigPermissions(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_perm.db")
+	db, err := model.InitDB(dbPath)
+	if err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+	defer db.Close()
+
+	os.Setenv("SKIP_SERVICE_RELOAD", "1")
+	defer os.Unsetenv("SKIP_SERVICE_RELOAD")
+
+	destPath := filepath.Join(t.TempDir(), "config.json")
+	if err := ApplyAndReload(destPath); err != nil {
+		t.Fatalf("ApplyAndReload failed: %v", err)
+	}
+
+	fi, err := os.Stat(destPath)
+	if err != nil {
+		t.Fatalf("Stat config file failed: %v", err)
+	}
+	if fi.Mode().Perm() != 0600 {
+		t.Fatalf("expected config file permissions 0600, got %o", fi.Mode().Perm())
+	}
+}
+

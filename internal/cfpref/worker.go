@@ -3,6 +3,7 @@ package cfpref
 import (
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 	"time"
 
@@ -178,8 +179,19 @@ func SaveSettings(settings map[string]interface{}) error {
 		case "cron_mode":
 			_ = model.SetSetting("cf_pref_cron_mode", valStr)
 		case "cron_interval":
+			if valStr != "" {
+				dur, err := time.ParseDuration(valStr)
+				if err != nil || dur < 10*time.Minute {
+					return fmt.Errorf("定时同步间隔不合法 (如 6h, 30m，且最小间隔不能低于 10 分钟)")
+				}
+			}
 			_ = model.SetSetting("cf_pref_cron_interval", valStr)
 		case "cron_time":
+			if valStr != "" {
+				if !regexp.MustCompile(`^([01][0-9]|2[0-3]):[0-5][0-9]$`).MatchString(valStr) {
+					return fmt.Errorf("定点同步时间格式不合法 (必须为 HH:MM 格式，如 04:00)")
+				}
+			}
 			_ = model.SetSetting("cf_pref_cron_time", valStr)
 		}
 	}

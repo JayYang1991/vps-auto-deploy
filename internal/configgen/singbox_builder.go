@@ -757,7 +757,8 @@ func probeSingboxHealth(driver *singbox.Driver) error {
 
 func rollbackSingbox(destPath string, oldConfig []byte, driver *singbox.Driver, wasActive bool) {
 	if len(oldConfig) > 0 {
-		_ = os.WriteFile(destPath, oldConfig, 0644)
+		_ = os.WriteFile(destPath, oldConfig, 0600)
+		_ = os.Chmod(destPath, 0600)
 	} else {
 		_ = os.Remove(destPath)
 	}
@@ -813,10 +814,11 @@ func ApplyAndReload(destPath string) error {
 	prevStatus, _ := driver.Status()
 	wasActive := prevStatus.Active || component.IsProcessRunning(singbox.DriverName)
 
-	// 3. 校验通过，写入目标配置文件
-	if err := os.WriteFile(destPath, rawJSON, 0644); err != nil {
+	// 3. 校验通过，写入目标配置文件 (0600: 仅所有者读写，严防本地低权限进程窥视 Reality 私钥与 UUID)
+	if err := os.WriteFile(destPath, rawJSON, 0600); err != nil {
 		return fmt.Errorf("写入配置文件失败: %w", err)
 	}
+	_ = os.Chmod(destPath, 0600)
 
 	// 4. 重载服务并探活 (测试环境若设置 SKIP_SERVICE_RELOAD 则跳过 systemd 启停，但始终保留上一步的 sing-box check 语法预检)
 	if installedVer != "" && os.Getenv("SKIP_SERVICE_RELOAD") != "1" {

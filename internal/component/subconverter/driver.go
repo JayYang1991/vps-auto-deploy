@@ -221,7 +221,8 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 						modified = strings.Replace(modified, "[common]", "[common]\nskip_failed_links=true", 1)
 					}
 				}
-				_ = os.WriteFile(prefPath, []byte(modified), 0644)
+				_ = os.WriteFile(prefPath, []byte(modified), 0600)
+				_ = os.Chmod(prefPath, 0600)
 			}
 		} else {
 			// 若无 example，创建最小安全默认配置
@@ -240,7 +241,8 @@ port=%d
 [advanced]
 skip_failed_links=true
 `, DefaultPort)
-			_ = os.WriteFile(prefPath, []byte(defaultIni), 0644)
+			_ = os.WriteFile(prefPath, []byte(defaultIni), 0600)
+			_ = os.Chmod(prefPath, 0600)
 		}
 	} else {
 		logFn("保留现有用户自定义 pref.ini 配置文件，并同步高可用防护配置。")
@@ -380,7 +382,8 @@ func EnsurePrefDefaults() {
 		if model.DB != nil {
 			if rawIni, _ := model.GetSetting("subconverter_raw_ini"); rawIni != "" {
 				_ = os.MkdirAll(filepath.Dir(prefPath), 0755)
-				_ = os.WriteFile(prefPath, []byte(rawIni), 0644)
+				_ = os.WriteFile(prefPath, []byte(rawIni), 0600)
+				_ = os.Chmod(prefPath, 0600)
 				data = []byte(rawIni)
 			}
 		}
@@ -427,7 +430,8 @@ func EnsurePrefDefaults() {
 	}
 
 	if modified {
-		_ = os.WriteFile(prefPath, []byte(content), 0644)
+		_ = os.WriteFile(prefPath, []byte(content), 0600)
+		_ = os.Chmod(prefPath, 0600)
 	}
 
 	// 3. 检查并从数据库还原 custom_rules.ini (若磁盘丢失)

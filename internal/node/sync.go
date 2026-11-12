@@ -13,6 +13,7 @@ import (
 
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/pkg/crypto"
+	"vps-auto-deploy/internal/pkg/netutil"
 )
 
 // SyncMembersToNode 将小组成员列表精准推送至单个受管节点
@@ -61,7 +62,11 @@ func SyncMembersToNode(node *model.Node, members []model.Member) error {
 	if node.UseTLS {
 		client = crypto.CreatePinnedHTTPClient(node.CertFingerprint, 25*time.Second)
 	} else {
-		client = &http.Client{Timeout: 25 * time.Second}
+		// 非 TLS 节点请求强制挂载安全 Transport，阻断回环与云元数据 SSRF 探测
+		client = &http.Client{
+			Transport: netutil.CreateSafeHTTPTransport(25 * time.Second),
+			Timeout:   25 * time.Second,
+		}
 	}
 
 	resp, err := client.Do(req)

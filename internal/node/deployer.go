@@ -23,6 +23,7 @@ import (
 	"golang.org/x/crypto/ssh"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/pkg/crypto"
+	"vps-auto-deploy/internal/pkg/netutil"
 	"vps-auto-deploy/internal/pkg/upgrade"
 )
 
@@ -115,7 +116,11 @@ func LoginNode(host string, port int, secretPath, username, password string, use
 	if useTLS {
 		client = crypto.CreatePinnedHTTPClient(certFingerprint, 4*time.Second)
 	} else {
-		client = &http.Client{Timeout: 4 * time.Second}
+		// 非 TLS 节点请求强制挂载安全 Transport，阻断回环与云元数据 SSRF 探测
+		client = &http.Client{
+			Transport: netutil.CreateSafeHTTPTransport(4 * time.Second),
+			Timeout:   4 * time.Second,
+		}
 	}
 
 	resp, err := client.Post(loginURL, "application/json", bytes.NewReader(body))
@@ -172,7 +177,11 @@ func PingNode(node *model.Node) (int64, error) {
 	if node.UseTLS {
 		client = crypto.CreatePinnedHTTPClient(node.CertFingerprint, 8*time.Second)
 	} else {
-		client = &http.Client{Timeout: 8 * time.Second}
+		// 非 TLS 节点请求强制挂载安全 Transport，阻断回环与云元数据 SSRF 探测
+		client = &http.Client{
+			Transport: netutil.CreateSafeHTTPTransport(8 * time.Second),
+			Timeout:   8 * time.Second,
+		}
 	}
 
 	resp, err := client.Do(req)

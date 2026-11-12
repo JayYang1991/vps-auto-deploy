@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -99,6 +100,45 @@ func validateRuleSetURLs(ruleSetURLs string) error {
 	return nil
 }
 
+func validateIPCIDR(raw string) error {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	parts := strings.Split(trimmed, ",")
+	for _, p := range parts {
+		item := strings.TrimSpace(p)
+		if item == "" {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(item); err != nil {
+			if net.ParseIP(item) == nil {
+				return fmt.Errorf("非法 IP 或 CIDR 网段格式: %s", item)
+			}
+		}
+	}
+	return nil
+}
+
+func validatePorts(raw string) error {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	parts := strings.Split(trimmed, ",")
+	for _, p := range parts {
+		item := strings.TrimSpace(p)
+		if item == "" {
+			continue
+		}
+		val, err := strconv.Atoi(item)
+		if err != nil || val < 1 || val > 65535 {
+			return fmt.Errorf("非法端口: %s (端口必须在 1 ~ 65535 之间)", item)
+		}
+	}
+	return nil
+}
+
 // CreateRoute 新建路由规则
 func CreateRoute(c *gin.Context) {
 	var req RouteRequest
@@ -116,6 +156,24 @@ func CreateRoute(c *gin.Context) {
 	ruleSetURLs := strings.TrimSpace(req.RuleSetURLs)
 	if err := validateRuleSetURLs(ruleSetURLs); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "自定义规则集校验失败: " + err.Error()})
+		return
+	}
+
+	if err := validateIPCIDR(req.IPCIDR); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := validatePorts(req.Port); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := validateIPCIDR(req.IPCIDR); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := validatePorts(req.Port); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -205,6 +263,15 @@ func UpdateRoute(c *gin.Context) {
 	ruleSetURLs := strings.TrimSpace(req.RuleSetURLs)
 	if err := validateRuleSetURLs(ruleSetURLs); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "自定义规则集校验失败: " + err.Error()})
+		return
+	}
+
+	if err := validateIPCIDR(req.IPCIDR); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	if err := validatePorts(req.Port); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
