@@ -9,6 +9,7 @@ import (
 	"debug/elf"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -267,14 +268,27 @@ func ListPackages() ([]PackageInfo, error) {
 	return list, nil
 }
 
-// GetPackageBinaryPath 获取指定 packageID 的二进制完整路径
+// GetPackageBinaryPath 获取指定 packageID 的二进制完整路径 (严格校验路径合法性，防范目录穿越攻击)
 func GetPackageBinaryPath(packageID string) (string, error) {
+	cleanID := strings.TrimSpace(packageID)
+	if cleanID == "" || strings.Contains(cleanID, "..") || strings.Contains(cleanID, "/") || strings.Contains(cleanID, "\\") {
+		return "", errors.New("非法的 package_id: 禁止包含路径穿越字符或目录分隔符")
+	}
+	validPkgIDRegex := regexp.MustCompile(`^[a-zA-Z0-9_\-\.]+$`)
+	if !validPkgIDRegex.MatchString(cleanID) {
+		return "", errors.New("非法的 package_id: 仅支持字母、数字、短横线与下划线")
+	}
+
 	pkgDir := GetPackageDir()
-	binPath := filepath.Join(pkgDir, packageID+".bin")
+	binPath := filepath.Join(pkgDir, cleanID+".bin")
+	if !isPathSafe(pkgDir, binPath) {
+		return "", errors.New("【安全拦截】安装包路径越权")
+	}
+
 	if fi, err := os.Stat(binPath); err == nil && !fi.IsDir() {
 		return binPath, nil
 	}
-	return "", fmt.Errorf("安装包 %s 未找到", packageID)
+	return "", fmt.Errorf("安装包 %s 未找到", cleanID)
 }
 
 // FindBestPackageForArch 为指定架构寻找最匹配的二进制文件路径

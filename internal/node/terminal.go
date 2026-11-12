@@ -76,8 +76,8 @@ func IssueTerminalTicket(nodeID int64, username, clientIP, tempUser, tempPass, t
 	return ticket
 }
 
-// ValidateAndConsumeTicket 验证并立即销毁单次票据（防重放攻击），并返回绑定的凭据元数据
-func ValidateAndConsumeTicket(ticket string, nodeID int64) (*TerminalTicketInfo, bool) {
+// ValidateAndConsumeTicket 验证并立即销毁单次票据（防重放攻击与中间人冒领），并返回绑定的凭据元数据
+func ValidateAndConsumeTicket(ticket string, nodeID int64, clientIP ...string) (*TerminalTicketInfo, bool) {
 	if ticket == "" {
 		return nil, false
 	}
@@ -96,6 +96,19 @@ func ValidateAndConsumeTicket(ticket string, nodeID int64) (*TerminalTicketInfo,
 	if info.NodeID != nodeID {
 		return nil, false
 	}
+
+	// 绑定签发端 IP 强校验：防止票据被未授权第三方客户端抢占重放
+	if len(clientIP) > 0 && clientIP[0] != "" && info.ClientIP != "" {
+		reqIP := clientIP[0]
+		if info.ClientIP != reqIP {
+			isInfoLoop := info.ClientIP == "127.0.0.1" || info.ClientIP == "::1"
+			isReqLoop := reqIP == "127.0.0.1" || reqIP == "::1"
+			if !(isInfoLoop && isReqLoop) {
+				return nil, false
+			}
+		}
+	}
+
 	return &info, true
 }
 

@@ -119,3 +119,23 @@ func TestInspectAndSavePackageWithTarGz(t *testing.T) {
 	}
 }
 
+func TestGetPackageBinaryPathSecurity(t *testing.T) {
+	// 测试路径穿越注入
+	dangerousIDs := []string{
+		"../../etc/passwd",
+		"../packages/vps-panel",
+		"/bin/sh",
+		"vps-panel; rm -rf /",
+		"vps-panel|id",
+		"vps-panel/evil",
+		"",
+	}
+
+	for _, badID := range dangerousIDs {
+		_, err := GetPackageBinaryPath(badID)
+		if err == nil {
+			t.Errorf("expected error for dangerous packageID %q, got nil", badID)
+		}
+	}
+}
+

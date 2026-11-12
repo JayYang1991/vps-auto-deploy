@@ -829,8 +829,9 @@ func IsSafeLocalTemplate(tpl string) bool {
 
 	compDir := subconverter.GetComponentDir()
 	fullPath := filepath.Join(compDir, clean)
-	// 二次防穿越校验：确保绝对路径依然在 compDir 内
-	if !strings.HasPrefix(filepath.Clean(fullPath), filepath.Clean(compDir)) {
+	// 二次防穿越校验：确保绝对路径完全限定在 compDir 内部 (严防兄弟前缀目录逃逸)
+	rel, err := filepath.Rel(filepath.Clean(compDir), filepath.Clean(fullPath))
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return false
 	}
 

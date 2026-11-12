@@ -191,7 +191,7 @@ func TestDeleteInboundWithReferencingRoute(t *testing.T) {
 	// 1. 插入测试入站
 	res, err := model.DB.Exec(
 		"INSERT INTO inbounds (tag, protocol, listen, port, spec_json, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
-		"bound-inbound", "vless-reality", "::", 20443, "{}",
+		"bound-inbound", "mixed", "::", 20443, "{}",
 	)
 	if err != nil {
 		t.Fatalf("failed to insert inbound: %v", err)
@@ -224,7 +224,7 @@ func TestDeleteInboundWithReferencingRoute(t *testing.T) {
 	// 4. 重命名该入站 -> 路由应自动级联更新
 	updatePayload := `{
 		"tag": "renamed-inbound",
-		"protocol": "vless-reality",
+		"protocol": "mixed",
 		"listen": "::",
 		"port": 20443,
 		"spec": {},

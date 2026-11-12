@@ -185,7 +185,8 @@ func NodeTerminalWS(c *gin.Context) {
 	}
 
 	ticket := c.Query("ticket")
-	ticketInfo, ok := node.ValidateAndConsumeTicket(ticket, id)
+	clientIP := middleware.GetRealClientIP(c)
+	ticketInfo, ok := node.ValidateAndConsumeTicket(ticket, id, clientIP)
 	if !ok || ticketInfo == nil {
 		c.String(http.StatusUnauthorized, "invalid or expired terminal ticket")
 		return
