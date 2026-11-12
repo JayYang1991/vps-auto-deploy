@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -114,17 +115,37 @@ func GetSystemOverview(c *gin.Context) {
 
 // EnableBBR 一键开启 BBR 拥塞控制算法
 func EnableBBR(c *gin.Context) {
-	content, err := os.ReadFile("/etc/sysctl.conf")
-	if err == nil && strings.Contains(string(content), "net.ipv4.tcp_congestion_control=bbr") {
-		_, _ = executil.RunCommand(3*time.Second, "sysctl", "-p")
+	bbrRegex := regexp.MustCompile(`(?m)^\s*net\.ipv4\.tcp_congestion_control\s*=\s*bbr\b`)
+
+	// 检查当前系统配置中是否已启用 BBR
+	isConfigured := false
+	if data, err := os.ReadFile("/etc/sysctl.d/99-vps-bbr.conf"); err == nil && bbrRegex.Match(data) {
+		isConfigured = true
+	} else if data, err := os.ReadFile("/etc/sysctl.conf"); err == nil && bbrRegex.Match(data) {
+		isConfigured = true
+	}
+
+	if isConfigured {
+		_, _ = executil.RunCommand(3*time.Second, "sysctl", "--system")
 		c.JSON(http.StatusOK, gin.H{"message": "BBR is already configured and active"})
 		return
 	}
 
-	bbrConf := "\nnet.core.default_qdisc=fq\nnet.ipv4.tcp_congestion_control=bbr\n"
+	bbrContent := "# Managed by vps-panel\nnet.core.default_qdisc = fq\nnet.ipv4.tcp_congestion_control = bbr\n"
+
+	// 优先写入现代发行版标准的 /etc/sysctl.d/99-vps-bbr.conf
+	if fi, err := os.Stat("/etc/sysctl.d"); err == nil && fi.IsDir() {
+		if err := os.WriteFile("/etc/sysctl.d/99-vps-bbr.conf", []byte(bbrContent), 0644); err == nil {
+			_, _ = executil.RunCommand(3*time.Second, "sysctl", "--system")
+			c.JSON(http.StatusOK, gin.H{"message": "BBR enabled successfully via sysctl.d"})
+			return
+		}
+	}
+
+	// 降级追加至 /etc/sysctl.conf
 	f, err := os.OpenFile("/etc/sysctl.conf", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 	if err == nil {
-		_, _ = f.WriteString(bbrConf)
+		_, _ = f.WriteString("\n" + bbrContent)
 		f.Close()
 		_, _ = executil.RunCommand(3*time.Second, "sysctl", "-p")
 		c.JSON(http.StatusOK, gin.H{"message": "BBR enabled successfully"})

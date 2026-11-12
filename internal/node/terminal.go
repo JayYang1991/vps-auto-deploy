@@ -35,6 +35,16 @@ type TerminalTicketInfo struct {
 var (
 	ticketLock sync.RWMutex
 	ticketMap  = make(map[string]TerminalTicketInfo)
+
+	activeSessionsLock sync.Mutex
+	activeSessionCount int
+)
+
+const (
+	maxConcurrentSessions = 10
+	terminalPongWait      = 60 * time.Second
+	terminalPingPeriod    = (terminalPongWait * 9) / 10
+	terminalReadLimit     = 64 * 1024
 )
 
 // IssueTerminalTicket 为目标节点签发一个一次性有效、30秒有效期的终端票据，并安全绑定临时凭据
@@ -128,6 +138,21 @@ type TerminalMessage struct {
 func HandleTerminalSession(ws *websocket.Conn, targetNode *model.Node, initCols, initRows int, ticketInfo *TerminalTicketInfo) {
 	defer ws.Close()
 
+	activeSessionsLock.Lock()
+	if activeSessionCount >= maxConcurrentSessions {
+		activeSessionsLock.Unlock()
+		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31m[ERROR] 活跃终端会话数已达并发上限 (10)，请关闭已有终端后再试。\x1b[0m\r\n"))
+		return
+	}
+	activeSessionCount++
+	activeSessionsLock.Unlock()
+
+	defer func() {
+		activeSessionsLock.Lock()
+		activeSessionCount--
+		activeSessionsLock.Unlock()
+	}()
+
 	if initCols <= 0 {
 		initCols = 100
 	}
@@ -196,8 +221,32 @@ func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int, user, cli
 
 	_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[32m✔ 已连接至本地主控端控制台 Shell (Local PTY)\x1b[0m\r\n\r\n"))
 
+	ws.SetReadLimit(terminalReadLimit)
+	_ = ws.SetReadDeadline(time.Now().Add(terminalPongWait))
+	ws.SetPongHandler(func(string) error {
+		_ = ws.SetReadDeadline(time.Now().Add(terminalPongWait))
+		return nil
+	})
+
 	var closeOnce sync.Once
 	done := make(chan struct{})
+
+	// 0. 服务端定时心跳 Ping，侦测半开连接与网络断流
+	go func() {
+		ticker := time.NewTicker(terminalPingPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := ws.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second)); err != nil {
+					closeOnce.Do(func() { close(done) })
+					return
+				}
+			}
+		}
+	}()
 
 	// 1. PTY stdout -> WebSocket
 	go func() {
@@ -224,6 +273,7 @@ func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int, user, cli
 			if err != nil {
 				return
 			}
+			_ = ws.SetReadDeadline(time.Now().Add(terminalPongWait))
 
 			if msgType == websocket.TextMessage || msgType == websocket.BinaryMessage {
 				var ctrl TerminalMessage
@@ -389,8 +439,32 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 	RecordTerminalAudit("CONNECTED", user, clientIP, node.Name, targetAddr, "远端 Shell 交互就绪")
 	_ = ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[32m✔ SSH 安全终端建立成功！已连接至 %s (%s)\x1b[0m\r\n\r\n", node.Name, node.Host)))
 
+	ws.SetReadLimit(terminalReadLimit)
+	_ = ws.SetReadDeadline(time.Now().Add(terminalPongWait))
+	ws.SetPongHandler(func(string) error {
+		_ = ws.SetReadDeadline(time.Now().Add(terminalPongWait))
+		return nil
+	})
+
 	var closeOnce sync.Once
 	done := make(chan struct{})
+
+	// 0. 定时心跳 Ping，侦测半开连接与网络断流
+	go func() {
+		ticker := time.NewTicker(terminalPingPeriod)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				if err := ws.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second)); err != nil {
+					closeOnce.Do(func() { close(done) })
+					return
+				}
+			}
+		}
+	}()
 
 	// 1. SSH stdout/stderr -> WebSocket
 	reader := io.MultiReader(stdoutPipe, stderrPipe)
@@ -418,6 +492,7 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 			if err != nil {
 				return
 			}
+			_ = ws.SetReadDeadline(time.Now().Add(terminalPongWait))
 
 			if msgType == websocket.TextMessage || msgType == websocket.BinaryMessage {
 				var ctrl TerminalMessage

@@ -57,6 +57,11 @@ func Login(c *gin.Context) {
 	// 认证通过，重置该 IP 失败尝试记录
 	middleware.ResetLoginAttempts(middleware.GetRealClientIP(c))
 
+	// 若存在初始明文密码记录，首次登录成功后自动擦除，杜绝明文凭据常驻数据库
+	if initPass, _ := model.GetSetting("initial_admin_password"); initPass != "" {
+		_ = model.SetSetting("initial_admin_password", "")
+	}
+
 	// 根据是否勾选“记住我”决定 JWT 签发生命周期 (未勾选 24 小时，勾选 7 天)
 	duration := 24 * time.Hour
 	if req.RememberMe {

@@ -654,7 +654,8 @@ func ProxySubconverterConvert(target, sourceSubURL, configTemplate string, extra
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	// 限制最大读取 10MB，防范超大响应引发 OOM
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		return nil, "", err
 	}

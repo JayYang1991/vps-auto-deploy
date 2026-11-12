@@ -132,7 +132,8 @@ func (c *Client) doRequest(method, path string, bodyData any) ([]byte, int, erro
 	}
 	defer resp.Body.Close()
 
-	respBytes, err := io.ReadAll(resp.Body)
+	// 限制读取最大 5MB
+	respBytes, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
 	if err != nil {
 		return nil, resp.StatusCode, err
 	}

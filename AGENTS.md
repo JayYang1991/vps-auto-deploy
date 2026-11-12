@@ -304,6 +304,31 @@ type ServiceStatus struct {
 - **感知动态配置与安全令牌**：
   - `ProxySubconverterConvert` 自动动态读取生效端口与 `api_access_token`，在开启访问令牌的高安全模式下自动注入 `&token=...`，确保受管服务在端口变更与凭据保护下的功能闭环。
 
+### 13. 敏感临时文件权限与即时销毁 (0600 Temp Files & Immediate Cleanup)
+- **严禁使用共享宽松权限创建包含私钥的临时文件**：
+  - Sing-box 语法预检与运行时测试配置往往包含节点 Reality 私钥、UUID 与入站凭据。
+  - 严禁使用默认 `0644` 权限在 `/tmp` 创建普通文件，必须统一使用 `os.CreateTemp("", "sb_chk_*.json")` 并显式设置 `0600`（仅当前用户可读写）权限。
+  - 必须使用 `defer os.Remove(tmpPath)` 保证测试结束后无论预检成功还是失败均立即物理擦除临时文件，杜绝非 root 本地进程窥视敏感密钥。
+
+### 14. 终端 WebSocket 读写超时、心跳保活与并发保护 (PTY Keepalive & Session Cap)
+- **心跳保活与死连接剔除 (Ping/Pong Deadlines)**：
+  - 针对 Local PTY 与 Remote SSH 终端会话，后端必须设置 `SetReadDeadline` 与 `SetPongHandler`（60 秒无心跳超时断开），并定时向客户端发送 WebSocket Ping（默认 20 秒周期）。
+  - 杜绝因客户端静默离线（如休眠、断网）导致底层 Bash 进程与 PTY 文件描述符无限期挂死泄漏。
+- **并发终端会话配额防护 (Max Concurrent Sessions)**：
+  - 全局限制活跃终端会话总数上限（默认 10 个并发会话）。超额请求立即拒绝，防止恶意刷起过量 PTY 会话耗尽宿主机进程和文件描述符。
+
+### 15. 外部数据流读取有界防护 (Anti-OOM Bounded LimitReader)
+- **拒绝无界流式响应**：
+  - 针对拉取 Cloudflare 优选 IP、远程订阅转换规则、公网 IP 查询及第三方云 API 响应，严禁直接使用 `io.ReadAll(resp.Body)`。
+  - 必须统一使用 `io.LimitReader(resp.Body, maxBytes)` 进行严格的流式字节截断防护（通常 64KB ~ 10MB），防范外部服务器投毒、Gzip 炸弹或恶性慢速无限数据流耗尽面板内存 (OOM Crash)。
+
+### 16. 生产配置路径严格白名单与初始明文密码自销毁
+- **生产环境配置路径隔离**：
+  - `isAllowedSingboxConfigPath` 生产环境下严禁将 `/tmp` 作为合法配置导入路径，仅允许在 `/etc/vps-auto-deploy`、`/etc/sing-box` 等明确受管目录，防止探测系统临时目录。
+- **首次成功登录立即销毁初始明文密码**：
+  - 系统初次启动生成的随机 `initial_admin_password` 仅供首次运维查看。一旦用户通过 Web 首次成功认证，后端立即将 `initial_admin_password` 从数据库擦除置空，消除明文凭据常驻数据库风险。
+
+
 
 
 

@@ -454,7 +454,10 @@ func isAllowedSingboxConfigPath(p string) bool {
 		"/etc/sing-box",
 		"/usr/local/etc/sing-box",
 		filepath.Dir(defaultPath),
-		os.TempDir(),
+	}
+	// 生产环境严禁将 /tmp 作为合法配置路径，仅在明确指定测试环境变量时允许包含
+	if os.Getenv("ALLOW_TEST_CONFIG_PATH") == "1" {
+		allowedDirs = append(allowedDirs, os.TempDir())
 	}
 	if home := os.Getenv("HOME"); home != "" {
 		allowedDirs = append(allowedDirs, filepath.Join(home, ".config/vps-auto-deploy"))

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -28,8 +29,31 @@ var upgrader = websocket.Upgrader{
 		if err != nil {
 			return false
 		}
-		// 阻断跨源 WebSocket 劫持 (CSWSH)，校验 Host 是否完全匹配
-		return strings.EqualFold(u.Host, r.Host)
+
+		// 1. 直连请求：校验 Host 是否完全匹配 (防跨源 WebSocket 劫持 CSWSH)
+		if strings.EqualFold(u.Host, r.Host) {
+			return true
+		}
+
+		// 2. 反向代理/隧道模式：若请求来自本地回环，允许匹配 X-Forwarded-Host 或已配置的 public_ip
+		remoteIP := r.RemoteAddr
+		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && host != "" {
+			remoteIP = host
+		}
+		if remoteIP == "127.0.0.1" || remoteIP == "::1" || strings.HasPrefix(remoteIP, "127.") {
+			if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
+				if strings.EqualFold(u.Host, fwdHost) {
+					return true
+				}
+			}
+			if pubHost, _ := model.GetSetting("public_ip"); pubHost != "" {
+				if strings.EqualFold(u.Hostname(), pubHost) {
+					return true
+				}
+			}
+		}
+
+		return false
 	},
 }
 

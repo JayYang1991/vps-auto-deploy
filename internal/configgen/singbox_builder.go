@@ -788,13 +788,20 @@ func ApplyAndReload(destPath string) error {
 	driver := singbox.NewDriver()
 	installedVer, _ := driver.GetInstalledVersion()
 
-	// 1. 若已安装 sing-box，先写临时文件进行语法与语义合法性预检
+	// 1. 若已安装 sing-box，使用安全临时文件 (0600 权限) 进行语法与语义合法性预检
 	if installedVer != "" {
-		tmpPath := filepath.Join(os.TempDir(), fmt.Sprintf("sb_chk_%d.json", time.Now().UnixNano()))
-		if err := os.WriteFile(tmpPath, rawJSON, 0644); err != nil {
+		tmpFile, err := os.CreateTemp("", "sb_chk_*.json")
+		if err != nil {
+			return fmt.Errorf("创建临时校验文件失败: %w", err)
+		}
+		tmpPath := tmpFile.Name()
+		defer os.Remove(tmpPath)
+
+		if _, err := tmpFile.Write(rawJSON); err != nil {
+			tmpFile.Close()
 			return fmt.Errorf("写入临时校验文件失败: %w", err)
 		}
-		defer os.Remove(tmpPath)
+		_ = tmpFile.Close()
 
 		if err := singbox.CheckConfig(tmpPath); err != nil {
 			return fmt.Errorf("sing-box 配置语法预检失败: %w", err)

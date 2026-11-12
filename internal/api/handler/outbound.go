@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"reflect"
 	"regexp"
 	"strconv"
@@ -383,13 +382,20 @@ func GetSingboxFullConfig(c *gin.Context) {
 	checkOK := true
 	checkOutput := "配置语法检查通过"
 	if st.Installed {
-		tmpCheck := filepath.Join(os.TempDir(), fmt.Sprintf("sb_chk_%d.json", time.Now().UnixNano()))
-		_ = os.WriteFile(tmpCheck, rawJSON, 0644)
-		defer os.Remove(tmpCheck)
+		tmpCheck, err := os.CreateTemp("", "sb_chk_*.json")
+		if err == nil {
+			tmpPath := tmpCheck.Name()
+			defer os.Remove(tmpPath)
+			_, _ = tmpCheck.Write(rawJSON)
+			_ = tmpCheck.Close()
 
-		if err := singbox.CheckConfig(tmpCheck); err != nil {
+			if err := singbox.CheckConfig(tmpPath); err != nil {
+				checkOK = false
+				checkOutput = err.Error()
+			}
+		} else {
 			checkOK = false
-			checkOutput = err.Error()
+			checkOutput = "创建临时预检文件失败: " + err.Error()
 		}
 	} else {
 		checkOutput = "sing-box 核心未安装，将在安装后自动校验生效"

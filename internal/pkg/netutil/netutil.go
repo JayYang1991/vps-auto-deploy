@@ -37,7 +37,7 @@ func GetPublicIP() string {
 				return
 			}
 			defer resp.Body.Close()
-			body, err := io.ReadAll(resp.Body)
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 			if err == nil {
 				ip := strings.TrimSpace(string(body))
 				if parsed := net.ParseIP(ip); parsed != nil && parsed.To4() != nil {

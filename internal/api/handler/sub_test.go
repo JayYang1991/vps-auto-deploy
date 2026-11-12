@@ -32,3 +32,4 @@ func TestBuildAttachmentHeader(t *testing.T) {
 		t.Fatalf("expected UTF-8'' prefix in filename*, got %s", h3)
 	}
 }
+

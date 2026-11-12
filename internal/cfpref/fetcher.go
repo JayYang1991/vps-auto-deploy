@@ -100,7 +100,8 @@ func FetchAndSavePreferredIPs() (*FetchResult, error) {
 		return nil, fmt.Errorf("%s", msg)
 	}
 
-	bodyBytes, err := io.ReadAll(resp.Body)
+	// 限制最大读取 10MB，防范外部恶意投毒或 OOM 炸弹
+	bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 10*1024*1024))
 	if err != nil {
 		recordFailure(fmt.Sprintf("读取响应失败: %v", err))
 		return nil, err
