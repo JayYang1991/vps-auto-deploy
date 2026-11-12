@@ -374,6 +374,11 @@ func copyFile(src, dst string) error {
 	return out.Sync()
 }
 
+const (
+	maxExtractSingleFileSize = 150 * 1024 * 1024 // 单个文件最多 150MB
+	maxExtractTotalSize      = 300 * 1024 * 1024 // 整个压缩包累计解压最多 300MB
+)
+
 // 解压 tar.gz
 func extractTarGz(src, destDir string) error {
 	f, err := os.Open(src)
@@ -388,6 +393,7 @@ func extractTarGz(src, destDir string) error {
 	}
 	defer gzr.Close()
 
+	var totalExtracted int64
 	tr := tar.NewReader(gzr)
 	for {
 		header, err := tr.Next()
@@ -414,11 +420,30 @@ func extractTarGz(src, destDir string) error {
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(outFile, tr); err != nil {
+
+			// 防 Zip Bomb：限制单文件写入上限与总解压上限
+			remainTotal := int64(maxExtractTotalSize) - totalExtracted
+			if remainTotal <= 0 {
 				outFile.Close()
+				return fmt.Errorf("解压数据量超出总上限 (300MB)，已拦截防解压炸弹")
+			}
+			maxCopy := int64(maxExtractSingleFileSize)
+			if remainTotal < maxCopy {
+				maxCopy = remainTotal
+			}
+
+			written, err := io.Copy(outFile, io.LimitReader(tr, maxCopy+1))
+			outFile.Close()
+			if err != nil {
 				return err
 			}
-			outFile.Close()
+			if written > maxExtractSingleFileSize {
+				return fmt.Errorf("解压单个文件 %s 超过大小限制 (150MB)，已拦截防解压炸弹", header.Name)
+			}
+			totalExtracted += written
+			if totalExtracted > maxExtractTotalSize {
+				return fmt.Errorf("解压数据总量超过上限 (300MB)，已拦截防解压炸弹")
+			}
 		}
 	}
 	return nil
@@ -432,6 +457,7 @@ func extractZip(src, destDir string) error {
 	}
 	defer r.Close()
 
+	var totalExtracted int64
 	for _, f := range r.File {
 		target := filepath.Join(destDir, f.Name)
 		if !isPathSafe(destDir, target) {
@@ -454,11 +480,31 @@ func extractZip(src, destDir string) error {
 			rc.Close()
 			return err
 		}
-		_, err = io.Copy(outFile, rc)
+
+		// 防 Zip Bomb：限制单文件写入上限与总解压上限
+		remainTotal := int64(maxExtractTotalSize) - totalExtracted
+		if remainTotal <= 0 {
+			outFile.Close()
+			rc.Close()
+			return fmt.Errorf("解压数据量超出总上限 (300MB)，已拦截防解压炸弹")
+		}
+		maxCopy := int64(maxExtractSingleFileSize)
+		if remainTotal < maxCopy {
+			maxCopy = remainTotal
+		}
+
+		written, err := io.Copy(outFile, io.LimitReader(rc, maxCopy+1))
 		outFile.Close()
 		rc.Close()
 		if err != nil {
 			return err
+		}
+		if written > maxExtractSingleFileSize {
+			return fmt.Errorf("解压单个文件 %s 超过大小限制 (150MB)，已拦截防解压炸弹", f.Name)
+		}
+		totalExtracted += written
+		if totalExtracted > maxExtractTotalSize {
+			return fmt.Errorf("解压数据总量超过上限 (300MB)，已拦截防解压炸弹")
 		}
 	}
 	return nil

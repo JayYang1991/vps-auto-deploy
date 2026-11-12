@@ -135,7 +135,8 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 			// 当请求系统概览时，若远端检测到的公网 IP 为空或 127.0.0.1，自动补齐为已知节点的直连 Host
 			if strings.HasSuffix(reqPath, "/system/overview") {
 				if resp.StatusCode == http.StatusOK && strings.Contains(resp.Header.Get("Content-Type"), "application/json") {
-					bodyBytes, err := io.ReadAll(resp.Body)
+					// 限制读取最多 1MB，防范超大响应引发内存溢出
+					bodyBytes, err := io.ReadAll(io.LimitReader(resp.Body, 1*1024*1024))
 					if err != nil {
 						return err
 					}

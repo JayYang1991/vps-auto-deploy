@@ -1012,6 +1012,15 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 	case "armv7l", "arm":
 		targetArch = "arm"
 	default:
+		// 严防 shell 元字符注入，仅允许英文字母、数字和横线
+		for _, r := range unameM {
+			if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' || r == '-') {
+				task.Status = "failed"
+				task.Error = fmt.Sprintf("异常的远程系统架构标识: %q", unameM)
+				task.AddLog("[ERROR] " + task.Error)
+				return
+			}
+		}
 		targetArch = unameM
 	}
 	task.AddLog(fmt.Sprintf("目标主机架构: %s (主控当前架构: %s)", targetArch, runtime.GOARCH))

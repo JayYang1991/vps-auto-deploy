@@ -40,3 +40,19 @@ func TestIsAllowedSingboxConfigPath_Security(t *testing.T) {
 		t.Fatalf("expected tmp file %s to be allowed when ALLOW_TEST_CONFIG_PATH=1, but was rejected", tmpFile)
 	}
 }
+
+func TestIsValidListenAddress(t *testing.T) {
+	valid := []string{"", "::", "0.0.0.0", "127.0.0.1", "localhost", "192.168.1.1", "2001:db8::1"}
+	for _, v := range valid {
+		if !isValidListenAddress(v) {
+			t.Errorf("expected %q to be valid listen address, but got invalid", v)
+		}
+	}
+
+	invalid := []string{"127.0.0.1; rm -rf /", "invalid_ip", "999.999.999.999", "1.2.3.4.5", "http://127.0.0.1"}
+	for _, inv := range invalid {
+		if isValidListenAddress(inv) {
+			t.Errorf("expected %q to be invalid listen address, but got valid", inv)
+		}
+	}
+}

@@ -89,6 +89,7 @@ func RequestTerminalTicket(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "主控管理员密码错误，二次安全验证失败！"})
 		return
 	}
+	middleware.ResetLoginAttempts(middleware.GetRealClientIP(c))
 
 	// 2. 验证目标节点是否存在
 	target, err := model.GetNode(id)
@@ -144,6 +145,7 @@ func SaveNodeSSHCredentials(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "主控管理员密码错误，二次验证失败！"})
 		return
 	}
+	middleware.ResetLoginAttempts(middleware.GetRealClientIP(c))
 
 	target, err := model.GetNode(id)
 	if err != nil {

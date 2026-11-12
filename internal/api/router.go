@@ -65,7 +65,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.DELETE("/nodes/cloud/vultr/instances/:id", middleware.LoginRateLimitMiddleware(), handler.DeleteVultrInstance)
 
 			// 设置与密码
-			api.POST("/auth/password", handler.UpdatePassword)
+			api.POST("/auth/password", middleware.LoginRateLimitMiddleware(), handler.UpdatePassword)
 			api.POST("/auth/revoke-all-sessions", handler.RevokeAllSessions)
 			api.GET("/settings", handler.GetSettings)
 			api.POST("/settings", handler.UpdateSettings)

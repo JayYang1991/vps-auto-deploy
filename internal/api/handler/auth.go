@@ -104,6 +104,7 @@ func UpdatePassword(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "old password is incorrect"})
 		return
 	}
+	middleware.ResetLoginAttempts(middleware.GetRealClientIP(c))
 
 	newHash, err := bcrypt.GenerateFromPassword([]byte(req.NewPassword), bcrypt.DefaultCost)
 	if err != nil {

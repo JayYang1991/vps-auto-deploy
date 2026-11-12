@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -217,18 +218,35 @@ func SecurityHeadersMiddleware() gin.HandlerFunc {
 	}
 }
 
-// CORSMiddleware 安全跨域处理 (防御任意源反射与敏感凭据泄露)
+// CORSMiddleware 安全跨域处理 (防御任意源反射与敏感凭据泄露，兼容反代与隧道)
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
 		host := c.Request.Host
 
-		// 仅当 Origin 为空 (同源非浏览器)，或 Origin 的 Host 与当前请求 Host 一致时放行
 		allowed := false
 		if origin != "" {
 			if u, err := url.Parse(origin); err == nil && u.Host != "" {
 				if strings.EqualFold(u.Host, host) {
 					allowed = true
+				} else {
+					hostName, _, err := net.SplitHostPort(host)
+					if err != nil {
+						hostName = host
+					}
+					// 允许反向代理或隧道通过本地回环转发
+					if hostName == "127.0.0.1" || hostName == "::1" || hostName == "localhost" {
+						if fwdHost := c.GetHeader("X-Forwarded-Host"); fwdHost != "" && strings.EqualFold(u.Host, fwdHost) {
+							allowed = true
+						} else if pubIP, _ := model.GetSetting("public_ip"); pubIP != "" {
+							if strings.EqualFold(u.Hostname(), pubIP) || strings.EqualFold(u.Host, pubIP) {
+								allowed = true
+							}
+						}
+					}
+				}
+
+				if allowed {
 					c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 					c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 				}

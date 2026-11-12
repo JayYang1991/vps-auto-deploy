@@ -378,6 +378,7 @@ func DeleteVultrInstance(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "主控管理员密码错误，二次安全验证失败！拒绝销毁云主机"})
 		return
 	}
+	middleware.ResetLoginAttempts(middleware.GetRealClientIP(c))
 
 	apiKey, err := model.GetVultrAPIKey()
 	if err != nil || strings.TrimSpace(apiKey) == "" {

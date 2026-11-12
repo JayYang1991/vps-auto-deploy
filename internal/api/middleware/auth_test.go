@@ -197,3 +197,48 @@ func TestSubscriptionRateLimitWithRealClientIP(t *testing.T) {
 	}
 }
 
+func TestCORSMiddlewareLoopbackProxy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	dbPath := setupAuthTestDB(t)
+	defer os.Remove(dbPath)
+
+	_ = model.SetSetting("public_ip", "panel.example.com")
+
+	r := gin.New()
+	r.Use(CORSMiddleware())
+	r.GET("/api/ping", func(c *gin.Context) {
+		c.String(http.StatusOK, "pong")
+	})
+
+	// 1. 本地回环 + X-Forwarded-Host 匹配 -> 允许
+	w1 := httptest.NewRecorder()
+	req1, _ := http.NewRequest(http.MethodGet, "/api/ping", nil)
+	req1.Host = "127.0.0.1:8080"
+	req1.Header.Set("Origin", "https://proxy.example.com")
+	req1.Header.Set("X-Forwarded-Host", "proxy.example.com")
+	r.ServeHTTP(w1, req1)
+	if w1.Header().Get("Access-Control-Allow-Origin") != "https://proxy.example.com" {
+		t.Fatalf("expected CORS to allow forwarded host, got %q", w1.Header().Get("Access-Control-Allow-Origin"))
+	}
+
+	// 2. 本地回环 + public_ip 匹配 -> 允许
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest(http.MethodGet, "/api/ping", nil)
+	req2.Host = "127.0.0.1:8080"
+	req2.Header.Set("Origin", "https://panel.example.com")
+	r.ServeHTTP(w2, req2)
+	if w2.Header().Get("Access-Control-Allow-Origin") != "https://panel.example.com" {
+		t.Fatalf("expected CORS to allow public_ip host, got %q", w2.Header().Get("Access-Control-Allow-Origin"))
+	}
+
+	// 3. 不匹配的第三方恶意跨源 -> 拒绝
+	w3 := httptest.NewRecorder()
+	req3, _ := http.NewRequest(http.MethodGet, "/api/ping", nil)
+	req3.Host = "127.0.0.1:8080"
+	req3.Header.Set("Origin", "https://evil-attacker.com")
+	r.ServeHTTP(w3, req3)
+	if w3.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("expected CORS to reject evil origin, got %q", w3.Header().Get("Access-Control-Allow-Origin"))
+	}
+}
+

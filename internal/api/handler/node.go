@@ -366,6 +366,7 @@ func DeleteNode(c *gin.Context) {
 			c.JSON(http.StatusForbidden, gin.H{"error": "主控管理员密码错误，二次安全验证失败！拒绝销毁云主机"})
 			return
 		}
+		middleware.ResetLoginAttempts(middleware.GetRealClientIP(c))
 
 		if err := node.DestroyVultrInstanceIfBound(id); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "销毁云厂商主机失败: " + err.Error()})
@@ -414,6 +415,7 @@ func RevealNodeCredentials(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "主控管理员密码错误，二次安全验证失败！"})
 		return
 	}
+	middleware.ResetLoginAttempts(middleware.GetRealClientIP(c))
 
 	// 2. 校验成功，查询目标节点
 	target, err := model.GetNode(id)

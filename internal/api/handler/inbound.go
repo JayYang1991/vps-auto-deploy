@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -17,6 +18,14 @@ import (
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/pkg/netutil"
 )
+
+func isValidListenAddress(addr string) bool {
+	trimmed := strings.TrimSpace(addr)
+	if trimmed == "" || trimmed == "::" || trimmed == "0.0.0.0" || trimmed == "localhost" {
+		return true
+	}
+	return net.ParseIP(trimmed) != nil
+}
 
 type InboundCreateRequest struct {
 	Tag      string          `json:"tag" binding:"required"`
@@ -194,6 +203,10 @@ func CreateInbound(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "入站 Tag 格式不合法 (仅支持1-64位字母、数字、点号、短横线与下划线)"})
 		return
 	}
+	if req.Listen != "" && !isValidListenAddress(req.Listen) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "监听地址格式不合法，请输入合法的 IP 地址（如 ::, 0.0.0.0, 127.0.0.1）"})
+		return
+	}
 
 	listen := req.Listen
 	if listen == "" {
@@ -264,6 +277,10 @@ func UpdateInbound(c *gin.Context) {
 	req.Tag = strings.TrimSpace(req.Tag)
 	if !regexp.MustCompile(`^[a-zA-Z0-9_\-\.]{1,64}$`).MatchString(req.Tag) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "入站 Tag 格式不合法 (仅支持1-64位字母、数字、点号、短横线与下划线)"})
+		return
+	}
+	if req.Listen != "" && !isValidListenAddress(req.Listen) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "监听地址格式不合法，请输入合法的 IP 地址（如 ::, 0.0.0.0, 127.0.0.1）"})
 		return
 	}
 
