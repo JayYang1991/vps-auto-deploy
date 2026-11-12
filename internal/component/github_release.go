@@ -198,7 +198,8 @@ func FetchReleaseChecksums(rel *GitHubRelease) map[string]string {
 				continue
 			}
 
-			scanner := bufio.NewScanner(resp.Body)
+			// 限制校验文件扫描最多读取 2MB，防范超大文件 DoS
+			scanner := bufio.NewScanner(io.LimitReader(resp.Body, 2*1024*1024))
 			for scanner.Scan() {
 				line := strings.TrimSpace(scanner.Text())
 				if line == "" || strings.HasPrefix(line, "#") {
@@ -264,7 +265,8 @@ func DownloadFileWithChecksum(downloadURL, destPath, expectedHash string) error 
 			return fmt.Errorf("create dest file error: %w", err)
 		}
 
-		_, err = io.Copy(out, resp.Body)
+		// 单文件下载上限限制 500MB，防范无限数据流与磁盘耗尽
+		_, err = io.Copy(out, io.LimitReader(resp.Body, 500*1024*1024))
 		out.Close()
 		resp.Body.Close()
 		if err != nil {

@@ -102,4 +102,22 @@ func TestComputeFileSHA256(t *testing.T) {
 	}
 }
 
+func TestFetchRemoteNodeInventory_SSRFIntercept(t *testing.T) {
+	targetNode := &model.Node{
+		Name:      "Malicious Metadata Node",
+		Host:      "169.254.169.254",
+		PanelPort: 20888,
+		UseTLS:    false,
+		APIToken:  "dummy_token",
+	}
+
+	_, _, err := FetchRemoteNodeInventory(targetNode)
+	if err == nil {
+		t.Fatalf("expected SSRF error when connecting to 169.254.169.254, got nil")
+	}
+	if !strings.Contains(err.Error(), "SSRF") {
+		t.Fatalf("expected SSRF intercept message, got: %v", err)
+	}
+}
+
 

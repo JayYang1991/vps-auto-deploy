@@ -130,7 +130,7 @@ func LoginNode(host string, port int, secretPath, username, password string, use
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		return "", fmt.Errorf("远端登录失败 (状态码 %d): %s", resp.StatusCode, string(respBody))
 	}
 
@@ -764,7 +764,11 @@ func RunUpgradeAPI(task *DeployTask, req UpgradeRequest) {
 	if targetNode.UseTLS {
 		client = crypto.CreatePinnedHTTPClient(targetNode.CertFingerprint, 25*time.Second)
 	} else {
-		client = &http.Client{Timeout: 25 * time.Second}
+		// 非 TLS 节点请求强制挂载安全 Transport，阻断回环与云元数据 SSRF 探测
+		client = &http.Client{
+			Transport: netutil.CreateSafeHTTPTransport(25 * time.Second),
+			Timeout:   25 * time.Second,
+		}
 	}
 
 	task.AddLog(fmt.Sprintf("连接目标节点管理通道 %s (TLS 指纹锁定保护)...", baseURL))
@@ -840,7 +844,11 @@ func RunUpgradeAPI(task *DeployTask, req UpgradeRequest) {
 		if targetNode.UseTLS {
 			pushClient = crypto.CreatePinnedHTTPClient(targetNode.CertFingerprint, 180*time.Second)
 		} else {
-			pushClient = &http.Client{Timeout: 180 * time.Second}
+			// 非 TLS 节点推流强制挂载安全 Transport，阻断回环与云元数据 SSRF 探测
+			pushClient = &http.Client{
+				Transport: netutil.CreateSafeHTTPTransport(180 * time.Second),
+				Timeout:   180 * time.Second,
+			}
 		}
 
 		upResp, err := pushClient.Do(upReq)
@@ -852,7 +860,7 @@ func RunUpgradeAPI(task *DeployTask, req UpgradeRequest) {
 		}
 		defer upResp.Body.Close()
 
-		respBody, _ := io.ReadAll(upResp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(upResp.Body, 64*1024))
 		if upResp.StatusCode != http.StatusOK {
 			task.Status = "failed"
 			task.Error = fmt.Sprintf("远端节点拒绝升级 (HTTP %d): %s", upResp.StatusCode, string(respBody))

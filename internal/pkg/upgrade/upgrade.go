@@ -36,12 +36,20 @@ type PackageInfo struct {
 	CreatedAt        string `json:"created_at"`
 }
 
-// GetPackageDir 返回安装包存储目录
+// GetPackageDir 返回安装包存储目录 (Root 环境 /etc/vps-auto-deploy/packages，普通用户环境 ~/.config/vps-auto-deploy/packages)
 func GetPackageDir() string {
-	dir := "/etc/vps-auto-deploy/packages"
-	if os.Geteuid() != 0 {
-		dir = "./packages"
+	if os.Geteuid() == 0 {
+		dir := "/etc/vps-auto-deploy/packages"
+		_ = os.MkdirAll(dir, 0755)
+		return dir
 	}
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		dir := filepath.Join(home, ".config", "vps-auto-deploy", "packages")
+		_ = os.MkdirAll(dir, 0755)
+		return dir
+	}
+	dir := "./packages"
 	_ = os.MkdirAll(dir, 0755)
 	return dir
 }

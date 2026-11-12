@@ -99,7 +99,7 @@ func SyncMembersToNode(node *model.Node, members []model.Member) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		if resp.StatusCode == http.StatusNotFound {
 			return fmt.Errorf("远端节点版本过低未开启凭据同步接口 (HTTP 404)，请在集群管理中点击该节点的 [🚀 升级节点] 更新软件")
 		}

@@ -34,6 +34,8 @@ func newTestRecorder() *testResponseWriter {
 
 func TestNodeProxyWithTLSFingerprint(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	_ = os.Setenv("ALLOW_PRIVATE_IP", "1")
+	defer os.Unsetenv("ALLOW_PRIVATE_IP")
 
 	tmpDir, err := os.MkdirTemp("", "proxy_test_*")
 	if err != nil {

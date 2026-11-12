@@ -359,6 +359,23 @@ type ServiceStatus struct {
   - 节点纳管后台异步任务（`LoginNode`、`PingNode`、`SyncMembersToNode`）在非 TLS 通信或初始化阶段，必须强制使用 `netutil.CreateSafeHTTPTransport`，对目标地址执行严格的私有网段与云厂商元数据地址（`169.254.169.254` 等）拦截与 DNS Rebinding 防护。
   - 针对分流规则等入参在写入配置前强制执行前置校验：`ip_cidr` 严格执行 `net.ParseCIDR` / `net.ParseIP` 合法性检查，`port` 严格限定在 1~65535 端口范围及端口段语法，杜绝非法入参污染底层配置文件引发核心组件启动崩溃。
 
+### 23. 跨域 CORS 来源真伪校验与 Host 头防伪造 (CORS Socket Verification)
+- **严禁基于 HTTP Host 头判定本地回环**：
+  - HTTP `Host` 请求头属于用户输入层，客户端可任意构造伪造值（如向公网端口传入 `Host: 127.0.0.1`）。
+  - 判定请求是否来自可信的反向代理或穿透隧道，**必须且仅能依赖底层 TCP 握手的物理套接字来源 `c.Request.RemoteAddr`**。
+  - 仅当物理连接源确认为 `127.0.0.1` / `::1` 时，才允许采信 `X-Forwarded-Host` 或已绑定的 `public_ip`，杜绝恶意网站通过伪造 Host 头反射跨域凭据。
+
+### 24. 全链路跨节点通信与 Pinned TLS SSRF 统一封锁 (Full-Link SSRF Containment)
+- **节点资产抓取与推流升级全覆盖**：
+  - 跨节点资产清单抓取（`FetchRemoteNodeInventory`）以及节点推流自升级（`RunUpgradeAPI`）在非 TLS 通信时，必须强制挂载 `netutil.CreateSafeHTTPTransport`，阻断免认证订阅分发接口遭遇 SSRF 探测。
+  - 针对带有硬件指纹锁定的 TLS 传输（`CreatePinnedTransport`），必须在底层集成 `SafeDialContext`，使所有自签名 TLS 通信同样受控于公网 IP 合规检查，全面封堵针对本地回环与云元数据地址（`169.254.169.254`）的逃逸。
+
+### 25. 数据流有界防护与数据库事务日志权限收紧 (Anti-OOM Streams & WAL Hardening)
+- **全链路响应有界流式截断**：
+  - 针对所有外部响应读取（状态检查、版本探测、错误详情、校验清单扫描、二进制下载），必须统一使用 `io.LimitReader` 实施严格的上限控制（错误体 64KB，JSON/清单 2MB，二进制 500MB），杜绝无限流引发内存耗尽或磁盘耗尽崩溃。
+  - SQLite 在 WAL 模式下动态生成的 `<dbPath>-wal` 与 `<dbPath>-shm` 事务文件必须主动固化为 `0600` 权限，防止未提交凭据明文被同机非特权进程窥视。
+
+
 
 
 

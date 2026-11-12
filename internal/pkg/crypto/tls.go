@@ -20,6 +20,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"vps-auto-deploy/internal/pkg/netutil"
 )
 
 // FingerprintSHA256 计算证书 DER 二进制数据的 SHA-256 指纹（小写十六进制，每两位以冒号隔开）
@@ -172,16 +174,13 @@ func CreatePinnedTLSConfig(pinnedFingerprint string) *tls.Config {
 	}
 }
 
-// CreatePinnedTransport 创建带指纹强校验的 HTTP Transport
+// CreatePinnedTransport 创建带指纹强校验且免疫 SSRF / DNS 重绑定的安全 HTTP Transport
 func CreatePinnedTransport(pinnedFingerprint string) *http.Transport {
-	return &http.Transport{
-		TLSClientConfig:       CreatePinnedTLSConfig(pinnedFingerprint),
-		ResponseHeaderTimeout: 60 * time.Second,
-		IdleConnTimeout:       90 * time.Second,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   10,
-		ForceAttemptHTTP2:     true,
-	}
+	t := netutil.CreateSafeHTTPTransport(60 * time.Second)
+	t.TLSClientConfig = CreatePinnedTLSConfig(pinnedFingerprint)
+	t.ForceAttemptHTTP2 = true
+	t.MaxIdleConnsPerHost = 10
+	return t
 }
 
 // CreatePinnedHTTPClient 创建配置有指纹锁定的 HTTP 客户端

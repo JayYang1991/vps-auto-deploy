@@ -12,6 +12,9 @@ import (
 )
 
 func TestTLSGenerationAndPinning(t *testing.T) {
+	_ = os.Setenv("ALLOW_PRIVATE_IP", "1")
+	defer os.Unsetenv("ALLOW_PRIVATE_IP")
+
 	tmpDir, err := os.MkdirTemp("", "tls_test_*")
 	if err != nil {
 		t.Fatalf("MkdirTemp failed: %v", err)
@@ -83,6 +86,17 @@ func TestTLSGenerationAndPinning(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "安全拦截") && !strings.Contains(err.Error(), "指纹未配置") {
 		t.Fatalf("Expected empty fingerprint security error, got: %v", err)
+	}
+
+	// 7. SSRF 拦截验证：当 ALLOW_PRIVATE_IP 未设置时，Pinned Client 请求本地回环/私网地址必须被拦截
+	_ = os.Unsetenv("ALLOW_PRIVATE_IP")
+	ssrfClient := CreatePinnedHTTPClient(fp, 5*time.Second)
+	_, ssrfErr := ssrfClient.Get(server.URL)
+	if ssrfErr == nil {
+		t.Fatalf("Expected SSRF error for loopback address without ALLOW_PRIVATE_IP, got nil!")
+	}
+	if !strings.Contains(ssrfErr.Error(), "SSRF") {
+		t.Fatalf("Expected SSRF error message, got: %v", ssrfErr)
 	}
 }
 

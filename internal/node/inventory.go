@@ -3,12 +3,14 @@ package node
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/pkg/crypto"
+	"vps-auto-deploy/internal/pkg/netutil"
 )
 
 // FetchRemoteNodeInventory 跨节点抓取受管端的 inbounds 与 tunnels 配置
@@ -22,7 +24,11 @@ func FetchRemoteNodeInventory(node *model.Node) ([]model.Inbound, map[int64]stri
 	if node.UseTLS {
 		client = crypto.CreatePinnedHTTPClient(node.CertFingerprint, 3*time.Second)
 	} else {
-		client = &http.Client{Timeout: 3 * time.Second}
+		// 非 TLS 跨节点抓取强制挂载安全 Transport，阻断回环与云元数据 SSRF 探测
+		client = &http.Client{
+			Transport: netutil.CreateSafeHTTPTransport(3 * time.Second),
+			Timeout:   3 * time.Second,
+		}
 	}
 
 	// 1. 抓取 inbounds
@@ -44,7 +50,7 @@ func FetchRemoteNodeInventory(node *model.Node) ([]model.Inbound, map[int64]stri
 	}
 
 	var inbounds []model.Inbound
-	if err := json.NewDecoder(resp.Body).Decode(&inbounds); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 2*1024*1024)).Decode(&inbounds); err != nil {
 		return nil, nil, err
 	}
 
@@ -58,7 +64,7 @@ func FetchRemoteNodeInventory(node *model.Node) ([]model.Inbound, map[int64]stri
 			defer respTn.Body.Close()
 			if respTn.StatusCode == http.StatusOK {
 				var tunnels []model.Tunnel
-				if err := json.NewDecoder(respTn.Body).Decode(&tunnels); err == nil {
+				if err := json.NewDecoder(io.LimitReader(respTn.Body, 2*1024*1024)).Decode(&tunnels); err == nil {
 					for _, t := range tunnels {
 						if t.Domain != "" {
 							tunnelsMap[t.ID] = t.Domain

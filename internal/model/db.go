@@ -34,10 +34,16 @@ func InitDB(dbPath string) (*sql.DB, error) {
 		return nil, fmt.Errorf("open sqlite db error: %w", err)
 	}
 
-	// 强化数据库文件权限 (0600: 仅所有者读写，严防本地低权限越权脱库)
-	if fi, err := os.Stat(dbPath); err == nil && fi.Mode().Perm() != 0600 {
-		_ = os.Chmod(dbPath, 0600)
+	// 强化数据库文件及 WAL/SHM 事务日志权限 (0600: 仅所有者读写，严防本地低权限越权脱库)
+	secureDBFiles := func() {
+		for _, suffix := range []string{"", "-wal", "-shm"} {
+			p := dbPath + suffix
+			if fi, err := os.Stat(p); err == nil && fi.Mode().Perm() != 0600 {
+				_ = os.Chmod(p, 0600)
+			}
+		}
 	}
+	secureDBFiles()
 
 	DB = db
 	ClearSettingsCache()
@@ -51,6 +57,7 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	}
 
 	_ = MigrateLegacyEncryptedData()
+	secureDBFiles()
 
 	return db, nil
 }

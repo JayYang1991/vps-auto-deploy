@@ -95,7 +95,7 @@ func (d *Driver) GetInstalledVersion() (string, error) {
 	resp, err := client.Get(fmt.Sprintf("http://127.0.0.1:%d/version", DefaultPort))
 	if err == nil {
 		defer resp.Body.Close()
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 		if v := component.ExtractVersion(string(body)); v != "" {
 			return v, nil
 		}

@@ -230,12 +230,14 @@ func CORSMiddleware() gin.HandlerFunc {
 				if strings.EqualFold(u.Host, host) {
 					allowed = true
 				} else {
-					hostName, _, err := net.SplitHostPort(host)
-					if err != nil {
-						hostName = host
+					// 安全严密校验：仅当物理套接字连接真正来自本地回环时，才信任反向代理/隧道头 (防 Host 请求头伪造绕过)
+					remoteIP := c.ClientIP()
+					if rip, _, err := net.SplitHostPort(c.Request.RemoteAddr); err == nil && rip != "" {
+						remoteIP = rip
 					}
-					// 允许反向代理或隧道通过本地回环转发
-					if hostName == "127.0.0.1" || hostName == "::1" || hostName == "localhost" {
+					isLoopback := remoteIP == "127.0.0.1" || remoteIP == "::1" || strings.HasPrefix(remoteIP, "127.")
+
+					if isLoopback {
 						if fwdHost := c.GetHeader("X-Forwarded-Host"); fwdHost != "" && strings.EqualFold(u.Host, fwdHost) {
 							allowed = true
 						} else if pubIP, _ := model.GetSetting("public_ip"); pubIP != "" {

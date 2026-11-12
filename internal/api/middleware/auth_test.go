@@ -213,6 +213,7 @@ func TestCORSMiddlewareLoopbackProxy(t *testing.T) {
 	// 1. 本地回环 + X-Forwarded-Host 匹配 -> 允许
 	w1 := httptest.NewRecorder()
 	req1, _ := http.NewRequest(http.MethodGet, "/api/ping", nil)
+	req1.RemoteAddr = "127.0.0.1:12345"
 	req1.Host = "127.0.0.1:8080"
 	req1.Header.Set("Origin", "https://proxy.example.com")
 	req1.Header.Set("X-Forwarded-Host", "proxy.example.com")
@@ -224,6 +225,7 @@ func TestCORSMiddlewareLoopbackProxy(t *testing.T) {
 	// 2. 本地回环 + public_ip 匹配 -> 允许
 	w2 := httptest.NewRecorder()
 	req2, _ := http.NewRequest(http.MethodGet, "/api/ping", nil)
+	req2.RemoteAddr = "127.0.0.1:12345"
 	req2.Host = "127.0.0.1:8080"
 	req2.Header.Set("Origin", "https://panel.example.com")
 	r.ServeHTTP(w2, req2)
@@ -234,11 +236,24 @@ func TestCORSMiddlewareLoopbackProxy(t *testing.T) {
 	// 3. 不匹配的第三方恶意跨源 -> 拒绝
 	w3 := httptest.NewRecorder()
 	req3, _ := http.NewRequest(http.MethodGet, "/api/ping", nil)
+	req3.RemoteAddr = "127.0.0.1:12345"
 	req3.Host = "127.0.0.1:8080"
 	req3.Header.Set("Origin", "https://evil-attacker.com")
 	r.ServeHTTP(w3, req3)
 	if w3.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Fatalf("expected CORS to reject evil origin, got %q", w3.Header().Get("Access-Control-Allow-Origin"))
+	}
+
+	// 4. 外网攻击者伪造 Host: 127.0.0.1 + X-Forwarded-Host: evil.com -> 必须拒绝 (防 Host 伪造绕过)
+	w4 := httptest.NewRecorder()
+	req4, _ := http.NewRequest(http.MethodGet, "/api/ping", nil)
+	req4.RemoteAddr = "203.0.113.10:54321" // 外网来源
+	req4.Host = "127.0.0.1:8080"           // 伪造的 Host 头
+	req4.Header.Set("Origin", "https://evil.com")
+	req4.Header.Set("X-Forwarded-Host", "evil.com")
+	r.ServeHTTP(w4, req4)
+	if w4.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("expected CORS to reject spoofed Host header from non-loopback remote, got %q", w4.Header().Get("Access-Control-Allow-Origin"))
 	}
 }
 
