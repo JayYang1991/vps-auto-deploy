@@ -18,6 +18,37 @@ import (
 	"vps-auto-deploy/internal/pkg/crypto"
 )
 
+// isKnownPanelHost 校验目标 Host/域名是否属于当前受管面板资产（公网IP/域名、集群节点Host、隧道绑定的自定义域名）
+func isKnownPanelHost(host string) bool {
+	if host == "" {
+		return false
+	}
+	host = strings.TrimSpace(host)
+
+	// 1. 匹配 public_ip 配置
+	if pubHost, _ := model.GetSetting("public_ip"); pubHost != "" {
+		if strings.EqualFold(host, strings.TrimSpace(pubHost)) {
+			return true
+		}
+	}
+
+	// 2. 匹配集群节点 Host 与隧道域名
+	if model.DB != nil {
+		var count int
+		_ = model.DB.QueryRow("SELECT COUNT(1) FROM nodes WHERE host = ? LIMIT 1", host).Scan(&count)
+		if count > 0 {
+			return true
+		}
+
+		_ = model.DB.QueryRow("SELECT COUNT(1) FROM tunnels WHERE domain = ? LIMIT 1", host).Scan(&count)
+		if count > 0 {
+			return true
+		}
+	}
+
+	return false
+}
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
@@ -40,39 +71,31 @@ var upgrader = websocket.Upgrader{
 			return true
 		}
 
-		// 2. 反向代理匹配 X-Forwarded-Host
-		if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
-			if strings.EqualFold(u.Host, fwdHost) || strings.EqualFold(u.Hostname(), fwdHost) {
-				return true
-			}
-			fwdHostOnly, _, _ := net.SplitHostPort(fwdHost)
-			if fwdHostOnly != "" && strings.EqualFold(u.Hostname(), fwdHostOnly) {
-				return true
-			}
-		}
-
-		// 3. 匹配配置的面版公网 IP 或域名
-		if pubHost, _ := model.GetSetting("public_ip"); pubHost != "" {
-			pubHost = strings.TrimSpace(pubHost)
-			if strings.EqualFold(u.Hostname(), pubHost) || strings.EqualFold(u.Host, pubHost) {
-				return true
+		// 2. 反向代理匹配 X-Forwarded-Host 或 X-Original-Host
+		for _, hdr := range []string{"X-Forwarded-Host", "X-Original-Host"} {
+			if fwdHost := r.Header.Get(hdr); fwdHost != "" {
+				if strings.EqualFold(u.Host, fwdHost) || strings.EqualFold(u.Hostname(), fwdHost) {
+					return true
+				}
+				fwdHostOnly, _, _ := net.SplitHostPort(fwdHost)
+				if fwdHostOnly != "" && strings.EqualFold(u.Hostname(), fwdHostOnly) {
+					return true
+				}
 			}
 		}
 
-		// 4. 反向代理/隧道/容器模式：若请求来自本地回环或内网私有地址，放行
-		remoteIP := r.RemoteAddr
-		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && host != "" {
-			remoteIP = host
-		}
-		parsedIP := net.ParseIP(remoteIP)
-		if parsedIP != nil && (parsedIP.IsLoopback() || parsedIP.IsPrivate()) {
-			return true
-		}
-		if remoteIP == "127.0.0.1" || remoteIP == "::1" || strings.HasPrefix(remoteIP, "127.") {
+		// 3. 本地回环或局域网管理：若 Origin 本身是 localhost、127.0.0.1 或私有内网 IP，放行
+		origHost := u.Hostname()
+		if origHost == "localhost" || node.IsLoopbackOrPrivate(origHost) {
 			return true
 		}
 
-		log.Printf("[WebSocket CheckOrigin] Origin 校验未通过: origin=%s, host=%s, remoteIP=%s", origin, r.Host, remoteIP)
+		// 4. 面板资产匹配：若 Origin 对应配置的 public_ip、集群纳管节点 Host 或已配置的隧道域名，放行
+		if isKnownPanelHost(origHost) {
+			return true
+		}
+
+		log.Printf("[WebSocket CheckOrigin] 拦截非法跨源请求 (CSWSH 防护): origin=%s, host=%s, remoteIP=%s", origin, r.Host, r.RemoteAddr)
 		return false
 	},
 }

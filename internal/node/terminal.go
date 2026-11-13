@@ -78,7 +78,8 @@ func IssueTerminalTicket(nodeID int64, username, clientIP, tempUser, tempPass, t
 	return ticket
 }
 
-func isLoopbackOrPrivate(ipStr string) bool {
+// IsLoopbackOrPrivate 检查 IP 地址是否属于本机回环或私有内网网段
+func IsLoopbackOrPrivate(ipStr string) bool {
 	ipStr = strings.TrimSpace(ipStr)
 	if ipStr == "" {
 		return false
@@ -119,7 +120,7 @@ func ValidateAndConsumeTicket(ticket string, nodeID int64, clientIP ...string) (
 	if len(clientIP) > 0 && clientIP[0] != "" && info.ClientIP != "" {
 		reqIP := clientIP[0]
 		if info.ClientIP != reqIP {
-			if !isLoopbackOrPrivate(info.ClientIP) && !isLoopbackOrPrivate(reqIP) {
+			if !IsLoopbackOrPrivate(info.ClientIP) && !IsLoopbackOrPrivate(reqIP) {
 				log.Printf("[TerminalTicket] 客户端 IP 不匹配被拦截 (防盗用): issued=%s, requested=%s, nodeID=%d", info.ClientIP, reqIP, nodeID)
 				return nil, false
 			}
@@ -203,7 +204,7 @@ func HandleTerminalSession(ws *websocket.Conn, targetNode *model.Node, initCols,
 	activeSessionsLock.Lock()
 	if activeSessionCount >= maxConcurrentSessions {
 		activeSessionsLock.Unlock()
-		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31m[ERROR] 活跃终端会话数已达并发上限 (10)，请关闭已有终端后再试。\x1b[0m\r\n"))
+		sendTerminalErrorAndClose(ws, "[ERROR] 活跃终端会话数已达并发上限 (10)，请关闭已有终端后再试。")
 		return
 	}
 	activeSessionCount++

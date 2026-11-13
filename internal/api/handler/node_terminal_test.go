@@ -124,3 +124,112 @@ func TestTerminalTicketWorkflow(t *testing.T) {
 	_ = nodeID
 	_ = time.Second
 }
+
+func TestCheckOriginSecurity(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "check_origin_test_*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	dbPath := filepath.Join(tmpDir, "test.db")
+	_, err = model.InitDB(dbPath)
+	if err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+
+	// 配置 public_ip
+	_ = model.SetSetting("public_ip", "my-pub-domain.com")
+
+	tests := []struct {
+		name       string
+		origin     string
+		host       string
+		fwdHost    string
+		remoteAddr string
+		expected   bool
+	}{
+		{
+			name:       "直连 Host 完全匹配",
+			origin:     "http://1.2.3.4:20888",
+			host:       "1.2.3.4:20888",
+			remoteAddr: "114.248.1.1:54321",
+			expected:   true,
+		},
+		{
+			name:       "直连 Hostname 匹配 (忽略端口)",
+			origin:     "https://1.2.3.4",
+			host:       "1.2.3.4:20888",
+			remoteAddr: "114.248.1.1:54321",
+			expected:   true,
+		},
+		{
+			name:       "反向代理 X-Forwarded-Host 匹配",
+			origin:     "https://panel.example.com",
+			host:       "127.0.0.1:20888",
+			fwdHost:    "panel.example.com",
+			remoteAddr: "127.0.0.1:54321",
+			expected:   true,
+		},
+		{
+			name:       "本地调试 localhost 放行",
+			origin:     "http://localhost:5173",
+			host:       "127.0.0.1:20888",
+			remoteAddr: "127.0.0.1:54321",
+			expected:   true,
+		},
+		{
+			name:       "局域网私有 IP 放行",
+			origin:     "http://192.168.1.50:20888",
+			host:       "127.0.0.1:20888",
+			remoteAddr: "127.0.0.1:54321",
+			expected:   true,
+		},
+		{
+			name:       "匹配已配置的面板公网资产 public_ip",
+			origin:     "https://my-pub-domain.com",
+			host:       "127.0.0.1:20888",
+			remoteAddr: "127.0.0.1:54321",
+			expected:   true,
+		},
+		{
+			name:       "【安全测试】恶意第三方跨源网站哪怕经由本地反代也必须拦截 (防 CSWSH)",
+			origin:     "https://evil-hacker.com",
+			host:       "127.0.0.1:20888",
+			fwdHost:    "",
+			remoteAddr: "127.0.0.1:54321",
+			expected:   false,
+		},
+		{
+			name:       "【安全测试】恶意第三方跨源网站直连必须拦截",
+			origin:     "https://attacker-origin.net",
+			host:       "1.2.3.4:20888",
+			fwdHost:    "",
+			remoteAddr: "203.0.113.88:54321",
+			expected:   false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, "/terminal", nil)
+			if err != nil {
+				t.Fatalf("NewRequest error: %v", err)
+			}
+			req.Host = tc.host
+			req.RemoteAddr = tc.remoteAddr
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.fwdHost != "" {
+				req.Header.Set("X-Forwarded-Host", tc.fwdHost)
+			}
+
+			allowed := upgrader.CheckOrigin(req)
+			if allowed != tc.expected {
+				t.Errorf("[%s] origin=%s, host=%s, remote=%s: got %v, expected %v",
+					tc.name, tc.origin, tc.host, tc.remoteAddr, allowed, tc.expected)
+			}
+		})
+	}
+}
