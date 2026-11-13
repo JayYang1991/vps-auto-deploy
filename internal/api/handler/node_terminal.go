@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -30,29 +31,48 @@ var upgrader = websocket.Upgrader{
 			return false
 		}
 
-		// 1. 直连请求：校验 Host 是否完全匹配 (防跨源 WebSocket 劫持 CSWSH)
-		if strings.EqualFold(u.Host, r.Host) {
+		// 1. 直连请求：校验 Host / Hostname 是否匹配 (防跨源 WebSocket 劫持 CSWSH)
+		if strings.EqualFold(u.Host, r.Host) || strings.EqualFold(u.Hostname(), r.Host) {
+			return true
+		}
+		reqHostOnly, _, _ := net.SplitHostPort(r.Host)
+		if reqHostOnly != "" && strings.EqualFold(u.Hostname(), reqHostOnly) {
 			return true
 		}
 
-		// 2. 反向代理/隧道模式：若请求来自本地回环，允许匹配 X-Forwarded-Host 或已配置的 public_ip
+		// 2. 反向代理匹配 X-Forwarded-Host
+		if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
+			if strings.EqualFold(u.Host, fwdHost) || strings.EqualFold(u.Hostname(), fwdHost) {
+				return true
+			}
+			fwdHostOnly, _, _ := net.SplitHostPort(fwdHost)
+			if fwdHostOnly != "" && strings.EqualFold(u.Hostname(), fwdHostOnly) {
+				return true
+			}
+		}
+
+		// 3. 匹配配置的面版公网 IP 或域名
+		if pubHost, _ := model.GetSetting("public_ip"); pubHost != "" {
+			pubHost = strings.TrimSpace(pubHost)
+			if strings.EqualFold(u.Hostname(), pubHost) || strings.EqualFold(u.Host, pubHost) {
+				return true
+			}
+		}
+
+		// 4. 反向代理/隧道/容器模式：若请求来自本地回环或内网私有地址，放行
 		remoteIP := r.RemoteAddr
 		if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && host != "" {
 			remoteIP = host
 		}
+		parsedIP := net.ParseIP(remoteIP)
+		if parsedIP != nil && (parsedIP.IsLoopback() || parsedIP.IsPrivate()) {
+			return true
+		}
 		if remoteIP == "127.0.0.1" || remoteIP == "::1" || strings.HasPrefix(remoteIP, "127.") {
-			if fwdHost := r.Header.Get("X-Forwarded-Host"); fwdHost != "" {
-				if strings.EqualFold(u.Host, fwdHost) {
-					return true
-				}
-			}
-			if pubHost, _ := model.GetSetting("public_ip"); pubHost != "" {
-				if strings.EqualFold(u.Hostname(), pubHost) {
-					return true
-				}
-			}
+			return true
 		}
 
+		log.Printf("[WebSocket CheckOrigin] Origin 校验未通过: origin=%s, host=%s, remoteIP=%s", origin, r.Host, remoteIP)
 		return false
 	},
 }
@@ -104,8 +124,9 @@ func RequestTerminalTicket(c *gin.Context) {
 		usernameStr = "admin"
 	}
 
-	// 3. 签发 30 秒有效的一次性 Ticket，并绑定内存临时凭据载荷
-	ticket := node.IssueTerminalTicket(target.ID, usernameStr, c.ClientIP(), req.TempUser, req.TempPass, req.TempKey, 30*time.Second)
+	// 3. 签发 30 秒有效的一次性 Ticket，并绑定内存临时凭据载荷 (使用 GetRealClientIP 保持与 WS 端点一致)
+	clientIP := middleware.GetRealClientIP(c)
+	ticket := node.IssueTerminalTicket(target.ID, usernameStr, clientIP, req.TempUser, req.TempPass, req.TempKey, 30*time.Second)
 
 	c.JSON(http.StatusOK, gin.H{
 		"ticket":       ticket,
@@ -188,12 +209,14 @@ func NodeTerminalWS(c *gin.Context) {
 	clientIP := middleware.GetRealClientIP(c)
 	ticketInfo, ok := node.ValidateAndConsumeTicket(ticket, id, clientIP)
 	if !ok || ticketInfo == nil {
+		log.Printf("[NodeTerminalWS] 终端票据校验失败或已过期: nodeID=%d, clientIP=%s, ticket=%s", id, clientIP, ticket)
 		c.String(http.StatusUnauthorized, "invalid or expired terminal ticket")
 		return
 	}
 
 	target, err := model.GetNode(id)
 	if err != nil {
+		log.Printf("[NodeTerminalWS] 目标节点未找到: nodeID=%d", id)
 		c.String(http.StatusNotFound, "target node not found")
 		return
 	}
@@ -203,6 +226,7 @@ func NodeTerminalWS(c *gin.Context) {
 
 	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
+		log.Printf("[NodeTerminalWS] WebSocket 协议升级失败: nodeID=%d, err=%v", id, err)
 		return
 	}
 

@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -77,6 +78,21 @@ func IssueTerminalTicket(nodeID int64, username, clientIP, tempUser, tempPass, t
 	return ticket
 }
 
+func isLoopbackOrPrivate(ipStr string) bool {
+	ipStr = strings.TrimSpace(ipStr)
+	if ipStr == "" {
+		return false
+	}
+	if ipStr == "127.0.0.1" || ipStr == "::1" || strings.HasPrefix(ipStr, "127.") || strings.HasPrefix(ipStr, "::ffff:127.") {
+		return true
+	}
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	return ip.IsLoopback() || ip.IsPrivate()
+}
+
 // ValidateAndConsumeTicket 验证并立即销毁单次票据（防重放攻击与中间人冒领），并返回绑定的凭据元数据
 func ValidateAndConsumeTicket(ticket string, nodeID int64, clientIP ...string) (*TerminalTicketInfo, bool) {
 	if ticket == "" {
@@ -98,13 +114,13 @@ func ValidateAndConsumeTicket(ticket string, nodeID int64, clientIP ...string) (
 		return nil, false
 	}
 
-	// 绑定签发端 IP 强校验：防止票据被未授权第三方客户端抢占重放
+	// 绑定签发端 IP 校验：防止票据被未授权第三方客户端抢占重放
+	// 若签发端与请求端任一方经过本地回环或私有反代 (如 Nginx/Docker/Cloudflare Tunnel)，予以放行
 	if len(clientIP) > 0 && clientIP[0] != "" && info.ClientIP != "" {
 		reqIP := clientIP[0]
 		if info.ClientIP != reqIP {
-			isInfoLoop := info.ClientIP == "127.0.0.1" || info.ClientIP == "::1"
-			isReqLoop := reqIP == "127.0.0.1" || reqIP == "::1"
-			if !(isInfoLoop && isReqLoop) {
+			if !isLoopbackOrPrivate(info.ClientIP) && !isLoopbackOrPrivate(reqIP) {
+				log.Printf("[TerminalTicket] 客户端 IP 不匹配被拦截 (防盗用): issued=%s, requested=%s, nodeID=%d", info.ClientIP, reqIP, nodeID)
 				return nil, false
 			}
 		}
@@ -228,6 +244,16 @@ func HandleTerminalSession(ws *websocket.Conn, targetNode *model.Node, initCols,
 	}
 }
 
+// sendTerminalErrorAndClose 向客户端发送格式化错误提示，优雅关闭 WebSocket 并等待缓冲区刷新
+func sendTerminalErrorAndClose(ws *websocket.Conn, errMsg string) {
+	msg := fmt.Sprintf("\r\n\x1b[31m%s\x1b[0m\r\n", errMsg)
+	_ = ws.WriteMessage(websocket.TextMessage, []byte(msg))
+	_ = ws.WriteControl(websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, "session error"),
+		time.Now().Add(time.Second))
+	time.Sleep(800 * time.Millisecond)
+}
+
 // handleLocalPTYSession 为主控本机启动本地伪终端 (pty)
 func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int, user, clientIP string) {
 	startTime := time.Now()
@@ -254,7 +280,7 @@ func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int, user, cli
 		Cols: uint16(initCols),
 	})
 	if err != nil {
-		_ = ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n[ERROR] 启动本地伪终端失败: %v\r\n", err)))
+		sendTerminalErrorAndClose(ws, fmt.Sprintf("[ERROR] 启动本地伪终端失败: %v", err))
 		return
 	}
 	defer func() {
@@ -393,7 +419,7 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 	}
 
 	if len(authMethods) == 0 {
-		_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[31m[ERROR] 该远程节点尚未配置 SSH 登录凭据（密码或私钥），请先在弹窗中录入凭据！\x1b[0m\r\n"))
+		sendTerminalErrorAndClose(ws, "[ERROR] 该远程节点尚未配置 SSH 登录凭据（密码或私钥），请先在弹窗中录入凭据！")
 		return
 	}
 
@@ -435,7 +461,7 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 	client, err := ssh.Dial("tcp", addr, sshConfig)
 	if err != nil {
 		RecordTerminalAudit("CONNECT_FAILED", user, clientIP, node.Name, targetAddr, fmt.Sprintf("握手失败: %v", err))
-		_ = ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[31m[ERROR] SSH 连接建立失败: %v\x1b[0m\r\n", err)))
+		sendTerminalErrorAndClose(ws, fmt.Sprintf("[ERROR] SSH 连接建立失败: %v", err))
 		return
 	}
 	defer client.Close()
@@ -443,7 +469,7 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 	session, err := client.NewSession()
 	if err != nil {
 		RecordTerminalAudit("CONNECT_FAILED", user, clientIP, node.Name, targetAddr, fmt.Sprintf("创建 Session 失败: %v", err))
-		_ = ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[31m[ERROR] 创建 SSH Session 失败: %v\x1b[0m\r\n", err)))
+		sendTerminalErrorAndClose(ws, fmt.Sprintf("[ERROR] 创建 SSH Session 失败: %v", err))
 		return
 	}
 	defer session.Close()
@@ -454,31 +480,31 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 		ssh.TTY_OP_OSPEED: 14400,
 	}
 	if err := session.RequestPty("xterm-256color", initRows, initCols, modes); err != nil {
-		_ = ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[31m[ERROR] 请求 PTY 失败: %v\x1b[0m\r\n", err)))
+		sendTerminalErrorAndClose(ws, fmt.Sprintf("[ERROR] 请求 PTY 失败: %v", err))
 		return
 	}
 
 	stdinPipe, err := session.StdinPipe()
 	if err != nil {
-		_ = ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n[ERROR] 打开 StdinPipe 失败: %v\r\n", err)))
+		sendTerminalErrorAndClose(ws, fmt.Sprintf("[ERROR] 打开 StdinPipe 失败: %v", err))
 		return
 	}
 
 	stdoutPipe, err := session.StdoutPipe()
 	if err != nil {
-		_ = ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n[ERROR] 打开 StdoutPipe 失败: %v\r\n", err)))
+		sendTerminalErrorAndClose(ws, fmt.Sprintf("[ERROR] 打开 StdoutPipe 失败: %v", err))
 		return
 	}
 
 	stderrPipe, err := session.StderrPipe()
 	if err != nil {
-		_ = ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n[ERROR] 打开 StderrPipe 失败: %v\r\n", err)))
+		sendTerminalErrorAndClose(ws, fmt.Sprintf("[ERROR] 打开 StderrPipe 失败: %v", err))
 		return
 	}
 
 	if err := session.Shell(); err != nil {
 		RecordTerminalAudit("CONNECT_FAILED", user, clientIP, node.Name, targetAddr, fmt.Sprintf("启动 Shell 失败: %v", err))
-		_ = ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[31m[ERROR] 启动远端 Shell 失败: %v\x1b[0m\r\n", err)))
+		sendTerminalErrorAndClose(ws, fmt.Sprintf("[ERROR] 启动远端 Shell 失败: %v", err))
 		return
 	}
 

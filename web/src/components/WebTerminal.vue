@@ -510,16 +510,21 @@ function connectWebSocket(ticket: string) {
     }
   }
 
-  socket.onclose = () => {
-    connecting.value = false
-    connectionStatus.value = 'disconnected'
-    term?.writeln('\r\n\x1b[33m[终端会话已断开]\x1b[0m')
-  }
-
   socket.onerror = () => {
     connecting.value = false
     connectionStatus.value = 'disconnected'
-    term?.writeln('\r\n\x1b[31m[WebSocket 通信异常断开]\x1b[0m')
+    term?.writeln('\r\n\x1b[31m[WebSocket 通信连接异常]\x1b[0m')
+  }
+
+  socket.onclose = event => {
+    connecting.value = false
+    connectionStatus.value = 'disconnected'
+    const reasonInfo = event.reason ? ` (${event.reason})` : ''
+    if (event.code === 1000) {
+      term?.writeln(`\r\n\x1b[33m[终端会话已断开${reasonInfo}]\x1b[0m`)
+    } else {
+      term?.writeln(`\r\n\x1b[33m[终端会话已断开 - 代码 ${event.code}${reasonInfo}]\x1b[0m`)
+    }
   }
 }
 
