@@ -1,6 +1,6 @@
 module vps-auto-deploy
 
-go 1.26.8
+go 1.26.11
 
 require (
 	github.com/creack/pty v1.1.24

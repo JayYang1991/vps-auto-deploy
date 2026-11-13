@@ -425,6 +425,7 @@ func extractTarGz(src, destDir string) error {
 		if err != nil {
 			return err
 		}
+		/* #nosec G305 - path traversal protected via isPathSafe */
 		target := filepath.Join(destDir, header.Name)
 		if !isPathSafe(destDir, target) {
 			continue // 防 Zip Slip 路径穿透
@@ -482,6 +483,7 @@ func extractZip(src, destDir string) error {
 
 	var totalExtracted int64
 	for _, f := range r.File {
+		/* #nosec G305 - path traversal protected via isPathSafe */
 		target := filepath.Join(destDir, f.Name)
 		if !isPathSafe(destDir, target) {
 			continue // 防 Zip Slip 路径穿透

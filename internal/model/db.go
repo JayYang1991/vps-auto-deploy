@@ -27,6 +27,7 @@ func InitDB(dbPath string) (*sql.DB, error) {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return nil, fmt.Errorf("create db dir error: %w", err)
 	}
+	/* #nosec G302 - directory permission 0700 */
 	_ = os.Chmod(dir, 0700)
 
 	db, err := sql.Open("sqlite", dbPath+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
