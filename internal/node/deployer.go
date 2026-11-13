@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/notifier"
 	"vps-auto-deploy/internal/pkg/crypto"
 	"vps-auto-deploy/internal/pkg/netutil"
 	"vps-auto-deploy/internal/pkg/upgrade"
@@ -674,6 +675,20 @@ WantedBy=multi-user.target
 
 	task.Status = "success"
 	task.AddLog(fmt.Sprintf("[SUCCESS] 节点 %s (ID: %d) 成功加入集群并完成 TLS 指纹绑定！", req.Name, nodeID))
+
+	notifier.Send(notifier.Event{
+		Type:      notifier.EventNodeDeploy,
+		Level:     notifier.LevelInfo,
+		Title:     "新节点成功加入集群",
+		Message:   fmt.Sprintf("远程节点 [%s] (%s:%d) 已成功通过 SSH 自动完成部署并纳入集群管控", req.Name, req.Host, req.PanelPort),
+		NodeName:  req.Name,
+		Timestamp: time.Now(),
+		Metadata: map[string]string{
+			"node_id": strconv.FormatInt(nodeID, 10),
+			"host":    fmt.Sprintf("%s:%d", req.Host, req.PanelPort),
+			"os":      newNode.OSInfo,
+		},
+	})
 }
 
 // RunUpgradeAPI 通过已有管理凭据 (API Token + Pinned TLS) 免密平滑升级纳管节点 (Zero-SSH)

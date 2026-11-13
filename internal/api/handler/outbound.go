@@ -12,9 +12,11 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"vps-auto-deploy/internal/api/middleware"
 	"vps-auto-deploy/internal/component/singbox"
 	"vps-auto-deploy/internal/configgen"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/notifier"
 )
 
 type OutboundRequest struct {
@@ -437,6 +439,16 @@ func ReloadSingboxService(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "重载失败: " + err.Error()})
 		return
 	}
+
+	notifier.Send(notifier.Event{
+		Type:      notifier.EventConfigReload,
+		Level:     notifier.LevelInfo,
+		Title:     "Sing-box 核心配置已重载",
+		Message:   "管理员触发了 Sing-box 服务最新配置写入与热重载",
+		ClientIP:  middleware.GetRealClientIP(c),
+		Timestamp: time.Now(),
+	})
+
 	c.JSON(http.StatusOK, gin.H{"message": "sing-box 服务已成功重新加载最新配置！"})
 }
 

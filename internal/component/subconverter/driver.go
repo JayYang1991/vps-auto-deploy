@@ -524,6 +524,10 @@ func extractTarGzToDir(archivePath, destDir string) error {
 	defer gzReader.Close()
 
 	tarReader := tar.NewReader(gzReader)
+	var totalExtracted int64
+	const maxArchiveTotal = 250 * 1024 * 1024 // 整个压缩包累计解压上限 250MB
+	const maxPerFile = 100 * 1024 * 1024      // 单个文件解压上限 100MB
+
 	for {
 		header, err := tarReader.Next()
 		if err == io.EOF {
@@ -576,10 +580,25 @@ func extractTarGzToDir(archivePath, destDir string) error {
 			if err != nil {
 				return err
 			}
-			if _, err := io.Copy(outFile, tarReader); err != nil {
+
+			// 单文件解压限制 + 累计体积限制，防御 Tar Bomb DoS
+			limited := io.LimitReader(tarReader, maxPerFile)
+			written, err := io.Copy(outFile, limited)
+			if err != nil {
 				outFile.Close()
 				_ = os.Remove(tmpPath)
 				return err
+			}
+			if written >= maxPerFile {
+				outFile.Close()
+				_ = os.Remove(tmpPath)
+				return fmt.Errorf("解包异常: 单文件超出安全限制 (100MB)")
+			}
+			totalExtracted += written
+			if totalExtracted > maxArchiveTotal {
+				outFile.Close()
+				_ = os.Remove(tmpPath)
+				return fmt.Errorf("解包异常: 累计解压体积超出安全阈值 (250MB)，疑似 Tar Bomb 攻击")
 			}
 			outFile.Close()
 

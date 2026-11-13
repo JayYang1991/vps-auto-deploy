@@ -12,6 +12,7 @@ import (
 	"vps-auto-deploy/internal/api/middleware"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/node"
+	"vps-auto-deploy/internal/notifier"
 	"vps-auto-deploy/internal/pkg/crypto"
 )
 
@@ -345,6 +346,8 @@ func DeleteNode(c *gin.Context) {
 		return
 	}
 
+	targetNode, _ := model.GetNode(id)
+
 	// 检查是否要求同时销毁云端实例
 	var req struct {
 		DestroyCloud   bool   `json:"destroy_cloud"`
@@ -378,6 +381,26 @@ func DeleteNode(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "从数据库删除节点失败: " + err.Error()})
 		return
 	}
+
+	nodeName := "未知节点"
+	nodeHost := ""
+	if targetNode != nil {
+		nodeName = targetNode.Name
+		nodeHost = targetNode.Host
+	}
+	notifier.Send(notifier.Event{
+		Type:      notifier.EventNodeDeleted,
+		Level:     notifier.LevelWarn,
+		Title:     "节点已移出集群",
+		Message:   fmt.Sprintf("节点 [%s] (%s) 已被管理员从控制平面移出删除", nodeName, nodeHost),
+		ClientIP:  middleware.GetRealClientIP(c),
+		NodeName:  nodeName,
+		Timestamp: time.Now(),
+		Metadata: map[string]string{
+			"node_id":       strconv.FormatInt(id, 10),
+			"destroy_cloud": strconv.FormatBool(destroyCloud),
+		},
+	})
 
 	msg := "节点已移出集群"
 	if destroyCloud {
@@ -451,6 +474,21 @@ func RevealNodeCredentials(c *gin.Context) {
 		scheme = "https"
 	}
 	loginURL := fmt.Sprintf("%s://%s:%d/%s/", scheme, target.Host, target.PanelPort, strings.Trim(target.SecretPath, "/"))
+
+	notifier.Send(notifier.Event{
+		Type:      notifier.EventCredsRevealed,
+		Level:     notifier.LevelWarn,
+		Title:     "节点机密凭据被查阅",
+		Message:   fmt.Sprintf("管理员通过二次鉴权查看了节点 [%s] (%s) 的登录密码与连接凭据", target.Name, target.Host),
+		ClientIP:  middleware.GetRealClientIP(c),
+		Username:  target.Username,
+		NodeName:  target.Name,
+		Timestamp: time.Now(),
+		Metadata: map[string]string{
+			"node_id":   strconv.FormatInt(target.ID, 10),
+			"node_host": target.Host,
+		},
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"id":               target.ID,

@@ -19,6 +19,7 @@ import (
 	"github.com/gorilla/websocket"
 	"golang.org/x/crypto/ssh"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/notifier"
 )
 
 // TerminalTicketInfo 包含一次性终端令牌绑定的元数据与凭据载荷
@@ -136,6 +137,38 @@ func RecordTerminalAudit(event, username, clientIP, nodeName, targetAddr, detail
 			_ = f.Close()
 			break
 		}
+	}
+
+	if event == "CONNECT" || event == "CONNECTED" {
+		notifier.Send(notifier.Event{
+			Type:      notifier.EventTerminalSession,
+			Level:     notifier.LevelWarn,
+			Title:     "特权 Web 终端控制台已建立连接",
+			Message:   fmt.Sprintf("用户 %s 从 %s 建立了对目标 [%s] (%s) 的交互式终端会话: %s", username, clientIP, nodeName, targetAddr, details),
+			ClientIP:  clientIP,
+			Username:  username,
+			NodeName:  nodeName,
+			Timestamp: time.Now(),
+			Metadata: map[string]string{
+				"event":       event,
+				"target_addr": targetAddr,
+			},
+		})
+	} else if event == "CONNECT_FAILED" {
+		notifier.Send(notifier.Event{
+			Type:      notifier.EventTerminalSession,
+			Level:     notifier.LevelCritical,
+			Title:     "特权 Web 终端连接建立失败",
+			Message:   fmt.Sprintf("用户 %s 从 %s 尝试连接目标 [%s] (%s) 失败: %s", username, clientIP, nodeName, targetAddr, details),
+			ClientIP:  clientIP,
+			Username:  username,
+			NodeName:  nodeName,
+			Timestamp: time.Now(),
+			Metadata: map[string]string{
+				"event":       event,
+				"target_addr": targetAddr,
+			},
+		})
 	}
 }
 

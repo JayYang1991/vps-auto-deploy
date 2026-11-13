@@ -720,6 +720,10 @@ func GetSetting(key string) (string, error) {
 		return val, nil
 	}
 
+	if DB == nil {
+		return "", fmt.Errorf("database not initialized")
+	}
+
 	var dbVal string
 	err := DB.QueryRow("SELECT value FROM settings WHERE key = ?", key).Scan(&dbVal)
 	if err != nil {
@@ -734,6 +738,9 @@ func GetSetting(key string) (string, error) {
 
 // SetSetting 写入或更新配置并同步刷新内存缓存
 func SetSetting(key, val string) error {
+	if DB == nil {
+		return fmt.Errorf("database not initialized")
+	}
 	_, err := DB.Exec("INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", key, val)
 	if err == nil {
 		settingsCacheMu.Lock()

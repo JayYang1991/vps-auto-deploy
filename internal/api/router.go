@@ -69,6 +69,9 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 			api.POST("/auth/revoke-all-sessions", handler.RevokeAllSessions)
 			api.GET("/settings", handler.GetSettings)
 			api.POST("/settings", handler.UpdateSettings)
+			api.GET("/settings/telegram", handler.GetTelegramConfig)
+			api.POST("/settings/telegram", handler.SaveTelegramConfig)
+			api.POST("/settings/telegram/test", handler.TestTelegram)
 
 			// 系统监控与日志
 			api.GET("/system/overview", handler.GetSystemOverview)

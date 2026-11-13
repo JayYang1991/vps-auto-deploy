@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"vps-auto-deploy/internal/notifier"
 )
 
 type loginAttempt struct {
@@ -154,10 +155,26 @@ func RecordFailedLogin(ip string) {
 
 	attempt, exists := loginAttempts[ip]
 	if !exists {
-		loginAttempts[ip] = &loginAttempt{count: 1, lastFailed: time.Now()}
+		attempt = &loginAttempt{count: 1, lastFailed: time.Now()}
+		loginAttempts[ip] = attempt
 	} else {
 		attempt.count++
 		attempt.lastFailed = time.Now()
+	}
+
+	if attempt.count == maxFailedAttempts {
+		notifier.Send(notifier.Event{
+			Type:      notifier.EventIPLocked,
+			Level:     notifier.LevelCritical,
+			Title:     "IP 连续登录失败被系统锁定",
+			Message:   fmt.Sprintf("来源 IP 连续 %d 次密码认证失败，已被系统强制锁定 %v", maxFailedAttempts, lockoutDuration),
+			ClientIP:  ip,
+			Timestamp: time.Now(),
+			Metadata: map[string]string{
+				"failed_attempts": fmt.Sprintf("%d", maxFailedAttempts),
+				"lockout_period":  lockoutDuration.String(),
+			},
+		})
 	}
 }
 

@@ -295,7 +295,348 @@
       </form>
     </div>
 
-    <!-- 3. 修改管理员密码 -->
+    <!-- 3. Telegram 审计与安全告警外发 -->
+    <div class="card" style="margin-bottom: 1.5rem; border: 1px solid rgba(14, 165, 233, 0.3); background: linear-gradient(180deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.8) 100%);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
+        <div style="display: flex; align-items: center; gap: 0.5rem;">
+          <span style="font-size: 1.35rem;">✈️</span>
+          <div>
+            <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+              <h3 style="font-size: 1.1rem; font-weight: 600; color: #38bdf8; margin: 0;">Telegram 审计与安全告警外发</h3>
+              <button
+                type="button"
+                @click="showTgGuide = !showTgGuide"
+                style="background: rgba(56, 189, 248, 0.12); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); font-size: 0.75rem; padding: 0.15rem 0.5rem; border-radius: 9999px; cursor: pointer; display: flex; align-items: center; gap: 0.25rem; transition: all 0.2s;"
+              >
+                <span>{{ showTgGuide ? '收起配置指引 ▲' : '📖 极速配置教程 ▼' }}</span>
+              </button>
+            </div>
+            <p style="font-size: 0.75rem; color: #94a3b8; margin: 0.2rem 0 0 0;">
+              将管理员登录、IP 封禁、凭据查阅、终端运维与实例生命周期事件秒级推送至 Telegram
+            </p>
+          </div>
+        </div>
+        <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none; background: rgba(15, 23, 42, 0.6); padding: 0.35rem 0.75rem; border-radius: 9999px; border: 1px solid #334155;">
+          <input type="checkbox" v-model="tgConfig.enabled" style="accent-color: #0284c7; width: 1rem; height: 1rem; cursor: pointer;" />
+          <span style="font-size: 0.85rem; font-weight: 600;" :style="{ color: tgConfig.enabled ? '#38bdf8' : '#94a3b8' }">
+            {{ tgConfig.enabled ? '● 告警已启用' : '○ 告警已暂停' }}
+          </span>
+        </label>
+      </div>
+
+      <!-- 极速配置指南看板 (Step-by-step visual onboarding guide) -->
+      <div
+        v-if="showTgGuide"
+        style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 0.5rem; padding: 1rem; margin-bottom: 1.25rem;"
+      >
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+          <div style="font-size: 0.875rem; font-weight: 600; color: #f8fafc; display: flex; align-items: center; gap: 0.4rem;">
+            <span>💡 3 步完成 Telegram 审计机器人配置</span>
+          </div>
+          <button
+            type="button"
+            @click="showTgGuide = false"
+            style="background: transparent; border: none; color: #64748b; cursor: pointer; font-size: 0.8rem;"
+          >
+            ✕ 暂时收起
+          </button>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem;">
+          <!-- 步骤 1 -->
+          <div style="background: rgba(30, 41, 59, 0.6); border: 1px solid #334155; border-radius: 0.375rem; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.4rem;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-size: 0.8rem; font-weight: 700; color: #38bdf8; background: rgba(56, 189, 248, 0.15); padding: 0.1rem 0.4rem; border-radius: 0.25rem;">
+                Step 1: 创建机器人
+              </span>
+              <a
+                href="https://t.me/BotFather"
+                target="_blank"
+                rel="noreferrer"
+                style="font-size: 0.75rem; color: #38bdf8; text-decoration: none; display: flex; align-items: center; gap: 0.2rem;"
+              >
+                <span>@BotFather</span> ↗
+              </a>
+            </div>
+            <p style="font-size: 0.75rem; color: #cbd5e1; line-height: 1.4; margin: 0;">
+              在 Telegram 中打开官方 <b>@BotFather</b>，发送
+              <code style="background: rgba(0,0,0,0.3); padding: 0.1rem 0.3rem; border-radius: 0.2rem; color: #f1f5f9; cursor: pointer;" @click="copyToClipboard('/newbot', '指令')" title="点击复制">/newbot</code>
+              按照提示设置机器人昵称与用户名（须以 <code>bot</code> 结尾）。
+            </p>
+            <p style="font-size: 0.72rem; color: #94a3b8; margin: 0;">
+              获取形如 <code>123456:ABC-DEF...</code> 的 API Token 并填入下方输入框。
+            </p>
+          </div>
+
+          <!-- 步骤 2 -->
+          <div style="background: rgba(30, 41, 59, 0.6); border: 1px solid #334155; border-radius: 0.375rem; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.4rem;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-size: 0.8rem; font-weight: 700; color: #818cf8; background: rgba(129, 140, 248, 0.15); padding: 0.1rem 0.4rem; border-radius: 0.25rem;">
+                Step 2: 获取 Chat ID
+              </span>
+              <a
+                href="https://t.me/userinfobot"
+                target="_blank"
+                rel="noreferrer"
+                style="font-size: 0.75rem; color: #818cf8; text-decoration: none; display: flex; align-items: center; gap: 0.2rem;"
+              >
+                <span>@userinfobot</span> ↗
+              </a>
+            </div>
+            <div style="background: rgba(245, 158, 11, 0.1); border-left: 2px solid #f59e0b; padding: 0.25rem 0.4rem; border-radius: 0.2rem; font-size: 0.72rem; color: #fbbf24;">
+              ⚠️ <b>关键一步</b>：先打开你刚建好的机器人，点击底部 <b>START</b> 发送首条消息，否则 Telegram 会拦截推送！
+            </div>
+            <p style="font-size: 0.75rem; color: #cbd5e1; line-height: 1.4; margin: 0;">
+              <b>个人通知</b>：私聊 <b>@userinfobot</b> 获取纯数字 <code>Id</code>。<br/>
+              <b>群组通知</b>：将机器人拉入群，把群消息转发给 <b>@userinfobot</b> 获取群组 ID（以 <code>-100</code> 开头）。
+            </p>
+          </div>
+
+          <!-- 步骤 3 -->
+          <div style="background: rgba(30, 41, 59, 0.6); border: 1px solid #334155; border-radius: 0.375rem; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.4rem;">
+            <div style="display: flex; align-items: center; justify-content: space-between;">
+              <span style="font-size: 0.8rem; font-weight: 700; color: #34d399; background: rgba(52, 211, 153, 0.15); padding: 0.1rem 0.4rem; border-radius: 0.25rem;">
+                Step 3: 测试并保存
+              </span>
+              <span style="font-size: 0.75rem; color: #34d399;">即配即通</span>
+            </div>
+            <p style="font-size: 0.75rem; color: #cbd5e1; line-height: 1.4; margin: 0;">
+              填写 Token 与 Chat ID 后，点击右下角 <b>[ 🔔 发送测试告警 ]</b>。<br/>
+              确认 Telegram 客户端收到测试推送后，勾选关注的事件类别并点击 <b>[ 💾 保存配置 ]</b>。
+            </p>
+            <div style="margin-top: auto; padding-top: 0.25rem;">
+              <button
+                type="button"
+                @click="showProxyGuide = !showProxyGuide"
+                style="background: transparent; border: none; color: #38bdf8; font-size: 0.72rem; cursor: pointer; padding: 0; text-decoration: underline;"
+              >
+                {{ showProxyGuide ? '收起境内网络加速指南 ▲' : '🌐 境内 VPS / 网络受限如何解决？▼' }}
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 境内网络加速 / Cloudflare Workers 教程抽屉 (Expandable Proxy Tip) -->
+        <div
+          v-if="showProxyGuide"
+          style="margin-top: 0.75rem; background: rgba(15, 23, 42, 0.9); border: 1px dashed #475569; border-radius: 0.375rem; padding: 0.75rem;"
+        >
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+            <div style="font-size: 0.78rem; font-weight: 600; color: #38bdf8;">
+              🌐 境内 VPS 免费反代解决方案 (Cloudflare Workers 1 分钟搞定)
+            </div>
+            <button
+              type="button"
+              class="btn-text-copy"
+              @click="copyToClipboard(CF_WORKER_SNIPPET, 'Cloudflare Worker 代理代码')"
+              style="font-size: 0.72rem; color: #818cf8; background: transparent; border: none; cursor: pointer;"
+            >
+              📋 复制 Worker 代码
+            </button>
+          </div>
+          <p style="font-size: 0.72rem; color: #94a3b8; line-height: 1.4; margin-bottom: 0.4rem;">
+            若您的 VPS 位于中国大陆直连 <code>api.telegram.org</code> 超时，可免费在 Cloudflare 创建一个 Worker，粘贴下方代码并部署。将生成的 <code>https://xxx.workers.dev</code> 填入下方的「自定义 Telegram API 地址」即可顺畅推送：
+          </p>
+          <pre style="margin: 0; padding: 0.5rem; background: rgba(0,0,0,0.4); border-radius: 0.25rem; font-size: 0.72rem; color: #a5f3fc; font-family: monospace; overflow-x: auto;">{{ CF_WORKER_SNIPPET }}</pre>
+        </div>
+      </div>
+
+      <form @submit.prevent="saveTelegramConfig" style="display: flex; flex-direction: column; gap: 1rem;">
+        <!-- Bot Token -->
+        <div>
+          <label style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.35rem;">
+            <span>Telegram Bot Token <span style="color: #f43f5e;">*</span></span>
+            <span v-if="tgConfig.masked_token" style="font-size: 0.75rem; color: #10b981;">
+              已加密绑定: <code>{{ tgConfig.masked_token }}</code>
+            </span>
+          </label>
+          <div style="position: relative; display: flex; align-items: center;">
+            <input
+              :type="showBotToken ? 'text' : 'password'"
+              v-model="tgConfig.bot_token"
+              class="input"
+              :placeholder="tgConfig.masked_token ? '留空保留已配置 Token，输入新 Token 将覆盖' : '例如: 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ'"
+              style="padding-right: 2.5rem; font-family: monospace;"
+            />
+            <button
+              type="button"
+              @click="showBotToken = !showBotToken"
+              style="position: absolute; right: 0.5rem; background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 1rem; padding: 0.25rem;"
+              title="切换明文显示"
+            >
+              {{ showBotToken ? '🙈' : '👁️' }}
+            </button>
+          </div>
+          <div style="display: flex; gap: 0.75rem; margin-top: 0.35rem; align-items: center; flex-wrap: wrap;">
+            <a href="https://t.me/BotFather" target="_blank" rel="noreferrer" style="font-size: 0.75rem; color: #38bdf8; text-decoration: none;">
+              🤖 私聊 @BotFather 创建机器人 ↗
+            </a>
+            <button type="button" @click="copyToClipboard('/newbot', '指令')" style="background: transparent; border: none; color: #94a3b8; font-size: 0.75rem; cursor: pointer; padding: 0;">
+              📋 复制 <code>/newbot</code>
+            </button>
+            <span style="font-size: 0.72rem; color: #64748b;">落盘时使用 AES-256-GCM 强加密存储</span>
+          </div>
+        </div>
+
+        <!-- Chat ID -->
+        <div>
+          <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.35rem;">
+            接收通知的 Chat ID <span style="color: #f43f5e;">*</span>
+          </label>
+          <input
+            v-model="tgConfig.chat_id"
+            class="input"
+            placeholder="例如个人 ID: 123456789 或群组 ID: -1001234567890"
+            style="font-family: monospace;"
+          />
+          <div style="display: flex; gap: 0.75rem; margin-top: 0.35rem; align-items: center; flex-wrap: wrap;">
+            <a href="https://t.me/userinfobot" target="_blank" rel="noreferrer" style="font-size: 0.75rem; color: #818cf8; text-decoration: none;">
+              🔍 私聊 @userinfobot 获取个人 ID ↗
+            </a>
+            <span style="font-size: 0.75rem; color: #fbbf24;">
+              ⚡ 提示: 必须先在 Telegram 中打开新建的机器人并点击 START 发送任意消息！
+            </span>
+          </div>
+        </div>
+
+        <!-- 自定义 API URL (反代/中转) -->
+        <div>
+          <label style="display: block; font-size: 0.85rem; color: #cbd5e1; margin-bottom: 0.35rem;">
+            自定义 Telegram API 地址 (可选，默认官方地址)
+          </label>
+          <input
+            v-model="tgConfig.api_url"
+            class="input"
+            placeholder="https://api.telegram.org"
+            style="font-family: monospace;"
+          />
+          <div style="display: flex; gap: 0.75rem; margin-top: 0.35rem; align-items: center;">
+            <button type="button" @click="showProxyGuide = !showProxyGuide" style="background: transparent; border: none; color: #38bdf8; font-size: 0.75rem; cursor: pointer; padding: 0; text-decoration: underline;">
+              {{ showProxyGuide ? '收起反代配置代码 ▲' : '📖 查看 Cloudflare Workers 1 分钟反代代码模板 ▼' }}
+            </button>
+            <span style="font-size: 0.72rem; color: #64748b;">内置 SSRF 私网探测防护</span>
+          </div>
+        </div>
+
+        <!-- 静默推送 -->
+        <div>
+          <label style="display: flex; align-items: center; gap: 0.5rem; cursor: pointer; user-select: none;">
+            <input type="checkbox" v-model="tgConfig.silent" style="accent-color: #0284c7; width: 0.95rem; height: 0.95rem; cursor: pointer;" />
+            <span style="font-size: 0.85rem; color: #cbd5e1;">🔕 启用静默推送 (消息送达时不发出声音或振动提醒)</span>
+          </label>
+        </div>
+
+        <!-- 事件类型勾选 -->
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+            <label style="font-size: 0.85rem; color: #cbd5e1; font-weight: 600;">
+              订阅事件类型 ({{ tgConfig.events.length }}/{{ EVENT_DEFINITIONS.length }})
+            </label>
+            <div style="display: flex; gap: 0.5rem;">
+              <button
+                type="button"
+                @click="selectAllEvents"
+                style="background: transparent; border: 1px solid #475569; color: #94a3b8; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; cursor: pointer;"
+              >
+                全选
+              </button>
+              <button
+                type="button"
+                @click="selectCriticalEvents"
+                style="background: transparent; border: 1px solid #475569; color: #38bdf8; font-size: 0.75rem; padding: 0.2rem 0.5rem; border-radius: 0.25rem; cursor: pointer;"
+              >
+                仅关键安全
+              </button>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.6rem; background: rgba(15, 23, 42, 0.5); padding: 0.75rem; border-radius: 0.375rem; border: 1px solid #334155;">
+            <label
+              v-for="evt in EVENT_DEFINITIONS"
+              :key="evt.key"
+              style="display: flex; align-items: flex-start; gap: 0.45rem; cursor: pointer; user-select: none; padding: 0.35rem; border-radius: 0.25rem; background: rgba(30, 41, 59, 0.4);"
+            >
+              <input
+                type="checkbox"
+                :value="evt.key"
+                v-model="tgConfig.events"
+                style="accent-color: #0284c7; margin-top: 0.2rem; cursor: pointer;"
+              />
+              <div style="flex: 1; min-width: 0;">
+                <div style="display: flex; align-items: center; gap: 0.35rem;">
+                  <span style="font-size: 0.8rem; font-weight: 500; color: #f1f5f9;">{{ evt.label }}</span>
+                  <span
+                    :style="{
+                      fontSize: '0.65rem',
+                      padding: '0.05rem 0.3rem',
+                      borderRadius: '0.2rem',
+                      background: evt.level === 'critical' ? 'rgba(239, 68, 68, 0.2)' : evt.level === 'warn' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(56, 189, 248, 0.15)',
+                      color: evt.level === 'critical' ? '#f87171' : evt.level === 'warn' ? '#fbbf24' : '#38bdf8',
+                    }"
+                  >
+                    {{ evt.level === 'critical' ? '紧急' : evt.level === 'warn' ? '警告' : '通知' }}
+                  </span>
+                </div>
+                <div style="font-size: 0.7rem; color: #64748b; margin-top: 0.1rem;">{{ evt.desc }}</div>
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <!-- 连通性测试诊断反馈条 (Diagnostic Result Banner) -->
+        <div
+          v-if="testResult"
+          :style="{
+            background: testResult.success ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+            border: `1px solid ${testResult.success ? '#10b981' : '#ef4444'}`,
+            padding: '0.65rem 0.85rem',
+            borderRadius: '0.375rem',
+            fontSize: '0.8125rem',
+            color: testResult.success ? '#34d399' : '#f87171'
+          }"
+        >
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 0.5rem;">
+            <div>
+              <div style="font-weight: 600; margin-bottom: 0.2rem;">
+                {{ testResult.success ? '✅ 测试告警推送成功' : '❌ 连通性测试失败' }}
+              </div>
+              <div style="color: #cbd5e1; font-size: 0.78rem;">{{ testResult.message }}</div>
+              <div
+                v-if="!testResult.success && (testResult.message.includes('blocked by the user') || testResult.message.includes('chat not found'))"
+                style="margin-top: 0.35rem; color: #fbbf24; font-size: 0.75rem; line-height: 1.4;"
+              >
+                👉 <b>排查提示</b>：Telegram 限制机器人向未主动互动的用户推流。请先在 Telegram 中打开你的机器人点击底部的 <b>[START]</b> 发送第一条消息后再试！
+              </div>
+            </div>
+            <button
+              type="button"
+              @click="testResult = null"
+              style="background: transparent; border: none; color: inherit; cursor: pointer; font-size: 1rem; padding: 0.1rem 0.3rem;"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+
+        <!-- 按钮操作栏 -->
+        <div style="display: flex; gap: 0.75rem; align-items: center; margin-top: 0.5rem; flex-wrap: wrap;">
+          <button type="submit" class="btn btn-primary" :disabled="savingTelegram">
+            {{ savingTelegram ? '⏳ 保存中...' : '💾 保存 Telegram 配置' }}
+          </button>
+          <button
+            type="button"
+            class="btn btn-secondary"
+            @click="testTelegram"
+            :disabled="testingTelegram"
+            style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);"
+          >
+            {{ testingTelegram ? '⏳ 正在推送测试消息...' : '🔔 发送测试告警' }}
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- 4. 修改管理员密码 -->
     <div class="card">
       <h3 style="font-size: 1.1rem; font-weight: 600; margin-bottom: 1rem; color: #fbbf24;">修改管理员密码</h3>
       <form @submit.prevent="updatePassword" style="display: flex; flex-direction: column; gap: 1rem;">
@@ -382,6 +723,45 @@ const settings = reactive({
   public_ip: '',
   session_idle_timeout: 30,
 })
+
+// Telegram 审计告警配置
+const tgConfig = reactive({
+  enabled: false,
+  bot_token: '',
+  masked_token: '',
+  chat_id: '',
+  api_url: 'https://api.telegram.org',
+  events: [] as string[],
+  silent: false,
+})
+const showBotToken = ref(false)
+const savingTelegram = ref(false)
+const testingTelegram = ref(false)
+const showTgGuide = ref(false)
+const showProxyGuide = ref(false)
+const testResult = ref<{ success: boolean; message: string } | null>(null)
+
+const CF_WORKER_SNIPPET = `export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    url.hostname = 'api.telegram.org';
+    return fetch(new Request(url, request));
+  }
+}`
+
+const EVENT_DEFINITIONS = [
+  { key: 'IP_LOCKED', label: 'IP 连续登录失败被锁定', level: 'critical', desc: '防爆破触发 15 分钟封禁' },
+  { key: 'LOGIN_FAILED', label: '管理员登录失败', level: 'warn', desc: '后台密码错误尝试 (内置 30 秒流控)' },
+  { key: 'LOGIN_SUCCESS', label: '管理员登录成功', level: 'info', desc: '合法会话登录签发' },
+  { key: 'CREDS_REVEALED', label: '查阅节点机密凭据', level: 'warn', desc: '通过二次鉴权解密查看节点密码' },
+  { key: 'PASSWORD_CHANGED', label: '管理员密码修改', level: 'critical', desc: '主控管理员密码更新并轮换会话' },
+  { key: 'SESSION_REVOKED', label: '全局会话强制注销', level: 'critical', desc: '一键作废所有设备历史 Token' },
+  { key: 'TERMINAL_SESSION', label: '特权 Web 终端会话', level: 'warn', desc: 'SSH / PTY 终端连接或连接失败' },
+  { key: 'NODE_DEPLOY', label: '节点部署加入集群', level: 'info', desc: '新 VPS 自动纳管完成' },
+  { key: 'NODE_DELETED', label: '节点移出集群', level: 'warn', desc: '纳管节点被移出' },
+  { key: 'CLOUD_DESTROYED', label: '云端实例彻底销毁', level: 'critical', desc: '物理销毁云主机并停止计费' },
+  { key: 'CONFIG_RELOAD', label: 'Sing-box 核心重载', level: 'info', desc: '网络协议核心配置热重载' },
+]
 
 const passForm = reactive({
   old_password: '',
@@ -662,11 +1042,102 @@ async function updatePassword() {
   }
 }
 
+async function loadTelegramConfig() {
+  try {
+    const res = await api.get('/settings/telegram')
+    if (res.data?.config) {
+      tgConfig.enabled = res.data.config.enabled
+      tgConfig.masked_token = res.data.config.masked_token || ''
+      tgConfig.bot_token = ''
+      tgConfig.chat_id = res.data.config.chat_id || ''
+      tgConfig.api_url = res.data.config.api_url || 'https://api.telegram.org'
+      tgConfig.events = res.data.config.events || []
+      tgConfig.silent = !!res.data.config.silent
+
+      // 初次使用未配置时，默认展开新手引导教程
+      if (!res.data.config.masked_token) {
+        showTgGuide.value = true
+      }
+    }
+  } catch {
+    // 忽略加载错误
+  }
+}
+
+async function saveTelegramConfig() {
+  if (tgConfig.enabled && !tgConfig.chat_id.trim()) {
+    toast.warning('启用告警时，Chat ID 不能为空！')
+    return
+  }
+
+  savingTelegram.value = true
+  try {
+    await api.post('/settings/telegram', {
+      enabled: tgConfig.enabled,
+      bot_token: tgConfig.bot_token.trim(),
+      chat_id: tgConfig.chat_id.trim(),
+      api_url: tgConfig.api_url.trim(),
+      events: tgConfig.events,
+      silent: tgConfig.silent,
+    })
+    toast.success('Telegram 告警配置保存成功！')
+    await loadTelegramConfig()
+  } catch (err: any) {
+    toast.error('保存失败: ' + (err.response?.data?.error || err.message))
+  } finally {
+    savingTelegram.value = false
+  }
+}
+
+async function testTelegram() {
+  if (!tgConfig.chat_id.trim()) {
+    toast.warning('请先输入接收通知的 Chat ID！')
+    return
+  }
+  if (!tgConfig.bot_token.trim() && !tgConfig.masked_token) {
+    toast.warning('请先输入 Telegram Bot Token！')
+    return
+  }
+
+  testingTelegram.value = true
+  testResult.value = null
+  try {
+    const res = await api.post('/settings/telegram/test', {
+      bot_token: tgConfig.bot_token.trim(),
+      chat_id: tgConfig.chat_id.trim(),
+      api_url: tgConfig.api_url.trim(),
+    })
+    toast.success('测试告警发送成功，请前往 Telegram 查看机器人推送！')
+    testResult.value = {
+      success: true,
+      message: res.data?.message || '测试消息已成功推送并送达 Telegram，请在客户端查收确认！',
+    }
+  } catch (err: any) {
+    const errMsg = err.response?.data?.error || err.message
+    toast.error('连通性测试失败: ' + errMsg)
+    testResult.value = {
+      success: false,
+      message: errMsg,
+    }
+  } finally {
+    testingTelegram.value = false
+  }
+}
+
+function selectAllEvents() {
+  tgConfig.events = EVENT_DEFINITIONS.map(e => e.key)
+}
+
+function selectCriticalEvents() {
+  tgConfig.events = EVENT_DEFINITIONS.filter(e => e.level === 'critical' || e.level === 'warn').map(e => e.key)
+}
+
 onMounted(() => {
   loadSystemOverview()
   loadPackages()
   loadRemoteNodes()
   loadSettings()
+  loadTelegramConfig()
 })
 </script>
 

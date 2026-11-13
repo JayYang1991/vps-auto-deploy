@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/crypto/bcrypt"
@@ -11,6 +12,7 @@ import (
 	"vps-auto-deploy/internal/cloud/vultr"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/node"
+	"vps-auto-deploy/internal/notifier"
 )
 
 // GetVultrConfig 获取 Vultr 配置状态与账户概览
@@ -401,6 +403,18 @@ func DeleteVultrInstance(c *gin.Context) {
 			}
 		}
 	}
+
+	notifier.Send(notifier.Event{
+		Type:      notifier.EventCloudDestroyed,
+		Level:     notifier.LevelCritical,
+		Title:     "云端实例被彻底销毁",
+		Message:   fmt.Sprintf("Vultr 云端主机实例 [%s] 已被管理员彻底销毁并停止计费", instanceID),
+		ClientIP:  middleware.GetRealClientIP(c),
+		Timestamp: time.Now(),
+		Metadata: map[string]string{
+			"instance_id": instanceID,
+		},
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "Vultr 实例已成功销毁并终止计费",

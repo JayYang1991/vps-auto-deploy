@@ -23,6 +23,7 @@ import (
 	"vps-auto-deploy/internal/configgen"
 	"vps-auto-deploy/internal/model"
 	"vps-auto-deploy/internal/node"
+	"vps-auto-deploy/internal/notifier"
 	"vps-auto-deploy/internal/pkg/crypto"
 	"vps-auto-deploy/internal/pkg/netutil"
 	"vps-auto-deploy/internal/version"
@@ -71,6 +72,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize database: %v", err)
 	}
+
+	// 初始化轻量安全审计告警通知调度器
+	notifier.InitNotifier()
 
 	// 自动探测并导入宿主机已有 sing-box 配置（当数据库入站规则为空时）
 	var ibCount int

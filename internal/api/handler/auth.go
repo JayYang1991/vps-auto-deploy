@@ -13,6 +13,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"vps-auto-deploy/internal/api/middleware"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/notifier"
 )
 
 type LoginRequest struct {
@@ -49,13 +50,33 @@ func Login(c *gin.Context) {
 	passErr := bcrypt.CompareHashAndPassword([]byte(hashedPass), []byte(req.Password))
 
 	if !userMatches || passErr != nil {
-		middleware.RecordFailedLogin(middleware.GetRealClientIP(c))
+		clientIP := middleware.GetRealClientIP(c)
+		middleware.RecordFailedLogin(clientIP)
+		notifier.Send(notifier.Event{
+			Type:      notifier.EventLoginFailed,
+			Level:     notifier.LevelWarn,
+			Title:     "管理员登录失败",
+			Message:   "检测到一次密码错误的后台登录尝试",
+			ClientIP:  clientIP,
+			Username:  req.Username,
+			Timestamp: time.Now(),
+		})
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "incorrect username or password"})
 		return
 	}
 
 	// 认证通过，重置该 IP 失败尝试记录
-	middleware.ResetLoginAttempts(middleware.GetRealClientIP(c))
+	clientIP := middleware.GetRealClientIP(c)
+	middleware.ResetLoginAttempts(clientIP)
+	notifier.Send(notifier.Event{
+		Type:      notifier.EventLoginSuccess,
+		Level:     notifier.LevelInfo,
+		Title:     "管理员登录成功",
+		Message:   "管理员已成功登录后台管理控制面板",
+		ClientIP:  clientIP,
+		Username:  req.Username,
+		Timestamp: time.Now(),
+	})
 
 	// 若存在初始明文密码记录，首次登录成功后自动擦除，杜绝明文凭据常驻数据库
 	if initPass, _ := model.GetSetting("initial_admin_password"); initPass != "" {
@@ -127,6 +148,16 @@ func UpdatePassword(c *gin.Context) {
 	}
 	newToken, _ := middleware.GenerateJWT(usernameStr)
 
+	notifier.Send(notifier.Event{
+		Type:      notifier.EventPasswordChanged,
+		Level:     notifier.LevelCritical,
+		Title:     "管理员密码已修改",
+		Message:   "管理员后台登录密码已被修改，所有旧客户端会话已强制轮换失效",
+		ClientIP:  middleware.GetRealClientIP(c),
+		Username:  usernameStr,
+		Timestamp: time.Now(),
+	})
+
 	c.JSON(http.StatusOK, gin.H{
 		"message": "password updated successfully, sessions rotated",
 		"token":   newToken,
@@ -189,8 +220,25 @@ func UpdateSettings(c *gin.Context) {
 
 // RevokeAllSessions 记录全局会话失效时刻，强制注销所有设备上已签发的 Token
 func RevokeAllSessions(c *gin.Context) {
-	epoch := time.Now().Unix()
+	epoch := time.Now().Unix() + 1
 	_ = model.SetSetting("auth_min_issued_at", strconv.FormatInt(epoch, 10))
+
+	username, _ := c.Get("username")
+	usernameStr, _ := username.(string)
+	if usernameStr == "" {
+		usernameStr, _ = model.GetSetting("admin_username")
+	}
+
+	notifier.Send(notifier.Event{
+		Type:      notifier.EventSessionRevoked,
+		Level:     notifier.LevelCritical,
+		Title:     "所有活跃会话被全局强制注销",
+		Message:   "管理员触发了全局会话一键注销，所有设备已签发的凭据已立即全部作废",
+		ClientIP:  middleware.GetRealClientIP(c),
+		Username:  usernameStr,
+		Timestamp: time.Now(),
+	})
+
 	c.JSON(http.StatusOK, gin.H{"message": "所有会话已强制注销，请重新登录"})
 }
 

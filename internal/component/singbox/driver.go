@@ -475,9 +475,18 @@ func extractBinary(archivePath, targetName string) (string, error) {
 			if err != nil {
 				return "", err
 			}
-			if _, err := io.Copy(out, tr); err != nil {
+			// 限制最大解压体积为 150MB，防御 Decompression Bomb / Tar Bomb 耗尽磁盘
+			limitedReader := io.LimitReader(tr, 150*1024*1024)
+			written, err := io.Copy(out, limitedReader)
+			if err != nil {
 				out.Close()
+				_ = os.Remove(tmpTarget)
 				return "", err
+			}
+			if written >= 150*1024*1024 {
+				out.Close()
+				_ = os.Remove(tmpTarget)
+				return "", fmt.Errorf("解压异常中止: 单个二进制文件超出安全阈值 (150MB)，疑似 Tar Bomb 攻击")
 			}
 			out.Close()
 			return tmpTarget, nil
