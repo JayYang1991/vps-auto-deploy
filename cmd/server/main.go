@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -226,12 +228,23 @@ func main() {
 	}
 	fmt.Println("==================================================================")
 
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		MaxHeaderBytes:    1 << 20, // 1MB 最大请求头限制，防范头部膨胀 DoS
+	}
+
 	if *tlsFlag {
-		if err := http.ListenAndServeTLS(addr, certPath, keyPath, r); err != nil {
+		server.TLSConfig = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+		}
+		if err := server.ListenAndServeTLS(certPath, keyPath); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("TLS Server startup failed: %v", err)
 		}
 	} else {
-		if err := http.ListenAndServe(addr, r); err != nil {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("Server startup failed: %v", err)
 		}
 	}

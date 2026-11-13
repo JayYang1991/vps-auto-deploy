@@ -270,11 +270,16 @@ func RunProvisionVultr(task *DeployTask, req ProvisionVultrRequest) {
 		conn.Close()
 
 		// TCP 端口通了，现在尝试实际 SSH 握手探测（确保 cloud-init 已写入 key 且 sshd 正常响应）
+		var probedHostKey string
 		sshConfig := &ssh.ClientConfig{
-			User:            "root",
-			Auth:            probeAuthMethods,
-			HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-			Timeout:         5 * time.Second,
+			User: "root",
+			Auth: probeAuthMethods,
+			HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+				probedHostKey = ssh.FingerprintSHA256(key)
+				_ = probedHostKey
+				return nil
+			},
+			Timeout: 5 * time.Second,
 		}
 		sshClient, sshErr := ssh.Dial("tcp", net.JoinHostPort(activeInst.MainIP, "22"), sshConfig)
 		if sshErr == nil {

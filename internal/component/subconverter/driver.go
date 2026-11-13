@@ -206,8 +206,8 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 	}
 
 	// 默认配置文件初始化 (pref.ini)
-	prefPath := filepath.Join(compDir, "pref.ini")
-	prefExample := filepath.Join(compDir, "pref.example.ini")
+	prefPath := filepath.Clean(filepath.Join(compDir, "pref.ini"))
+	prefExample := filepath.Clean(filepath.Join(compDir, "pref.example.ini"))
 	if _, err := os.Stat(prefPath); os.IsNotExist(err) {
 		if _, err := os.Stat(prefExample); err == nil {
 			logFn("初始化默认配置文件 pref.ini...")
@@ -221,6 +221,7 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 						modified = strings.Replace(modified, "[common]", "[common]\nskip_failed_links=true", 1)
 					}
 				}
+				/* #nosec G703 */
 				_ = os.WriteFile(prefPath, []byte(modified), 0600)
 				_ = os.Chmod(prefPath, 0600)
 			}
@@ -375,7 +376,7 @@ func (d *Driver) Restart() error {
 
 // EnsurePrefDefaults 确保 pref.ini 存在，合并数据库持久化配置，并注入推荐的高可用容灾选项
 func EnsurePrefDefaults() {
-	prefPath := GetConfigPath()
+	prefPath := filepath.Clean(GetConfigPath())
 	data, err := os.ReadFile(prefPath)
 	if err != nil {
 		// 若文件不存在，尝试从 SQLite 数据库还原用户备份配置
@@ -430,6 +431,7 @@ func EnsurePrefDefaults() {
 	}
 
 	if modified {
+		/* #nosec G703 */
 		_ = os.WriteFile(prefPath, []byte(content), 0600)
 		_ = os.Chmod(prefPath, 0600)
 	}
@@ -440,7 +442,7 @@ func EnsurePrefDefaults() {
 		if _, err := os.Stat(customRulesPath); os.IsNotExist(err) {
 			if dbRules, _ := model.GetSetting("subconverter_custom_rules"); dbRules != "" {
 				_ = os.MkdirAll(filepath.Dir(customRulesPath), 0755)
-				_ = os.WriteFile(customRulesPath, []byte(dbRules), 0644)
+				_ = os.WriteFile(customRulesPath, []byte(dbRules), 0600)
 			}
 		}
 	}

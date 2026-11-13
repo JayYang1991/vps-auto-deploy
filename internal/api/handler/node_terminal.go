@@ -280,6 +280,12 @@ func NodeTerminalWS(c *gin.Context) {
 
 	cols, _ := strconv.Atoi(c.DefaultQuery("cols", "110"))
 	rows, _ := strconv.Atoi(c.DefaultQuery("rows", "32"))
+	if cols < 10 || cols > 1000 {
+		cols = 110
+	}
+	if rows < 5 || rows > 1000 {
+		rows = 32
+	}
 
 	wsUpgrader := websocket.Upgrader{
 		ReadBufferSize:  4096,

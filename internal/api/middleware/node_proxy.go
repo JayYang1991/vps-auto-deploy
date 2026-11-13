@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -64,7 +65,7 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 		}
 
 		// 集群管理自身接口、主控系统设置与统一凭据管理必须在主控节点执行，不予代理
-		reqPath := c.Request.URL.Path
+		reqPath := path.Clean(c.Request.URL.Path)
 		secret := c.Param("secret")
 		basePrefix := "/" + secret + "/api"
 		if strings.HasPrefix(reqPath, basePrefix+"/nodes") ||
@@ -100,9 +101,9 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 		}
 
 		// 计算目标机器上的真实路径
-		// 截取掉主控端的 /:secret 前缀，拼上远端节点的 secret_path
+		// 截取掉主控端的 /:secret 前缀，拼上远端节点的 secret_path，并做路径安全规整
 		restOfPath := strings.TrimPrefix(reqPath, "/"+secret)
-		remotePath := "/" + strings.Trim(targetNode.SecretPath, "/") + restOfPath
+		remotePath := path.Clean("/" + strings.Trim(targetNode.SecretPath, "/") + restOfPath)
 
 		proxy := httputil.NewSingleHostReverseProxy(targetURL)
 		proxy.FlushInterval = 50 * time.Millisecond // 确保 SSE 实时日志流不被缓冲卡顿

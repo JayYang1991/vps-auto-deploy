@@ -756,11 +756,13 @@ func probeSingboxHealth(driver *singbox.Driver) error {
 }
 
 func rollbackSingbox(destPath string, oldConfig []byte, driver *singbox.Driver, wasActive bool) {
+	cleanPath := filepath.Clean(destPath)
 	if len(oldConfig) > 0 {
-		_ = os.WriteFile(destPath, oldConfig, 0600)
-		_ = os.Chmod(destPath, 0600)
+		/* #nosec G703 */
+		_ = os.WriteFile(cleanPath, oldConfig, 0600)
+		_ = os.Chmod(cleanPath, 0600)
 	} else {
-		_ = os.Remove(destPath)
+		_ = os.Remove(cleanPath)
 	}
 	if wasActive {
 		_ = driver.ReloadOrRestart()
@@ -784,7 +786,8 @@ func ApplyAndReload(destPath string) error {
 		return fmt.Errorf("序列化配置失败: %w", err)
 	}
 
-	_ = os.MkdirAll(filepath.Dir(destPath), 0755)
+	destPath = filepath.Clean(destPath)
+	_ = os.MkdirAll(filepath.Dir(destPath), 0700)
 
 	driver := singbox.NewDriver()
 	installedVer, _ := driver.GetInstalledVersion()

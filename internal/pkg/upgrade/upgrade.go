@@ -436,7 +436,8 @@ func extractTarGz(src, destDir string) error {
 		case tar.TypeReg:
 			_ = os.MkdirAll(filepath.Dir(target), 0755)
 			// 安全清洗权限位，严防 SUID/SGID 特殊权限逃逸与越权
-			safeMode := (os.FileMode(header.Mode) & 0755) &^ (os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
+			perm := uint32(header.Mode & 0777)
+			safeMode := (os.FileMode(perm) & 0755) &^ (os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
 			safeMode |= 0600
 			outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, safeMode)
 			if err != nil {
@@ -487,6 +488,10 @@ func extractZip(src, destDir string) error {
 		}
 		if f.FileInfo().IsDir() {
 			_ = os.MkdirAll(target, 0755)
+			continue
+		}
+		// 严密拦截符号链接，防范软链接穿越攻击 (Symlink Traversal)
+		if f.Mode()&os.ModeSymlink != 0 {
 			continue
 		}
 		_ = os.MkdirAll(filepath.Dir(target), 0755)

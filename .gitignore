@@ -22,4 +22,5 @@ web/dist
 .idea/
 .vscode/
 packages/
+**/packages/
 

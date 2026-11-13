@@ -48,8 +48,9 @@ func findRunningConfigPath() string {
 		args := strings.Split(string(cmdlineBytes), "\x00")
 		for i, arg := range args {
 			if arg == "-c" && i+1 < len(args) {
-				candidate := strings.TrimSpace(args[i+1])
-				if candidate != "" {
+				candidate := filepath.Clean(strings.TrimSpace(args[i+1]))
+				if candidate != "" && filepath.IsAbs(candidate) {
+					/* #nosec G703 */
 					if _, err := os.Stat(candidate); err == nil {
 						return candidate
 					}
@@ -128,7 +129,7 @@ func NewDriver() *Driver {
 
 // EnsureServiceUnit 自动检查并补齐 ExecReload，确保热重载毫秒级极速生效
 func EnsureServiceUnit() {
-	unitPath := component.GetSystemdUnitPath(UnitName)
+	unitPath := filepath.Clean(component.GetSystemdUnitPath(UnitName))
 	data, err := os.ReadFile(unitPath)
 	if err != nil {
 		return
@@ -136,6 +137,7 @@ func EnsureServiceUnit() {
 	content := string(data)
 	if !strings.Contains(content, "ExecReload=") && strings.Contains(content, "[Service]") {
 		newContent := strings.Replace(content, "[Service]", "[Service]\nExecReload=/bin/kill -HUP $MAINPID", 1)
+		/* #nosec G703 */
 		_ = os.WriteFile(unitPath, []byte(newContent), 0644)
 		_ = component.DaemonReload()
 	}
@@ -241,8 +243,8 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 	}
 	defer os.Remove(tmpBinary)
 
-	targetBinary := component.GetDefaultBinaryPath(DriverName)
-	targetConfig := GetConfigPath()
+	targetBinary := filepath.Clean(component.GetDefaultBinaryPath(DriverName))
+	targetConfig := filepath.Clean(GetConfigPath())
 
 	_ = os.MkdirAll(filepath.Dir(targetBinary), 0755)
 
@@ -252,6 +254,7 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 		if err != nil {
 			return err
 		}
+		/* #nosec G703 */
 		if err := os.WriteFile(targetBinary, input, 0755); err != nil {
 			return fmt.Errorf("write binary error: %w", err)
 		}

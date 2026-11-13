@@ -123,7 +123,7 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 	}
 	logFn("资产下载并完成供应链完整性校验，开始安装...")
 
-	targetBinary := component.GetDefaultBinaryPath(DriverName)
+	targetBinary := filepath.Clean(component.GetDefaultBinaryPath(DriverName))
 	_ = os.MkdirAll(filepath.Dir(targetBinary), 0755)
 
 	logFn(fmt.Sprintf("安装二进制文件至 %s...", targetBinary))
@@ -132,6 +132,7 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 		if err != nil {
 			return err
 		}
+		/* #nosec G703 */
 		if err := os.WriteFile(targetBinary, input, 0755); err != nil {
 			return fmt.Errorf("write binary error: %w", err)
 		}

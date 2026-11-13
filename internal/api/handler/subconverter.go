@@ -97,7 +97,7 @@ func GetSubconverterConfig(c *gin.Context) {
 	drv := subconverter.NewDriver()
 	st, _ := drv.Status()
 
-	configPath := subconverter.GetConfigPath()
+	configPath := filepath.Clean(subconverter.GetConfigPath())
 	rawBytes, err := os.ReadFile(configPath)
 	if err != nil && os.IsNotExist(err) {
 		// 优先从 SQLite 数据库还原用户备份配置
@@ -140,6 +140,7 @@ func GetSubconverterConfig(c *gin.Context) {
 		}
 	}
 	if dirty {
+		/* #nosec G703 */
 		_ = os.WriteFile(configPath, []byte(rawContent), 0600)
 		_ = os.Chmod(configPath, 0600)
 	}
@@ -178,11 +179,13 @@ func GetSubconverterConfig(c *gin.Context) {
 }
 
 func rollbackSubconverter(configPath string, oldConfig []byte, drv *subconverter.Driver) {
+	cleanPath := filepath.Clean(configPath)
 	if len(oldConfig) > 0 {
-		_ = os.WriteFile(configPath, oldConfig, 0600)
-		_ = os.Chmod(configPath, 0600)
+		/* #nosec G703 */
+		_ = os.WriteFile(cleanPath, oldConfig, 0600)
+		_ = os.Chmod(cleanPath, 0600)
 	} else {
-		_ = os.Remove(configPath)
+		_ = os.Remove(cleanPath)
 	}
 	_ = drv.Restart()
 }
@@ -238,7 +241,7 @@ func SaveSubconverterConfig(c *gin.Context) {
 		}
 	}
 
-	configPath := subconverter.GetConfigPath()
+	configPath := filepath.Clean(subconverter.GetConfigPath())
 	_ = os.MkdirAll(filepath.Dir(configPath), 0755)
 
 	// 2. 备份原配置
@@ -517,7 +520,7 @@ func SaveSubconverterPreferences(c *gin.Context) {
 	_ = model.SetSetting("subconverter_pref_scv", strconv.FormatBool(req.SCV))
 
 	// 同时将模板路径同步到 pref.ini 的 default_external_config
-	configPath := subconverter.GetConfigPath()
+	configPath := filepath.Clean(subconverter.GetConfigPath())
 	if existing, err := os.ReadFile(configPath); err == nil {
 		effectiveTpl := req.Template
 		if effectiveTpl == "custom" && req.CustomTemplateURL != "" {
@@ -800,7 +803,7 @@ func EnsureCustomRulesFile() error {
 	if err := os.MkdirAll(filepath.Dir(rulesPath), 0755); err != nil {
 		return err
 	}
-	return os.WriteFile(rulesPath, []byte(content), 0644)
+	return os.WriteFile(rulesPath, []byte(content), 0600)
 }
 
 // IsSafeLocalTemplate 检查指定的模板路径是否为安全合法的本地相对模板文件 (防目录穿越 LFI 攻击)
@@ -872,7 +875,7 @@ func GetSubconverterCustomRules(c *gin.Context) {
 		// 优先从 SQLite 数据库还原用户保存的自定义规则
 		if dbRules, _ := model.GetSetting("subconverter_custom_rules"); dbRules != "" {
 			_ = os.MkdirAll(filepath.Dir(rulesPath), 0755)
-			_ = os.WriteFile(rulesPath, []byte(dbRules), 0644)
+			_ = os.WriteFile(rulesPath, []byte(dbRules), 0600)
 			exists = true
 			content = dbRules
 		} else {
@@ -914,7 +917,7 @@ func SaveSubconverterCustomRules(c *gin.Context) {
 	}
 
 	rulesPath := filepath.Join(configDir, "custom_rules.ini")
-	if err := os.WriteFile(rulesPath, []byte(content), 0644); err != nil {
+	if err := os.WriteFile(rulesPath, []byte(content), 0600); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "写入自定义规则文件失败: " + err.Error()})
 		return
 	}

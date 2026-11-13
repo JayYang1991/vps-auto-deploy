@@ -164,6 +164,7 @@ func enrichInboundSpec(protocol, specStr string) string {
 			if strings.TrimSpace(rSpec.PublicKey) == "" && strings.TrimSpace(rSpec.PrivateKey) != "" {
 				if pub := singbox.DeriveRealityPublicKey(rSpec.PrivateKey); pub != "" {
 					rSpec.PublicKey = pub
+					/* #nosec G117 - internal struct marshaling for local database storage */
 					if updatedBytes, err := json.Marshal(rSpec); err == nil {
 						return string(updatedBytes)
 					}

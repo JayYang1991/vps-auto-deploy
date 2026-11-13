@@ -83,16 +83,16 @@ func GenerateSelfSignedCert(certPath, keyPath string, hosts []string) (string, e
 
 	fingerprint := FingerprintSHA256(derBytes)
 
-	// 创建目录
-	if err := os.MkdirAll(filepath.Dir(certPath), 0755); err != nil {
+	// 创建证书与私钥目录 (严格 0700 权限，防本地低权限读取私钥)
+	if err := os.MkdirAll(filepath.Dir(certPath), 0700); err != nil {
 		return "", err
 	}
-	if err := os.MkdirAll(filepath.Dir(keyPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(keyPath), 0700); err != nil {
 		return "", err
 	}
 
 	// 写入证书 cert.pem
-	certOut, err := os.Create(certPath)
+	certOut, err := os.OpenFile(certPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return "", fmt.Errorf("写入证书文件失败: %w", err)
 	}
@@ -152,7 +152,8 @@ func LoadOrGenerateCert(certPath, keyPath string, hosts []string) (string, error
 // 只要指纹完全一致即安全放行；一旦指纹不一致，立即中止连接并报错（防御 MITM 劫持）
 func CreatePinnedTLSConfig(pinnedFingerprint string) *tls.Config {
 	return &tls.Config{
-		InsecureSkipVerify: true, // 绕过公网 CA 证书链校验
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: true, /* #nosec G402 - pinned certificate verified via VerifyConnection */
 		VerifyConnection: func(cs tls.ConnectionState) error {
 			if len(cs.PeerCertificates) == 0 {
 				return errors.New("远端未提供任何 TLS 证书")

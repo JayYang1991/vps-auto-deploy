@@ -271,9 +271,18 @@ func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int, user, cli
 		"LC_ALL=en_US.UTF-8",
 	)
 
+	safeRows := uint16(32)
+	if initRows >= 5 && initRows <= 1000 {
+		safeRows = uint16(initRows)
+	}
+	safeCols := uint16(110)
+	if initCols >= 10 && initCols <= 1000 {
+		safeCols = uint16(initCols)
+	}
+
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{
-		Rows: uint16(initRows),
-		Cols: uint16(initCols),
+		Rows: safeRows,
+		Cols: safeCols,
 	})
 	if err != nil {
 		sendTerminalErrorAndClose(ws, fmt.Sprintf("[ERROR] 启动本地伪终端失败: %v", err))
@@ -348,7 +357,7 @@ func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int, user, cli
 				if err := json.Unmarshal(payload, &ctrl); err == nil && ctrl.Type != "" {
 					switch ctrl.Type {
 					case "resize":
-						if ctrl.Cols > 0 && ctrl.Rows > 0 {
+						if ctrl.Cols >= 10 && ctrl.Cols <= 1000 && ctrl.Rows >= 5 && ctrl.Rows <= 1000 {
 							_ = pty.Setsize(ptmx, &pty.Winsize{
 								Rows: uint16(ctrl.Rows),
 								Cols: uint16(ctrl.Cols),
@@ -475,7 +484,15 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 		ssh.TTY_OP_ISPEED: 14400,
 		ssh.TTY_OP_OSPEED: 14400,
 	}
-	if err := session.RequestPty("xterm-256color", initRows, initCols, modes); err != nil {
+	safeSSHRows := initRows
+	if initRows < 5 || initRows > 1000 {
+		safeSSHRows = 32
+	}
+	safeSSHCols := initCols
+	if initCols < 10 || initCols > 1000 {
+		safeSSHCols = 110
+	}
+	if err := session.RequestPty("xterm-256color", safeSSHRows, safeSSHCols, modes); err != nil {
 		sendTerminalErrorAndClose(ws, fmt.Sprintf("[ERROR] 请求 PTY 失败: %v", err))
 		return
 	}
@@ -567,7 +584,7 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 				if err := json.Unmarshal(payload, &ctrl); err == nil && ctrl.Type != "" {
 					switch ctrl.Type {
 					case "resize":
-						if ctrl.Cols > 0 && ctrl.Rows > 0 {
+						if ctrl.Cols >= 10 && ctrl.Cols <= 1000 && ctrl.Rows >= 5 && ctrl.Rows <= 1000 {
 							_ = session.WindowChange(ctrl.Rows, ctrl.Cols)
 						}
 					case "input":

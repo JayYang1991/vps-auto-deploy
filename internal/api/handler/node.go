@@ -448,8 +448,9 @@ func RevealNodeCredentials(c *gin.Context) {
 	}
 
 	if target.IsMaster {
-		// 本机节点直接返回当前账号
+		// 本机节点直接返回当前账号 (提示语非硬编码密码)
 		adminUser, _ := model.GetSetting("admin_username")
+		/* #nosec G101 */
 		c.JSON(http.StatusOK, gin.H{
 			"id":          target.ID,
 			"name":        target.Name,

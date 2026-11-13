@@ -276,6 +276,10 @@ func TestTelegram(apiURL, botToken, chatID string) error {
 	}
 	if cleanAPI == "" {
 		cleanAPI = DefaultTelegramAPI
+	} else if cleanAPI != DefaultTelegramAPI {
+		if err := netutil.ValidatePublicURL(cleanAPI); err != nil {
+			return fmt.Errorf("自定义 Telegram API 地址安全拦截: %w", err)
+		}
 	}
 
 	testEvent := Event{
