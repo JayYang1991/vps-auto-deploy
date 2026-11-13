@@ -49,54 +49,66 @@ func isKnownPanelHost(host string) bool {
 	return false
 }
 
+// isAllowedTerminalOrigin 智能校验 WebSocket Origin 合法性 (强力防御 CSWSH 跨源劫持)
+func isAllowedTerminalOrigin(r *http.Request, allowedHost string) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // 允许非浏览器或内联反代客户端连接
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	origHost := u.Hostname()
+
+	// 1. 票据绑定来源主机校验 (最高优先级与安全性)：
+	// 确保当前发起 WebSocket 的 Origin 与管理员刚刚通过二次密码鉴权签发 Ticket 的页面 Origin 完全一致！
+	// 无论经过 Cloudflare CDN、Cloudflare Tunnel、Nginx 还是多级反代，均能 100% 信任匹配。
+	if allowedHost != "" && strings.EqualFold(origHost, allowedHost) {
+		return true
+	}
+
+	// 2. 直连请求：校验 Host / Hostname 是否匹配
+	if strings.EqualFold(u.Host, r.Host) || strings.EqualFold(origHost, r.Host) {
+		return true
+	}
+	reqHostOnly, _, _ := net.SplitHostPort(r.Host)
+	if reqHostOnly != "" && strings.EqualFold(origHost, reqHostOnly) {
+		return true
+	}
+
+	// 3. 反向代理匹配 X-Forwarded-Host 或 X-Original-Host
+	for _, hdr := range []string{"X-Forwarded-Host", "X-Original-Host"} {
+		if fwdHost := r.Header.Get(hdr); fwdHost != "" {
+			if strings.EqualFold(u.Host, fwdHost) || strings.EqualFold(origHost, fwdHost) {
+				return true
+			}
+			fwdHostOnly, _, _ := net.SplitHostPort(fwdHost)
+			if fwdHostOnly != "" && strings.EqualFold(origHost, fwdHostOnly) {
+				return true
+			}
+		}
+	}
+
+	// 4. 本地回环或局域网管理：若 Origin 本身是 localhost、127.0.0.1 或私有内网 IP，放行
+	if origHost == "localhost" || node.IsLoopbackOrPrivate(origHost) {
+		return true
+	}
+
+	// 5. 面板资产匹配：若 Origin 对应配置的 public_ip、集群纳管节点 Host 或已配置的隧道域名，放行
+	if isKnownPanelHost(origHost) {
+		return true
+	}
+
+	log.Printf("[WebSocket CheckOrigin] 拦截非法跨源请求 (CSWSH 防护): origin=%s, allowedHost=%s, host=%s, remoteIP=%s", origin, allowedHost, r.Host, r.RemoteAddr)
+	return false
+}
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,
 	CheckOrigin: func(r *http.Request) bool {
-		origin := r.Header.Get("Origin")
-		if origin == "" {
-			return true // 允许非浏览器或内联反代客户端连接
-		}
-		u, err := url.Parse(origin)
-		if err != nil {
-			return false
-		}
-
-		// 1. 直连请求：校验 Host / Hostname 是否匹配 (防跨源 WebSocket 劫持 CSWSH)
-		if strings.EqualFold(u.Host, r.Host) || strings.EqualFold(u.Hostname(), r.Host) {
-			return true
-		}
-		reqHostOnly, _, _ := net.SplitHostPort(r.Host)
-		if reqHostOnly != "" && strings.EqualFold(u.Hostname(), reqHostOnly) {
-			return true
-		}
-
-		// 2. 反向代理匹配 X-Forwarded-Host 或 X-Original-Host
-		for _, hdr := range []string{"X-Forwarded-Host", "X-Original-Host"} {
-			if fwdHost := r.Header.Get(hdr); fwdHost != "" {
-				if strings.EqualFold(u.Host, fwdHost) || strings.EqualFold(u.Hostname(), fwdHost) {
-					return true
-				}
-				fwdHostOnly, _, _ := net.SplitHostPort(fwdHost)
-				if fwdHostOnly != "" && strings.EqualFold(u.Hostname(), fwdHostOnly) {
-					return true
-				}
-			}
-		}
-
-		// 3. 本地回环或局域网管理：若 Origin 本身是 localhost、127.0.0.1 或私有内网 IP，放行
-		origHost := u.Hostname()
-		if origHost == "localhost" || node.IsLoopbackOrPrivate(origHost) {
-			return true
-		}
-
-		// 4. 面板资产匹配：若 Origin 对应配置的 public_ip、集群纳管节点 Host 或已配置的隧道域名，放行
-		if isKnownPanelHost(origHost) {
-			return true
-		}
-
-		log.Printf("[WebSocket CheckOrigin] 拦截非法跨源请求 (CSWSH 防护): origin=%s, host=%s, remoteIP=%s", origin, r.Host, r.RemoteAddr)
-		return false
+		return isAllowedTerminalOrigin(r, "")
 	},
 }
 
@@ -147,9 +159,31 @@ func RequestTerminalTicket(c *gin.Context) {
 		usernameStr = "admin"
 	}
 
-	// 3. 签发 30 秒有效的一次性 Ticket，并绑定内存临时凭据载荷 (使用 GetRealClientIP 保持与 WS 端点一致)
+	// 3. 提取当前经二次鉴权合法客户端的来源主机名 (Origin / Referer / Host)
+	allowedHost := ""
+	if origin := c.GetHeader("Origin"); origin != "" {
+		if u, err := url.Parse(origin); err == nil && u.Hostname() != "" {
+			allowedHost = u.Hostname()
+		}
+	}
+	if allowedHost == "" {
+		if ref := c.GetHeader("Referer"); ref != "" {
+			if u, err := url.Parse(ref); err == nil && u.Hostname() != "" {
+				allowedHost = u.Hostname()
+			}
+		}
+	}
+	if allowedHost == "" {
+		if h, _, err := net.SplitHostPort(c.Request.Host); err == nil && h != "" {
+			allowedHost = h
+		} else {
+			allowedHost = c.Request.Host
+		}
+	}
+
+	// 4. 签发 30 秒有效的一次性 Ticket，并绑定临时凭据载荷与合法来源主机
 	clientIP := middleware.GetRealClientIP(c)
-	ticket := node.IssueTerminalTicket(target.ID, usernameStr, clientIP, req.TempUser, req.TempPass, req.TempKey, 30*time.Second)
+	ticket := node.IssueTerminalTicket(target.ID, usernameStr, clientIP, allowedHost, req.TempUser, req.TempPass, req.TempKey, 30*time.Second)
 
 	c.JSON(http.StatusOK, gin.H{
 		"ticket":       ticket,
@@ -247,7 +281,15 @@ func NodeTerminalWS(c *gin.Context) {
 	cols, _ := strconv.Atoi(c.DefaultQuery("cols", "110"))
 	rows, _ := strconv.Atoi(c.DefaultQuery("rows", "32"))
 
-	ws, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+	wsUpgrader := websocket.Upgrader{
+		ReadBufferSize:  4096,
+		WriteBufferSize: 4096,
+		CheckOrigin: func(r *http.Request) bool {
+			return isAllowedTerminalOrigin(r, ticketInfo.AllowedHost)
+		},
+	}
+
+	ws, err := wsUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("[NodeTerminalWS] WebSocket 协议升级失败: nodeID=%d, err=%v", id, err)
 		return

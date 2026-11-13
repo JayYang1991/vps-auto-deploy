@@ -25,13 +25,14 @@ import (
 
 // TerminalTicketInfo 包含一次性终端令牌绑定的元数据与凭据载荷
 type TerminalTicketInfo struct {
-	NodeID    int64
-	ExpiresAt time.Time
-	Username  string
-	ClientIP  string
-	TempUser  string
-	TempPass  string
-	TempKey   string
+	NodeID      int64
+	ExpiresAt   time.Time
+	Username    string
+	ClientIP    string
+	AllowedHost string
+	TempUser    string
+	TempPass    string
+	TempKey     string
 }
 
 var (
@@ -49,8 +50,8 @@ const (
 	terminalReadLimit     = 64 * 1024
 )
 
-// IssueTerminalTicket 为目标节点签发一个一次性有效、30秒有效期的终端票据，并安全绑定临时凭据
-func IssueTerminalTicket(nodeID int64, username, clientIP, tempUser, tempPass, tempKey string, ttl time.Duration) string {
+// IssueTerminalTicket 为目标节点签发一个一次性有效、30秒有效期的终端票据，并安全绑定临时凭据与合法来源域名
+func IssueTerminalTicket(nodeID int64, username, clientIP, allowedHost, tempUser, tempPass, tempKey string, ttl time.Duration) string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
 	ticket := hex.EncodeToString(b)
@@ -67,13 +68,14 @@ func IssueTerminalTicket(nodeID int64, username, clientIP, tempUser, tempPass, t
 	}
 
 	ticketMap[ticket] = TerminalTicketInfo{
-		NodeID:    nodeID,
-		ExpiresAt: now.Add(ttl),
-		Username:  username,
-		ClientIP:  clientIP,
-		TempUser:  tempUser,
-		TempPass:  tempPass,
-		TempKey:   tempKey,
+		NodeID:      nodeID,
+		ExpiresAt:   now.Add(ttl),
+		Username:    username,
+		ClientIP:    clientIP,
+		AllowedHost: allowedHost,
+		TempUser:    tempUser,
+		TempPass:    tempPass,
+		TempKey:     tempKey,
 	}
 	return ticket
 }
@@ -115,16 +117,9 @@ func ValidateAndConsumeTicket(ticket string, nodeID int64, clientIP ...string) (
 		return nil, false
 	}
 
-	// 绑定签发端 IP 校验：防止票据被未授权第三方客户端抢占重放
-	// 若签发端与请求端任一方经过本地回环或私有反代 (如 Nginx/Docker/Cloudflare Tunnel)，予以放行
-	if len(clientIP) > 0 && clientIP[0] != "" && info.ClientIP != "" {
-		reqIP := clientIP[0]
-		if info.ClientIP != reqIP {
-			if !IsLoopbackOrPrivate(info.ClientIP) && !IsLoopbackOrPrivate(reqIP) {
-				log.Printf("[TerminalTicket] 客户端 IP 不匹配被拦截 (防盗用): issued=%s, requested=%s, nodeID=%d", info.ClientIP, reqIP, nodeID)
-				return nil, false
-			}
-		}
+	// 记录真实消费客户端 IP 迁移情况 (如 CDN 跨边缘节点分发、多出口漫游)
+	if len(clientIP) > 0 && clientIP[0] != "" && info.ClientIP != "" && info.ClientIP != clientIP[0] {
+		log.Printf("[TerminalTicket] 客户端 IP 迁移: issued=%s, current=%s, nodeID=%d (单次票据消费成功)", info.ClientIP, clientIP[0], nodeID)
 	}
 
 	return &info, true

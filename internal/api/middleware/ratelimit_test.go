@@ -84,3 +84,66 @@ func TestSubscriptionRateLimitMiddleware(t *testing.T) {
 		t.Fatalf("expected 429 after exceeding limit, got %d", wOver.Code)
 	}
 }
+
+func TestIsTrustedProxyAndCloudflareRealIP(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	// 1. 验证受信任反代识别
+	trustedIPs := []string{
+		"127.0.0.1",
+		"::1",
+		"10.0.0.5",
+		"172.17.0.2",
+		"192.168.1.100",
+		"162.158.10.20", // Cloudflare 162.158.0.0/15
+		"104.16.12.34",  // Cloudflare 104.16.0.0/13
+		"173.245.48.1",  // Cloudflare 173.245.48.0/20
+		"2606:4700::1",  // Cloudflare IPv6
+	}
+	for _, ip := range trustedIPs {
+		if !IsTrustedProxy(ip) {
+			t.Errorf("expected IP %s to be trusted proxy", ip)
+		}
+	}
+
+	// 2. 验证非受信公网 IP
+	untrustedIPs := []string{
+		"203.0.113.88",
+		"198.51.100.1",
+		"8.8.8.8",
+		"1.1.1.1",
+	}
+	for _, ip := range untrustedIPs {
+		if IsTrustedProxy(ip) {
+			t.Errorf("expected IP %s to NOT be trusted proxy", ip)
+		}
+	}
+
+	// 3. 验证通过 Cloudflare 边缘节点代理时安全解析 CF-Connecting-IP
+	r := gin.New()
+	var extractedIP string
+	r.GET("/test-ip", func(c *gin.Context) {
+		extractedIP = GetRealClientIP(c)
+		c.String(http.StatusOK, "ok")
+	})
+
+	// 模拟来自 Cloudflare 边缘节点的请求
+	reqCF := httptest.NewRequest(http.MethodGet, "/test-ip", nil)
+	reqCF.RemoteAddr = "162.158.12.34:44321"
+	reqCF.Header.Set("CF-Connecting-IP", "114.248.55.66")
+	wCF := httptest.NewRecorder()
+	r.ServeHTTP(wCF, reqCF)
+	if extractedIP != "114.248.55.66" {
+		t.Errorf("expected CF-Connecting-IP 114.248.55.66 to be extracted, got %s", extractedIP)
+	}
+
+	// 4. 验证恶意直连客户端尝试伪造 CF-Connecting-IP 时被坚决忽略 (防伪造)
+	reqAttacker := httptest.NewRequest(http.MethodGet, "/test-ip", nil)
+	reqAttacker.RemoteAddr = "203.0.113.88:44321"
+	reqAttacker.Header.Set("CF-Connecting-IP", "1.1.1.1") // 攻击者尝试伪装
+	wAttacker := httptest.NewRecorder()
+	r.ServeHTTP(wAttacker, reqAttacker)
+	if extractedIP != "203.0.113.88" {
+		t.Errorf("expected attacker's real IP 203.0.113.88 to be returned, got %s", extractedIP)
+	}
+}

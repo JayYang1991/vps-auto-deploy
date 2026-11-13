@@ -28,6 +28,8 @@ var (
 
 	subLimiterMu sync.Mutex
 	subRequests  = make(map[string]*subRequestTracker)
+
+	cloudflareCIDRs []*net.IPNet
 )
 
 const (
@@ -39,6 +41,23 @@ const (
 )
 
 func init() {
+	cfRanges := []string{
+		// Cloudflare 官方公布 IPv4 网段
+		"173.245.48.0/20", "103.21.244.0/22", "103.22.200.0/22", "103.31.4.0/22",
+		"141.101.64.0/18", "108.162.192.0/18", "190.93.240.0/20", "188.114.96.0/20",
+		"197.234.240.0/22", "198.41.128.0/17", "162.158.0.0/15", "104.16.0.0/13",
+		"104.24.0.0/14", "172.64.0.0/13", "131.0.72.0/22",
+		// Cloudflare 官方公布 IPv6 网段
+		"2400:cb00::/32", "2606:4700::/32", "2803:f800::/32", "2405:b500::/32",
+		"2405:8100::/32", "2a06:98c0::/29", "2c0f:f248::/32",
+	}
+	for _, r := range cfRanges {
+		_, cidr, err := net.ParseCIDR(r)
+		if err == nil {
+			cloudflareCIDRs = append(cloudflareCIDRs, cidr)
+		}
+	}
+
 	// 启动后台定时垃圾回收协程，定期清理过期的限流条目，防止内存无界泄露 (Anti-DoS)
 	go func() {
 		ticker := time.NewTicker(10 * time.Minute)
@@ -68,18 +87,38 @@ func cleanupExpiredLimiters() {
 	subLimiterMu.Unlock()
 }
 
+// IsTrustedProxy 校验连接对端 IP 是否属于受信任反代（本地回环、内网私有网段或 Cloudflare 官方边缘节点）
+func IsTrustedProxy(ipStr string) bool {
+	ipStr = strings.TrimSpace(ipStr)
+	if ipStr == "127.0.0.1" || ipStr == "::1" || strings.HasPrefix(ipStr, "127.") || strings.HasPrefix(ipStr, "::ffff:127.") {
+		return true
+	}
+	ip := net.ParseIP(ipStr)
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() || ip.IsPrivate() {
+		return true
+	}
+	for _, cidr := range cloudflareCIDRs {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 // GetRealClientIP 智能获取客户端真实 IP：
-// 1. 若连接来自本机回环 (127.0.0.1, ::1)，说明前置存在反向代理 (Nginx/Cloudflare Tunnel/Caddy)，
-//    优先解析 CF-Connecting-IP, X-Real-IP 或 X-Forwarded-For，精准识别真实来源，防止误封 127.0.0.1。
-// 2. 否则严格使用 c.ClientIP() / RemoteAddr，杜绝外网客户端伪造 X-Forwarded-For。
+// 1. 若连接来自受信任反代（本机回环、内网私有网段、Cloudflare 官方边缘节点），
+//    安全提取 CF-Connecting-IP, X-Real-IP 或 X-Forwarded-For，精准识别真实来源，防止误封代理节点或跨节点 IP 漂移。
+// 2. 否则严格使用 c.ClientIP() / RemoteAddr，杜绝外网未授权客户端伪造 X-Forwarded-For。
 func GetRealClientIP(c *gin.Context) string {
 	remoteIP := c.ClientIP()
 	if host, _, err := net.SplitHostPort(c.Request.RemoteAddr); err == nil && host != "" {
 		remoteIP = host
 	}
 
-	isLoopback := remoteIP == "127.0.0.1" || remoteIP == "::1" || strings.HasPrefix(remoteIP, "127.")
-	if isLoopback {
+	if IsTrustedProxy(remoteIP) {
 		if cfIP := strings.TrimSpace(c.GetHeader("CF-Connecting-IP")); cfIP != "" && net.ParseIP(cfIP) != nil {
 			return cfIP
 		}
