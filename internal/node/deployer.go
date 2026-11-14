@@ -194,7 +194,7 @@ func PingNode(node *model.Node) (int64, error) {
 	resp, err := client.Do(req)
 	latency := time.Since(start).Milliseconds()
 
-	// 自愈层级 1：若 Token 失效 (401)，尝试使用保存的加密密码重新登录刷新 Token
+	// 自愈层级 1：若 Token 失效 (401)，在受 Pinned TLS 指纹锁定的安全通道内刷新 Token
 	if err == nil && resp.StatusCode == http.StatusUnauthorized {
 		resp.Body.Close()
 		if node.PasswordEncrypted != "" {
@@ -213,58 +213,16 @@ func PingNode(node *model.Node) (int64, error) {
 		return latency, errors.New("节点认证失效 (401) 且自动刷新 Token 失败")
 	}
 
-	// 自愈层级 2：网络错误或非 200 响应，启动智能自愈机制 (证书指纹漂移自愈、协议错配探测)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		if resp != nil {
 			resp.Body.Close()
 		}
-
-		var rawPass string
-		if node.PasswordEncrypted != "" {
-			rawPass, _ = model.DecryptSensitiveData(node.PasswordEncrypted)
-		}
-
-		// 自愈路径 A：如果启用 TLS，探测是否证书重新生成导致指纹漂移 (通过节点密码权威验证后自动更新指纹)
-		if node.UseTLS && rawPass != "" {
-			if probedFP, probeErr := crypto.ProbeRemoteFingerprint(node.Host, node.PanelPort, 3*time.Second); probeErr == nil && probedFP != "" {
-				cleanProbed := strings.ToLower(strings.ReplaceAll(probedFP, ":", ""))
-				cleanCurrent := strings.ToLower(strings.ReplaceAll(node.CertFingerprint, ":", ""))
-				if cleanProbed != cleanCurrent {
-					if newToken, logErr := LoginNode(node.Host, node.PanelPort, node.SecretPath, node.Username, rawPass, true, probedFP); logErr == nil && newToken != "" {
-						node.CertFingerprint = probedFP
-						node.APIToken = newToken
-						_ = model.UpdateNodeTLSConfig(node.ID, true, probedFP)
-						_ = model.UpdateNodeToken(node.ID, newToken)
-						_ = model.UpdateNodeStatus(node.ID, "online", latency)
-						return latency, nil
-					}
-				}
-			}
-		}
-
-		// 自愈路径 B：协议错配自动纠偏 (本地与远端 TLS 开启状态不一致)
-		if rawPass != "" {
-			altTLS := !node.UseTLS
-			var altFP string
-			if altTLS {
-				altFP, _ = crypto.ProbeRemoteFingerprint(node.Host, node.PanelPort, 3*time.Second)
-			}
-
-			if !altTLS || altFP != "" {
-				if newToken, logErr := LoginNode(node.Host, node.PanelPort, node.SecretPath, node.Username, rawPass, altTLS, altFP); logErr == nil && newToken != "" {
-					node.UseTLS = altTLS
-					node.CertFingerprint = altFP
-					node.APIToken = newToken
-					_ = model.UpdateNodeTLSConfig(node.ID, altTLS, altFP)
-					_ = model.UpdateNodeToken(node.ID, newToken)
-					_ = model.UpdateNodeStatus(node.ID, "online", latency)
-					return latency, nil
-				}
-			}
-		}
-
 		_ = model.UpdateNodeStatus(node.ID, "offline", 0)
 		if err != nil {
+			// 若由于证书指纹不匹配被拦截，给出明确防劫持告警提示，严禁盲目向未验签证书发送密码 (防中间人窃密)
+			if strings.Contains(err.Error(), "指纹不匹配") || strings.Contains(err.Error(), "中间人攻击") {
+				return 0, fmt.Errorf("【安全拦截】节点 TLS 证书指纹不匹配！为防御中间人劫持，主控已阻断通信 (若远端重启更新了自签证书，请在集群管理中使用「SSH 救援升级」安全校准指纹)")
+			}
 			return 0, fmt.Errorf("节点不可达: %w", err)
 		}
 		return 0, fmt.Errorf("节点返回异常状态码: %d", resp.StatusCode)

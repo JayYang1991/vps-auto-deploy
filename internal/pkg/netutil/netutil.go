@@ -344,6 +344,10 @@ func IsSafeClusterNodeIP(ip net.IP) error {
 	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 		return fmt.Errorf("【集群SSRF拦截】禁止访问链路本地或云厂商元数据地址 (169.254.0.0/16, fe80::/10)")
 	}
+	// 拦截云厂商 IPv6 元数据地址 (如 AWS IMDSv6 fd00:ec2::254)
+	if ip.String() == "fd00:ec2::254" {
+		return fmt.Errorf("【集群SSRF拦截】禁止访问云厂商 IPv6 元数据地址 (fd00:ec2::254)")
+	}
 	if ip.IsUnspecified() || ip.IsMulticast() {
 		return fmt.Errorf("【集群SSRF拦截】禁止访问未指定或多播地址")
 	}

@@ -40,7 +40,7 @@ func validateTargetNodeHost(host string) error {
 		return fmt.Errorf("目标服务器地址格式包含非法字符")
 	}
 	// 严禁将云厂商元数据地址作为纳管目标 (防 SSRF)
-	if cleanHost == "169.254.169.254" || strings.HasPrefix(cleanHost, "169.254.") {
+	if cleanHost == "169.254.169.254" || strings.HasPrefix(cleanHost, "169.254.") || cleanHost == "fd00:ec2::254" {
 		return fmt.Errorf("【安全拦截】禁止将链路本地或云元数据地址作为目标主机")
 	}
 	if os.Getenv("ALLOW_PRIVATE_IP") != "1" {
