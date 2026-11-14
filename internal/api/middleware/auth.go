@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
@@ -97,8 +98,8 @@ func GenerateJWT(username string) (string, error) {
 // GenerateJWTWithDuration 生成指定有效期的 JWT Token
 func GenerateJWTWithDuration(username string, duration time.Duration) (string, error) {
 	secret, err := model.GetSetting("jwt_secret")
-	if err != nil {
-		return "", err
+	if err != nil || secret == "" {
+		return "", fmt.Errorf("jwt secret not initialized")
 	}
 
 	claims := Claims{
@@ -118,7 +119,13 @@ func SecretPathMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		reqSecret := c.Param("secret")
 		actualSecret, err := model.GetSetting("secret_path")
-		if err != nil || actualSecret == "" || subtle.ConstantTimeCompare([]byte(reqSecret), []byte(actualSecret)) != 1 {
+		if err != nil || actualSecret == "" {
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "not found"})
+			return
+		}
+		hReq := sha256.Sum256([]byte(reqSecret))
+		hAct := sha256.Sum256([]byte(actualSecret))
+		if subtle.ConstantTimeCompare(hReq[:], hAct[:]) != 1 {
 			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "not found"})
 			return
 		}
@@ -175,7 +182,7 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 		}
 
 		secret, err := model.GetSetting("jwt_secret")
-		if err != nil {
+		if err != nil || secret == "" {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "jwt secret not initialized"})
 			return
 		}

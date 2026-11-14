@@ -307,7 +307,19 @@ func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int, user, cli
 		_ = cmd.Wait()
 	}()
 
-	_ = ws.WriteMessage(websocket.TextMessage, []byte("\r\n\x1b[32m✔ 已连接至本地主控端控制台 Shell (Local PTY)\x1b[0m\r\n\r\n"))
+	var wsWriteMu sync.Mutex
+	safeWriteMessage := func(messageType int, data []byte) error {
+		wsWriteMu.Lock()
+		defer wsWriteMu.Unlock()
+		return ws.WriteMessage(messageType, data)
+	}
+	safeWriteControl := func(messageType int, data []byte, deadline time.Time) error {
+		wsWriteMu.Lock()
+		defer wsWriteMu.Unlock()
+		return ws.WriteControl(messageType, data, deadline)
+	}
+
+	_ = safeWriteMessage(websocket.TextMessage, []byte("\r\n\x1b[32m✔ 已连接至本地主控端控制台 Shell (Local PTY)\x1b[0m\r\n\r\n"))
 
 	ws.SetReadLimit(terminalReadLimit)
 	_ = ws.SetReadDeadline(time.Now().Add(terminalPongWait))
@@ -328,7 +340,7 @@ func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int, user, cli
 			case <-done:
 				return
 			case <-ticker.C:
-				if err := ws.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second)); err != nil {
+				if err := safeWriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second)); err != nil {
 					closeOnce.Do(func() { close(done) })
 					return
 				}
@@ -343,7 +355,7 @@ func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int, user, cli
 		for {
 			n, err := ptmx.Read(buf)
 			if n > 0 {
-				if wErr := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); wErr != nil {
+				if wErr := safeWriteMessage(websocket.BinaryMessage, buf[:n]); wErr != nil {
 					return
 				}
 			}
@@ -377,7 +389,7 @@ func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int, user, cli
 					case "input":
 						_, _ = ptmx.Write([]byte(ctrl.Data))
 					case "ping":
-						_ = ws.WriteMessage(websocket.TextMessage, []byte(`{"type":"pong"}`))
+						_ = safeWriteMessage(websocket.TextMessage, []byte(`{"type":"pong"}`))
 					}
 				} else {
 					// 纯文本/原始字节流输入
@@ -532,8 +544,20 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 		return
 	}
 
+	var wsWriteMu sync.Mutex
+	safeWriteMessage := func(messageType int, data []byte) error {
+		wsWriteMu.Lock()
+		defer wsWriteMu.Unlock()
+		return ws.WriteMessage(messageType, data)
+	}
+	safeWriteControl := func(messageType int, data []byte, deadline time.Time) error {
+		wsWriteMu.Lock()
+		defer wsWriteMu.Unlock()
+		return ws.WriteControl(messageType, data, deadline)
+	}
+
 	RecordTerminalAudit("CONNECTED", user, clientIP, node.Name, targetAddr, "远端 Shell 交互就绪")
-	_ = ws.WriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[32m✔ SSH 安全终端建立成功！已连接至 %s (%s)\x1b[0m\r\n\r\n", node.Name, node.Host)))
+	_ = safeWriteMessage(websocket.TextMessage, []byte(fmt.Sprintf("\r\n\x1b[32m✔ SSH 安全终端建立成功！已连接至 %s (%s)\x1b[0m\r\n\r\n", node.Name, node.Host)))
 
 	ws.SetReadLimit(terminalReadLimit)
 	_ = ws.SetReadDeadline(time.Now().Add(terminalPongWait))
@@ -554,7 +578,7 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 			case <-done:
 				return
 			case <-ticker.C:
-				if err := ws.WriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second)); err != nil {
+				if err := safeWriteControl(websocket.PingMessage, []byte{}, time.Now().Add(5*time.Second)); err != nil {
 					closeOnce.Do(func() { close(done) })
 					return
 				}
@@ -570,7 +594,7 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 		for {
 			n, err := reader.Read(buf)
 			if n > 0 {
-				if wErr := ws.WriteMessage(websocket.BinaryMessage, buf[:n]); wErr != nil {
+				if wErr := safeWriteMessage(websocket.BinaryMessage, buf[:n]); wErr != nil {
 					return
 				}
 			}
@@ -601,7 +625,7 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 					case "input":
 						_, _ = stdinPipe.Write([]byte(ctrl.Data))
 					case "ping":
-						_ = ws.WriteMessage(websocket.TextMessage, []byte(`{"type":"pong"}`))
+						_ = safeWriteMessage(websocket.TextMessage, []byte(`{"type":"pong"}`))
 					}
 				} else {
 					_, _ = stdinPipe.Write(payload)

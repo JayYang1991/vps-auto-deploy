@@ -223,7 +223,7 @@ func InspectAndSavePackage(srcPath, origFileName string) (*PackageInfo, error) {
 
 	info := &PackageInfo{
 		PackageID:        pkgID,
-		FileName:         origFileName,
+		FileName:         filepath.Base(origFileName),
 		Size:             fi.Size(),
 		Arch:             arch,
 		SHA256:           hash,

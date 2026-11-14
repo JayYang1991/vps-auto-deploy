@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"net"
 	"net/http"
@@ -43,8 +44,10 @@ func Login(c *gin.Context) {
 	actualUser, _ := model.GetSetting("admin_username")
 	hashedPass, _ := model.GetSetting("admin_password_hash")
 
-	// 常数时间比对用户名，消除用户名枚举时序侧信道
-	userMatches := subtle.ConstantTimeCompare([]byte(req.Username), []byte(actualUser)) == 1
+	// 常数时间比对用户名 (SHA-256 固定长度摘要比对，彻底消除用户名枚举与长度时序侧信道)
+	hReqUser := sha256.Sum256([]byte(req.Username))
+	hActUser := sha256.Sum256([]byte(actualUser))
+	userMatches := subtle.ConstantTimeCompare(hReqUser[:], hActUser[:]) == 1
 
 	// 无论用户名是否匹配，均计算一次 bcrypt，确保响应耗时恒定（~100ms）
 	passErr := bcrypt.CompareHashAndPassword([]byte(hashedPass), []byte(req.Password))
