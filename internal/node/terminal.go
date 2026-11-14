@@ -49,6 +49,7 @@ const (
 	terminalPongWait      = 60 * time.Second
 	terminalPingPeriod    = (terminalPongWait * 9) / 10
 	terminalReadLimit     = 64 * 1024
+	maxTerminalTickets    = 1000
 )
 
 // IssueTerminalTicket 为目标节点签发一个一次性有效、30秒有效期的终端票据，并安全绑定临时凭据与合法来源域名
@@ -62,11 +63,17 @@ func IssueTerminalTicket(nodeID int64, username, clientIP, allowedHost, tempUser
 	ticketLock.Lock()
 	defer ticketLock.Unlock()
 
-	// 清理已过期的历史 ticket
+	// 清理已过期的历史 ticket 并限制容量上限 (Anti-DoS)
 	now := time.Now()
 	for k, v := range ticketMap {
 		if now.After(v.ExpiresAt) {
 			delete(ticketMap, k)
+		}
+	}
+	if len(ticketMap) >= maxTerminalTickets {
+		for k := range ticketMap {
+			delete(ticketMap, k)
+			break
 		}
 	}
 

@@ -194,6 +194,13 @@ func UpdateSettings(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "安全入口路径格式不合法 (仅支持4-64位字母、数字、短横线与下划线)"})
 			return
 		}
+		reserved := map[string]bool{
+			"api": true, "sub": true, "assets": true, "static": true, "favicon.ico": true, "index.html": true,
+		}
+		if reserved[strings.ToLower(trimmedSecret)] {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "该安全入口路径为系统保留关键字，禁止使用"})
+			return
+		}
 		_ = model.SetSetting("secret_path", trimmedSecret)
 		// 安全路径变更，强制废止所有旧会话以防扫描缓存利用
 		_ = model.SetSetting("auth_min_issued_at", strconv.FormatInt(time.Now().Unix(), 10))

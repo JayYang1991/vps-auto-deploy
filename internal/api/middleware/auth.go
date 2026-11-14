@@ -30,6 +30,8 @@ var (
 	streamTickets  = make(map[string]streamTicketInfo)
 )
 
+const maxStreamTickets = 5000
+
 // IssueStreamTicket 签发 30 秒单次有效的 SSE 实时日志流临时 Ticket (消除 URL 中的长期 JWT 泄露隐患)
 func IssueStreamTicket(username string, ttl time.Duration) string {
 	b := make([]byte, 16)
@@ -42,6 +44,14 @@ func IssueStreamTicket(username string, ttl time.Duration) string {
 	defer streamTicketMu.Unlock()
 
 	now := time.Now()
+	// 容量上限控制与过期条目清理，防范内存无界泄露 (Anti-DoS)
+	if len(streamTickets) >= maxStreamTickets {
+		for k, v := range streamTickets {
+			if now.After(v.ExpiresAt) {
+				delete(streamTickets, k)
+			}
+		}
+	}
 	for k, v := range streamTickets {
 		if now.After(v.ExpiresAt) {
 			delete(streamTickets, k)
@@ -120,15 +130,17 @@ func SecretPathMiddleware() gin.HandlerFunc {
 // JWTAuthMiddleware 验证 Bearer Token (支持 Authorization Header、一次性 Stream Ticket 或限流白名单 SSE Query Token)
 func JWTAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 1. 优先校验单次有效短期的 Stream Ticket (针对 SSE 实时日志流，杜绝 URL 暴露长期 JWT)
+		// 1. 优先校验单次有效短期的 Stream Ticket (针对 SSE 实时日志流 GET 请求，杜绝 URL 暴露长期 JWT)
 		if ticket := c.Query("ticket"); ticket != "" {
-			if username, ok := ValidateAndConsumeStreamTicket(ticket); ok {
-				c.Set("username", username)
-				c.Next()
+			if c.Request.Method == http.MethodGet {
+				if username, ok := ValidateAndConsumeStreamTicket(ticket); ok {
+					c.Set("username", username)
+					c.Next()
+					return
+				}
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired stream ticket"})
 				return
 			}
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired stream ticket"})
-			return
 		}
 
 		// 2. 从 Authorization Header 提取 Bearer Token
@@ -141,13 +153,13 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 			}
 		}
 
-		// 3. 若 Header 中无 Token，仅严格限制在 SSE 实时流白名单端点允许读取 URL query 中的 token 参数作为向后兼容
+		// 3. 若 Header 中无 Token，仅严格限制在 SSE 实时流白名单 GET 端点允许读取 URL query 中的 token 参数作为向后兼容
 		if tokenStr == "" {
 			tokenQuery := c.Query("token")
 			if tokenQuery != "" {
 				cleanPath := path.Clean(c.Request.URL.Path)
 				baseName := path.Base(cleanPath)
-				isAllowedSSE := strings.Contains(baseName, "logs") || strings.Contains(baseName, "sse")
+				isAllowedSSE := (strings.Contains(baseName, "logs") || strings.Contains(baseName, "sse")) && c.Request.Method == http.MethodGet
 				if !isAllowedSSE {
 					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 						"error": "安全拦截：禁止在常规 REST API 中通过 URL Query 传递 Token，请使用 Authorization 请求头或申请 Stream Ticket",
