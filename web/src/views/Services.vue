@@ -32,7 +32,7 @@
     </div>
 
     <!-- Sing-box 组件专属配置区 (含二级出入站导航与全局操作) -->
-    <div v-if="activeComponent === 'singbox'" class="component-workspace">
+    <div v-show="activeComponent === 'singbox'" class="component-workspace">
       <!-- Sing-box 二级导航与操作工具栏 -->
       <div class="sub-nav-bar">
         <div class="sub-segmented-bar">
@@ -90,7 +90,7 @@
     </div>
 
     <!-- Cloudflared 组件专属配置区 -->
-    <div v-else-if="activeComponent === 'cloudflared'" class="component-workspace">
+    <div v-show="activeComponent === 'cloudflared'" class="component-workspace">
       <div class="tab-content-area">
         <keep-alive>
           <Tunnels />
@@ -99,7 +99,7 @@
     </div>
 
     <!-- 成员与订阅规则组件专属配置区 -->
-    <div v-else-if="activeComponent === 'subscriptions'" class="component-workspace">
+    <div v-show="activeComponent === 'subscriptions'" class="component-workspace">
       <div class="tab-content-area" :key="subKey">
         <keep-alive>
           <Subscriptions />

@@ -716,10 +716,13 @@
           <div style="display: flex; align-items: center; gap: 0.5rem;">
             <span style="font-size: 1.25rem;">🌐</span>
             <div>
-              <h3 style="font-size: 1.1rem; font-weight: 600; color: #f8fafc;">
-                本地优选 IP 节点库
+              <h3 style="font-size: 1.1rem; font-weight: 600; color: #f8fafc; display: flex; align-items: center; gap: 0.5rem;">
+                <span>本地优选 IP 节点库</span>
                 <span style="font-size: 0.85rem; color: #94a3b8; font-weight: 400;">
                   (已持久化 {{ cfIps.length }} 个节点)
+                </span>
+                <span v-if="loadingCfIps && cfIps.length > 0" class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-size: 0.7rem; font-weight: 500;">
+                  ⏳ 刷新中...
                 </span>
               </h3>
             </div>
@@ -804,7 +807,7 @@
         <div style="margin-bottom: 1rem;">
           <input
             v-model="cfSearchKeyword"
-            @input="loadCFIps"
+            @input="() => loadCFIps(true)"
             type="text"
             class="input"
             placeholder="🔍 搜索优选 IP / 地区备注 (如 SG, JP, 443)..."
@@ -812,25 +815,29 @@
           />
         </div>
 
-        <!-- 列表表格 -->
-        <div v-if="loadingCfIps" style="text-align: center; padding: 2.5rem; color: #94a3b8;">
+        <!-- 列表表格：非破坏性安全加载展示 (Stale-While-Revalidate) -->
+        <div v-if="loadingCfIps && cfIps.length === 0" style="text-align: center; padding: 2.5rem; color: #94a3b8;">
           正在加载优选 IP 节点列表...
         </div>
 
-        <div v-else-if="cfIps.length === 0" style="text-align: center; padding: 3rem 1rem; color: #94a3b8; background: rgba(15, 23, 42, 0.4); border-radius: 0.5rem; border: 1px dashed #334155;">
+        <div v-else-if="!loadingCfIps && cfIps.length === 0" style="text-align: center; padding: 3rem 1rem; color: #94a3b8; background: rgba(15, 23, 42, 0.4); border-radius: 0.5rem; border: 1px dashed #334155;">
           <div style="font-size: 2.2rem; margin-bottom: 0.5rem;">📡</div>
           <div style="font-size: 0.95rem; font-weight: 600; color: #cbd5e1; margin-bottom: 0.35rem;">
-            本地暂无持久化的 Cloudflare 优选 IP
+            {{ cfSearchKeyword.trim() ? '未找到匹配的优选 IP 节点' : '本地暂无持久化的 Cloudflare 优选 IP' }}
           </div>
           <div v-if="cfFetchError" style="max-width: 500px; margin: 0.5rem auto 1rem; padding: 0.5rem 0.85rem; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 0.375rem; color: #fca5a5; font-size: 0.8rem; text-align: left;">
             ❌ 最近一次抓取失败: {{ cfFetchError }}
           </div>
           <p v-else style="font-size: 0.8rem; max-width: 480px; margin: 0 auto 1.25rem; color: #64748b;">
-            点击右上角「立即重新获取」按钮，系统将立即从优选订阅源获取最新优选节点并保存在本地数据库中
+            {{ cfSearchKeyword.trim() ? '请尝试更换搜索关键词或清空搜索框' : '点击右上角「立即重新获取」按钮，系统将立即从优选订阅源获取最新优选节点并保存在本地数据库中' }}
           </p>
-          <button @click="manualFetchCFIps" class="btn btn-primary" :disabled="fetchingCf">
+          <button v-if="!cfSearchKeyword.trim()" @click="manualFetchCFIps" class="btn btn-primary" :disabled="fetchingCf">
             <span>⚡</span>
             <span>{{ fetchingCf ? '正在抓取中...' : '立即获取优选 IP' }}</span>
+          </button>
+          <button v-else @click="cfSearchKeyword = ''; loadCFIps(true)" class="btn btn-secondary">
+            <span>🔄</span>
+            <span>清空搜索条件</span>
           </button>
         </div>
 
@@ -1925,16 +1932,30 @@ async function loadCFPrefStatus() {
   return inFlightLoadCFPrefStatus
 }
 
+let lastCFIpsLoadedAt = 0
 let inFlightLoadCFIps: Promise<void> | null = null
 async function loadCFIps(force = false) {
+  const now = Date.now()
+  // 若已有持久化数据且非强制请求，并在 15 秒缓存有效期内，直接平滑复用，杜绝切页引发的闪烁或重绘
+  if (!force && cfIps.value.length > 0 && now - lastCFIpsLoadedAt < 15000) {
+    return
+  }
   if (inFlightLoadCFIps && !force) return inFlightLoadCFIps
-  loadingCfIps.value = true
+
+  if (cfIps.value.length === 0) {
+    loadingCfIps.value = true
+  }
   inFlightLoadCFIps = (async () => {
     try {
       const params = cfSearchKeyword.value.trim() ? { keyword: cfSearchKeyword.value.trim() } : {}
       const res = await api.get('/cf-preferred/ips', { params })
-      cfIps.value = Array.isArray(res.data) ? res.data : []
-      cfPrefStatus.total_count = cfIps.value.length
+      if (Array.isArray(res.data)) {
+        cfIps.value = res.data
+        lastCFIpsLoadedAt = Date.now()
+        if (!cfSearchKeyword.value.trim()) {
+          cfPrefStatus.total_count = cfIps.value.length
+        }
+      }
     } catch (err: any) {
       toast.error('加载优选 IP 列表失败: ' + (err.response?.data?.error || err.message))
     } finally {
@@ -2007,6 +2028,7 @@ async function clearAllCFIps() {
     toast.success('本地优选 IP 库已成功清空')
     cfIps.value = []
     cfPrefStatus.total_count = 0
+    lastCFIpsLoadedAt = Date.now()
     await loadCFPrefStatus()
   } catch (err: any) {
     toast.error('清空失败: ' + (err.response?.data?.error || err.message))
@@ -2019,6 +2041,8 @@ async function deleteSingleCFIp(id: number) {
     toast.success('已删除该优选 IP')
     cfIps.value = cfIps.value.filter((item) => item.id !== id)
     cfPrefStatus.total_count = cfIps.value.length
+    lastCFIpsLoadedAt = Date.now()
+    await loadCFPrefStatus()
   } catch (err: any) {
     toast.error('删除失败: ' + (err.response?.data?.error || err.message))
   }
@@ -2251,30 +2275,30 @@ function handleNodeContextChanged() {
 }
 
 onMounted(async () => {
-  await Promise.all([
+  const tasks: Promise<any>[] = [
     loadMembers(),
     fetchSubStatus(),
     fetchSubConfig(),
     fetchTemplates(),
     fetchWorkbenchPreferences(),
     loadCFPrefStatus(),
-  ])
+  ]
   if (activeSubSection.value === 'cf_preferred') {
-    await loadCFIps()
+    tasks.push(loadCFIps())
   } else if (activeSubSection.value === 'inventory') {
-    await loadInventory()
+    tasks.push(loadInventory())
   }
+  await Promise.all(tasks)
   window.addEventListener('node-context-changed', handleNodeContextChanged)
 })
 
 onActivated(async () => {
-  await loadMembers()
-  await loadCFPrefStatus()
-  if (activeSubSection.value === 'cf_preferred') {
-    await loadCFIps()
-  } else if (activeSubSection.value === 'inventory') {
-    await loadInventory()
-  }
+  await Promise.all([
+    loadMembers(),
+    loadCFPrefStatus(),
+    activeSubSection.value === 'cf_preferred' ? loadCFIps() : Promise.resolve(),
+    activeSubSection.value === 'inventory' ? loadInventory() : Promise.resolve(),
+  ])
 })
 
 onUnmounted(() => {
