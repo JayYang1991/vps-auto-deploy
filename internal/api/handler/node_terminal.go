@@ -60,6 +60,9 @@ func isAllowedTerminalOrigin(r *http.Request, allowedHost string) bool {
 		return false
 	}
 	origHost := u.Hostname()
+	if origHost == "" {
+		return false
+	}
 
 	// 1. 票据绑定来源主机校验 (最高优先级与安全性)：
 	// 确保当前发起 WebSocket 的 Origin 与管理员刚刚通过二次密码鉴权签发 Ticket 的页面 Origin 完全一致！
@@ -77,26 +80,32 @@ func isAllowedTerminalOrigin(r *http.Request, allowedHost string) bool {
 		return true
 	}
 
-	// 3. 反向代理匹配 X-Forwarded-Host 或 X-Original-Host
-	for _, hdr := range []string{"X-Forwarded-Host", "X-Original-Host"} {
-		if fwdHost := r.Header.Get(hdr); fwdHost != "" {
-			if strings.EqualFold(u.Host, fwdHost) || strings.EqualFold(origHost, fwdHost) {
-				return true
-			}
-			fwdHostOnly, _, _ := net.SplitHostPort(fwdHost)
-			if fwdHostOnly != "" && strings.EqualFold(origHost, fwdHostOnly) {
-				return true
+	// 3. 仅当物理套接字连接来自本地回环或受信任反代时，才采信 X-Forwarded-Host
+	remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if remoteIP == "" {
+		remoteIP = r.RemoteAddr
+	}
+	if node.IsLoopbackOrPrivate(remoteIP) || middleware.IsTrustedProxy(remoteIP) {
+		for _, hdr := range []string{"X-Forwarded-Host", "X-Original-Host"} {
+			if fwdHost := r.Header.Get(hdr); fwdHost != "" {
+				if strings.EqualFold(u.Host, fwdHost) || strings.EqualFold(origHost, fwdHost) {
+					return true
+				}
+				fwdHostOnly, _, _ := net.SplitHostPort(fwdHost)
+				if fwdHostOnly != "" && strings.EqualFold(origHost, fwdHostOnly) {
+					return true
+				}
 			}
 		}
 	}
 
-	// 4. 本地回环或局域网管理：若 Origin 本身是 localhost、127.0.0.1 或私有内网 IP，放行
-	if origHost == "localhost" || node.IsLoopbackOrPrivate(origHost) {
+	// 4. 仅允许本机回环调试，不再无条件放行整个 192.168/10/172 局域网段
+	if origHost == "localhost" || origHost == "127.0.0.1" || origHost == "::1" {
 		return true
 	}
 
-	// 5. 面板资产匹配：若 Origin 对应配置的 public_ip、集群纳管节点 Host 或已配置的隧道域名，放行
-	if isKnownPanelHost(origHost) {
+	// 5. 若未显式绑定 allowedHost，检查面板已注册的公网 IP 或隧道域名
+	if allowedHost == "" && isKnownPanelHost(origHost) {
 		return true
 	}
 

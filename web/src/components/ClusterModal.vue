@@ -901,7 +901,6 @@ import api, { getSecretPath, getStreamTicket } from '../api'
 import { useNodeContext, NodeItem } from '../composables/useNodeContext'
 import { useToast, copyToClipboard } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
-import { getToken } from '../utils/auth'
 import VultrProvisioner from './VultrProvisioner.vue'
 import WebTerminal from './WebTerminal.vue'
 
@@ -1199,11 +1198,14 @@ async function startDeploy() {
     const res = await api.post('/nodes/deploy', deployReq)
     const taskId = res.data.task_id
 
-    // 建立 SSE 日志连接 (优先使用脱敏单次 Stream Ticket)
+    // 建立 SSE 日志连接 (强制使用脱敏单次 Stream Ticket，杜绝 URL 暴露长期 JWT)
     const secret = getSecretPath()
     const ticket = await getStreamTicket()
-    const authParam = ticket ? `ticket=${ticket}` : `token=${getToken() || ''}`
-    const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&${authParam}`
+    if (!ticket) {
+      toast.error('安全日志流票据申请失败，请检查网络连接或重新登录')
+      return
+    }
+    const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&ticket=${ticket}`
 
     if (eventSource) {
       eventSource.close()
@@ -1609,8 +1611,11 @@ async function startUpgrade() {
 
     const secret = getSecretPath()
     const ticket = await getStreamTicket()
-    const authParam = ticket ? `ticket=${ticket}` : `token=${getToken() || ''}`
-    const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&${authParam}`
+    if (!ticket) {
+      toast.error('安全日志流票据申请失败，请检查网络连接或重新登录')
+      return
+    }
+    const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&ticket=${ticket}`
 
     if (upgradeEventSource) {
       upgradeEventSource.close()

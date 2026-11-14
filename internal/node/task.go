@@ -27,15 +27,37 @@ type DeployTask struct {
 	mu        sync.Mutex
 }
 
+const maxRetainedTasks = 200
+
 var (
 	tasksLock   sync.RWMutex
 	deployTasks = make(map[string]*DeployTask)
 )
 
-// CreateDeployTask 创建并登记一个部署任务
+// CreateDeployTask 创建并登记一个部署任务 (自动清理历史过期任务，防内存泄漏)
 func CreateDeployTask(nodeName, host string) *DeployTask {
 	tasksLock.Lock()
 	defer tasksLock.Unlock()
+
+	// 1. 清理超过 2 小时的已完成历史任务，防止内存泄漏
+	now := time.Now()
+	for k, v := range deployTasks {
+		if v.Status != "running" && now.Sub(v.StartedAt) > 2*time.Hour {
+			delete(deployTasks, k)
+		}
+	}
+
+	// 2. 若仍超过容量上限，淘汰最旧的非运行中任务
+	if len(deployTasks) >= maxRetainedTasks {
+		for k, v := range deployTasks {
+			if v.Status != "running" {
+				delete(deployTasks, k)
+				if len(deployTasks) < maxRetainedTasks {
+					break
+				}
+			}
+		}
+	}
 
 	id := "deploy-" + uuid.New().String()[:8]
 	task := &DeployTask{
@@ -44,7 +66,7 @@ func CreateDeployTask(nodeName, host string) *DeployTask {
 		Host:      host,
 		Status:    "running",
 		Logs:      make([]string, 0, 50),
-		StartedAt: time.Now(),
+		StartedAt: now,
 	}
 	deployTasks[id] = task
 	return task

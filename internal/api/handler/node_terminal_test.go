@@ -193,12 +193,20 @@ func TestCheckOriginSecurity(t *testing.T) {
 			expected:    true,
 		},
 		{
-			name:        "局域网私有 IP 放行",
+			name:        "局域网私有 IP 直连访问匹配 Host 放行",
+			origin:      "http://192.168.1.50:20888",
+			host:        "192.168.1.50:20888",
+			remoteAddr:  "192.168.1.200:54321",
+			allowedHost: "",
+			expected:    true,
+		},
+		{
+			name:        "【安全测试】未授权局域网跨源 IP 请求本机 127.0.0.1 必须拦截",
 			origin:      "http://192.168.1.50:20888",
 			host:        "127.0.0.1:20888",
 			remoteAddr:  "127.0.0.1:54321",
 			allowedHost: "",
-			expected:    true,
+			expected:    false,
 		},
 		{
 			name:        "匹配已配置的面板公网资产 public_ip",

@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,27 @@ func ListNodes(c *gin.Context) {
 	c.JSON(http.StatusOK, nodes)
 }
 
+func validateTargetNodeHost(host string) error {
+	cleanHost := strings.TrimSpace(host)
+	if cleanHost == "" {
+		return fmt.Errorf("目标服务器地址 (Host) 不能为空")
+	}
+	if strings.ContainsAny(cleanHost, " \t\r\n/\\;@") {
+		return fmt.Errorf("目标服务器地址格式包含非法字符")
+	}
+	// 严禁将云厂商元数据地址作为纳管目标 (防 SSRF)
+	if cleanHost == "169.254.169.254" || strings.HasPrefix(cleanHost, "169.254.") {
+		return fmt.Errorf("【安全拦截】禁止将链路本地或云元数据地址作为目标主机")
+	}
+	if os.Getenv("ALLOW_PRIVATE_IP") != "1" {
+		lower := strings.ToLower(cleanHost)
+		if lower == "localhost" || lower == "127.0.0.1" || lower == "::1" {
+			return fmt.Errorf("【安全拦截】禁止将主控本机回环地址作为远程受管节点")
+		}
+	}
+	return nil
+}
+
 // StartDeployNode 开启异步 SSH 部署任务
 func StartDeployNode(c *gin.Context) {
 	var req node.DeploySSHRequest
@@ -37,8 +59,8 @@ func StartDeployNode(c *gin.Context) {
 		return
 	}
 
-	if strings.TrimSpace(req.Host) == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "目标服务器地址 (Host) 不能为空"})
+	if err := validateTargetNodeHost(req.Host); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -195,6 +217,10 @@ func ImportNode(c *gin.Context) {
 
 	if req.PanelPort <= 0 {
 		req.PanelPort = 20888
+	}
+	if err := validateTargetNodeHost(req.Host); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 	if req.Username == "" {
 		req.Username = "admin"

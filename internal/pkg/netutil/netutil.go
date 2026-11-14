@@ -9,8 +9,35 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 	"time"
 )
+
+var (
+	fakeIPOnce     sync.Once
+	fakeIPDetected bool
+)
+
+// isFakeIPMode 判断当前运行环境是否启用了 Fake-IP (198.18.0.0/15) 透明代理 DNS
+func isFakeIPMode() bool {
+	if v := os.Getenv("ALLOW_FAKE_IP"); v != "" {
+		return v == "1"
+	}
+	fakeIPOnce.Do(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 800*time.Millisecond)
+		defer cancel()
+		ips, err := net.DefaultResolver.LookupIP(ctx, "ip4", "fake-ip-dns-probe.invalid")
+		if err == nil && len(ips) > 0 {
+			for _, ip := range ips {
+				if benchmarkCIDR != nil && benchmarkCIDR.Contains(ip) {
+					fakeIPDetected = true
+					break
+				}
+			}
+		}
+	})
+	return fakeIPDetected
+}
 
 // GetPublicIP 并发竞速获取主机的公网 IPv4 地址（首个返回即响应，最长等待 2 秒）
 func GetPublicIP() string {
@@ -125,6 +152,9 @@ func IsDisallowedIP(ip net.IP) bool {
 	}
 	for _, cidr := range blockedCIDRs {
 		if cidr.Contains(ip) {
+			if benchmarkCIDR != nil && benchmarkCIDR.String() == cidr.String() && os.Getenv("ALLOW_FAKE_IP") == "1" {
+				continue
+			}
 			return true
 		}
 	}
@@ -157,10 +187,8 @@ func IsSafePublicIP(ip net.IP, isLiteralIP bool) error {
 
 	for _, cidr := range blockedCIDRs {
 		if cidr.Contains(ip) {
-			// 针对 198.18.0.0/15 (RFC 2544)，在开发或生产环境使用透明代理 (如 Clash/sing-box Fake-IP 模式) 时，
-			// DNS 会将所有公网域名解析为 198.18.x.x。
-			// 为保障透明代理环境兼容性，仅在输入为显式字面量 IP (isLiteralIP) 时拦截，域名解析出的 Fake-IP 予以豁免。
-			if benchmarkCIDR != nil && benchmarkCIDR.String() == cidr.String() && !isLiteralIP {
+			// 默认严格拦截 198.18.0.0/15；仅在宿主机运行透明代理 (Fake-IP DNS) 且非直接传入的字面量 IP 时放行
+			if benchmarkCIDR != nil && benchmarkCIDR.String() == cidr.String() && !isLiteralIP && isFakeIPMode() {
 				continue
 			}
 			return fmt.Errorf("【SSRF拦截】目标 IP (%s) 命中了受限地址块 (%s)", ip.String(), cidr.String())

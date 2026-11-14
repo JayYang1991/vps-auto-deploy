@@ -18,6 +18,36 @@ import (
 
 var safeHeaderFilenameRegex = regexp.MustCompile(`[^a-zA-Z0-9_\-\.]`)
 
+// isAllowedRemoteConfigHost 限制公开订阅接口动态传入的外部规则集域名，防止利用 302 重定向绕过 SSRF 检测
+func isAllowedRemoteConfigHost(rawURL string) bool {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	allowedDomains := []string{
+		"raw.githubusercontent.com",
+		"gist.githubusercontent.com",
+		"cdn.jsdelivr.net",
+		"fastly.jsdelivr.net",
+		"testingcf.jsdelivr.net",
+		"ghproxy.net",
+		"mirror.ghproxy.com",
+	}
+	for _, d := range allowedDomains {
+		if host == d || strings.HasSuffix(host, "."+d) {
+			return true
+		}
+	}
+	// 若管理员在系统设置中保存过自定义模板 URL，则允许该特定域名
+	if savedCustom, _ := model.GetSetting("subconverter_pref_custom_url"); savedCustom != "" {
+		if su, err := url.Parse(savedCustom); err == nil && strings.EqualFold(su.Hostname(), host) {
+			return true
+		}
+	}
+	return false
+}
+
 // buildAttachmentHeader 安全构建 Content-Disposition 标头，防御 CRLF 响应头注入并符合 RFC 6266 标准
 func buildAttachmentHeader(baseName, ext string) string {
 	cleanASCII := safeHeaderFilenameRegex.ReplaceAllString(baseName, "_")
@@ -89,6 +119,12 @@ func ServeSubscription(c *gin.Context) {
 		includeRemark = strings.TrimSpace(subconverter.GetSettingFromPref("include_remarks"))
 	}
 
+	// 限制正则长度防 ReDoS
+	if len(excludeRemark) > 256 || len(includeRemark) > 256 {
+		c.String(http.StatusBadRequest, "Filter regex too long (max 256 chars)")
+		return
+	}
+
 	filteredURIs := subgen.FilterURIsByRemark(uris, excludeRemark, includeRemark)
 
 	// 2. 若请求的是通用 Base64 / URI 原始链接
@@ -108,6 +144,10 @@ func ServeSubscription(c *gin.Context) {
 			// 安全防护：校验外部传入的 config 模板 URL，拦截私网/内网/元数据等 SSRF 敏感地址
 			if err := netutil.ValidatePublicURL(configTemplate); err != nil {
 				c.String(http.StatusBadRequest, "Invalid config template: %v", err)
+				return
+			}
+			if !isAllowedRemoteConfigHost(configTemplate) {
+				c.String(http.StatusForbidden, "Security Policy: 公开订阅接口仅允许引用受信任的规则集托管域名，如需使用私有源请在后台配置中心设定")
 				return
 			}
 		} else if IsSafeLocalTemplate(configTemplate) {

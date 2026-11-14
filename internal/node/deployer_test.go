@@ -120,4 +120,48 @@ func TestFetchRemoteNodeInventory_SSRFIntercept(t *testing.T) {
 	}
 }
 
+func TestDeployTaskPruning(t *testing.T) {
+	// 验证 CreateDeployTask 自动回收已完成的历史任务
+	task1 := CreateDeployTask("Old Done Node", "1.2.3.4")
+	task1.Status = "success"
+	task1.StartedAt = time.Now().Add(-3 * time.Hour) // 3小时前完成
+
+	task2 := CreateDeployTask("New Node", "5.6.7.8")
+	if task2 == nil {
+		t.Fatalf("expected task2 to be created")
+	}
+
+	// task1 应该在创建 task2 时被清理淘汰
+	_, err := GetDeployTask(task1.ID)
+	if err == nil {
+		t.Errorf("expected old finished task1 to be pruned, but still found")
+	}
+}
+
+func TestDeploySSHPasswordControlChars(t *testing.T) {
+	// 密码包含非法控制字符应该被拦截
+	badPasswords := []string{
+		"pass\nwith_newline",
+		"pass\rwith_cr",
+		"pass\x00with_null",
+	}
+	for _, badPass := range badPasswords {
+		task := CreateDeployTask("Bad Pass Node", "1.1.1.1")
+		req := DeploySSHRequest{
+			Name:          "Bad Pass Node",
+			Host:          "1.1.1.1",
+			SSHPort:       22,
+			SSHUser:       "root",
+			SSHPassword:   "sshpass",
+			AdminUsername: "admin",
+			AdminPassword: badPass,
+			SecretPath:    "secret",
+		}
+		RunDeploySSH(task, req)
+		if task.Status != "failed" || !strings.Contains(task.Error, "控制字符") {
+			t.Errorf("expected task to fail with control char error for %q, got status %q, err %q", badPass, task.Status, task.Error)
+		}
+	}
+}
+
 

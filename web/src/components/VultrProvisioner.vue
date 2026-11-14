@@ -737,7 +737,6 @@ import { ref, reactive, computed, watch, onMounted, onUnmounted, nextTick } from
 import api, { getSecretPath, getStreamTicket } from '../api'
 import { useToast } from '../composables/useToast'
 import { useNodeContext } from '../composables/useNodeContext'
-import { getToken } from '../utils/auth'
 
 const emit = defineEmits<{
   (e: 'deployed', nodeId: number): void
@@ -1064,12 +1063,15 @@ function getLineClass(line: string) {
   return ''
 }
 
-// 订阅部署日志流 (优先使用脱敏 Stream Ticket)
+// 订阅部署日志流 (强制使用脱敏 Stream Ticket，杜绝 URL Query 暴露长效 Token)
 async function subscribeDeployLogs(taskId: string) {
   const secret = getSecretPath()
   const ticket = await getStreamTicket()
-  const authParam = ticket ? `ticket=${ticket}` : `token=${getToken() || ''}`
-  const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&${authParam}`
+  if (!ticket) {
+    toast.error('安全日志流票据申请失败，请检查网络连接或重新登录')
+    return
+  }
+  const streamURL = `/${secret}/api/nodes/deploy-logs?task_id=${taskId}&ticket=${ticket}`
 
   if (eventSource) eventSource.close()
   eventSource = new EventSource(streamURL)

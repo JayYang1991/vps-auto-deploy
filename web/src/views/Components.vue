@@ -308,7 +308,6 @@ import { useRoute } from 'vue-router'
 import api, { getSecretPath, getStreamTicket } from '../api'
 import { useToast, copyToClipboard } from '../composables/useToast'
 import { useConfirm } from '../composables/useConfirm'
-import { getToken } from '../utils/auth'
 
 interface ServiceStatus {
   name: string
@@ -417,11 +416,14 @@ async function startInstall(c: ServiceStatus) {
     return
   }
 
-  // 建立 SSE 流接收安装日志 (优先使用一次性脱敏 Stream Ticket)
+  // 建立 SSE 流接收安装日志 (强制使用一次性安全 Stream Ticket，杜绝 URL 暴露长期 JWT)
   const secret = getSecretPath()
   const ticket = await getStreamTicket()
-  const authParam = ticket ? `ticket=${ticket}` : `token=${getToken() || ''}`
-  const sseUrl = `/${secret}/api/components/${c.name}/install-logs?${authParam}`
+  if (!ticket) {
+    toast.error('安全日志流票据申请失败，请检查网络连接或重新登录')
+    return
+  }
+  const sseUrl = `/${secret}/api/components/${c.name}/install-logs?ticket=${ticket}`
 
   if (installModal.eventSource) {
     installModal.eventSource.close()
@@ -536,9 +538,12 @@ async function openLogs(unit: string) {
 
   const secret = getSecretPath()
   const ticket = await getStreamTicket()
-  const authParam = ticket ? `ticket=${ticket}` : `token=${getToken() || ''}`
+  if (!ticket) {
+    toast.error('安全日志流票据申请失败，请检查网络连接或重新登录')
+    return
+  }
   const activeNodeId = localStorage.getItem('active_node_id') || '1'
-  let url = `/${secret}/api/system/logs?unit=${unit}&${authParam}`
+  let url = `/${secret}/api/system/logs?unit=${unit}&ticket=${ticket}`
   if (activeNodeId !== '1') {
     url += `&node_id=${activeNodeId}`
   }

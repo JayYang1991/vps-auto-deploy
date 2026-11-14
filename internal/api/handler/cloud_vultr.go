@@ -198,11 +198,13 @@ func ListVultrInstances(c *gin.Context) {
 
 	type EnrichedInstance struct {
 		vultr.Instance
-		IsManaged bool   `json:"is_managed"`
-		NodeID    int64  `json:"node_id,omitempty"`
-		NodeName  string `json:"node_name,omitempty"`
-		FlagEmoji string `json:"flag_emoji"`
-		CityZh    string `json:"city_zh"`
+		DefaultPassword    string `json:"default_password,omitempty"` // 覆写并强制抹除明文密码，防信息泄露
+		HasDefaultPassword bool   `json:"has_default_password"`
+		IsManaged          bool   `json:"is_managed"`
+		NodeID             int64  `json:"node_id,omitempty"`
+		NodeName           string `json:"node_name,omitempty"`
+		FlagEmoji          string `json:"flag_emoji"`
+		CityZh             string `json:"city_zh"`
 	}
 
 	var res []EnrichedInstance
@@ -222,13 +224,17 @@ func ListVultrInstances(c *gin.Context) {
 			nodeName = matched.Name
 		}
 
+		hasDefPwd := strings.TrimSpace(inst.DefaultPassword) != ""
+		inst.DefaultPassword = "" // 彻底抹除明文密码，防未授权泄露
+
 		res = append(res, EnrichedInstance{
-			Instance:  inst,
-			IsManaged: isManaged,
-			NodeID:    nodeID,
-			NodeName:  nodeName,
-			FlagEmoji: flag,
-			CityZh:    cityZh,
+			Instance:           inst,
+			HasDefaultPassword: hasDefPwd,
+			IsManaged:          isManaged,
+			NodeID:             nodeID,
+			NodeName:           nodeName,
+			FlagEmoji:          flag,
+			CityZh:             cityZh,
 		})
 	}
 

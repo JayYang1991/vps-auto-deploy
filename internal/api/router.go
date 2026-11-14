@@ -23,6 +23,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 	r.Use(gin.Recovery())
 	r.Use(middleware.SecurityHeadersMiddleware())
 	r.Use(middleware.CORSMiddleware())
+	r.Use(middleware.MaxBodySizeMiddleware(2 * 1024 * 1024))
 
 	// 1. 公开免认证订阅接口 (挂载防频度压测与扫描中间件)
 	r.GET("/sub/:token", middleware.SubscriptionRateLimitMiddleware(), handler.ServeSubscription)

@@ -243,6 +243,19 @@ func SecurityHeadersMiddleware() gin.HandlerFunc {
 	}
 }
 
+// MaxBodySizeMiddleware 限制全局请求体体积 (防内存 DoS 炸弹，排除包上传路由)
+func MaxBodySizeMiddleware(limitBytes int64) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		p := c.Request.URL.Path
+		if strings.HasSuffix(p, "/system/upgrade/package") {
+			c.Next()
+			return
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limitBytes)
+		c.Next()
+	}
+}
+
 // CORSMiddleware 安全跨域处理 (防御任意源反射与敏感凭据泄露，兼容反代与隧道)
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {

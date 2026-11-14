@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"vps-auto-deploy/internal/component/cloudflared"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/pkg/crypto"
 	"vps-auto-deploy/internal/pkg/executil"
 )
 
@@ -50,7 +51,12 @@ func ListTunnels(c *gin.Context) {
 			t.CreatedAt = model.ParseTime(createdAtRaw)
 			t.UpdatedAt = model.ParseTime(updatedAtRaw)
 			if t.Token != "" {
-				t.Token = maskToken(t.Token)
+				// 若数据库存储为密文，解密后再打掩码 (透明解密兼容)
+				if dec, err := model.DecryptSensitiveData(t.Token); err == nil && dec != "" {
+					t.Token = maskToken(dec)
+				} else {
+					t.Token = maskToken(t.Token)
+				}
 			}
 			list = append(list, t)
 		}
@@ -109,10 +115,18 @@ func CreateTunnel(c *gin.Context) {
 		return
 	}
 
+	// 敏感凭据透明落盘加密 (AES-256-GCM)
+	savedToken := token
+	if token != "" {
+		if enc, err := crypto.EncryptAESGCM(token, model.GetEncryptionKey()); err == nil {
+			savedToken = enc
+		}
+	}
+
 	now := time.Now()
 	res, err := model.DB.Exec(
 		"INSERT INTO tunnels (name, mode, token, domain, target_port, edge_ip_version, protocol, status, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'stopped', 1, ?, ?)",
-		req.Name, cleanMode, token, req.Domain, req.TargetPort, edgeIP, proto, now, now,
+		req.Name, cleanMode, savedToken, req.Domain, req.TargetPort, edgeIP, proto, now, now,
 	)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})

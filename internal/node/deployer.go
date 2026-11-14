@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -278,6 +279,12 @@ func RunDeploySSH(task *DeployTask, req DeploySSHRequest) {
 		task.AddLog("[ERROR] " + task.Error)
 		return
 	}
+	if strings.ContainsAny(req.AdminPassword, "\r\n\x00") {
+		task.Status = "failed"
+		task.Error = "管理员密码包含非法控制字符"
+		task.AddLog("[ERROR] " + task.Error)
+		return
+	}
 	// 默认开启自签 TLS 防中间人劫持
 	enableTLS := true
 	if req.EnableTLS != nil {
@@ -476,30 +483,21 @@ func RunDeploySSH(task *DeployTask, req DeploySSHRequest) {
 		task.AddLog("跨架构二进制下载完成")
 	}
 
-	// 5. 初始化远端管理员账号、密码及安全路径 (通过 Stdin 管道传输，严防 /proc 进程树暴露密码)
-	task.AddLog("初始化被纳管节点的凭据与安全入口 (安全 Stdin 管道模式)...")
+	// 5. 初始化远端管理员账号、密码及安全路径 (通过 Base64 + Stdin 管道安全传输，彻底杜绝 Shell 逃逸与 /proc 暴露)
+	task.AddLog("初始化被纳管节点的凭据与安全入口 (安全 Base64 Stdin 管道模式)...")
 	credsJSON, _ := json.Marshal(map[string]string{
 		"username":    req.AdminUsername,
 		"password":    req.AdminPassword,
 		"secret_path": req.SecretPath,
 	})
-	stdinInitCmd := fmt.Sprintf("cat <<'EOF' | /usr/local/bin/vps-panel -stdin-credentials\n%s\nEOF\n", string(credsJSON))
+	b64Creds := base64.StdEncoding.EncodeToString(credsJSON)
+	stdinInitCmd := fmt.Sprintf("printf '%%s' '%s' | base64 -d | /usr/local/bin/vps-panel -stdin-credentials", b64Creds)
 	out, err := runSSHCmd(stdinInitCmd)
 	if err != nil {
-		// 优雅向后兼容：若远端二进制版本过低不支持 -stdin-credentials，降级为参数模式
-		task.AddLog("远端版本可能暂未启用 -stdin-credentials，降级兼容处理...")
-		fallbackCmd := fmt.Sprintf(
-			"/usr/local/bin/vps-panel -reset-username '%s' -reset-password '%s' -reset-secret '%s'",
-			strings.ReplaceAll(req.AdminUsername, "'", `'\''`),
-			strings.ReplaceAll(req.AdminPassword, "'", `'\''`),
-			strings.ReplaceAll(req.SecretPath, "'", `'\''`),
-		)
-		if fbOut, fbErr := runSSHCmd(fallbackCmd); fbErr != nil {
-			task.Status = "failed"
-			task.Error = fmt.Sprintf("初始化远端凭据失败: %v (%s / %s)", fbErr, out, fbOut)
-			task.AddLog("[ERROR] " + task.Error)
-			return
-		}
+		task.Status = "failed"
+		task.Error = fmt.Sprintf("初始化远端凭据失败 (请确保目标节点为最新版程序): %v (%s)", err, out)
+		task.AddLog("[ERROR] " + task.Error)
+		return
 	}
 	task.AddLog(fmt.Sprintf("远端管理员账号已置为: %s, 安全入口: /%s/", req.AdminUsername, req.SecretPath))
 

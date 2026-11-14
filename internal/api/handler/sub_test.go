@@ -33,3 +33,33 @@ func TestBuildAttachmentHeader(t *testing.T) {
 	}
 }
 
+func TestIsAllowedRemoteConfigHost(t *testing.T) {
+	allowedURLs := []string{
+		"https://raw.githubusercontent.com/JayYang1991/ACL4SSR/refs/heads/main/Clash/config/ACL4SSR_Online_Bespoke.ini",
+		"https://gist.githubusercontent.com/user/12345/raw/config.ini",
+		"https://cdn.jsdelivr.net/gh/user/repo/rules.ini",
+		"https://fastly.jsdelivr.net/npm/rules/config.ini",
+		"https://testingcf.jsdelivr.net/rules.ini",
+		"https://ghproxy.net/https://raw.githubusercontent.com/rules.ini",
+		"https://mirror.ghproxy.com/https://raw.githubusercontent.com/rules.ini",
+	}
+	for _, u := range allowedURLs {
+		if !isAllowedRemoteConfigHost(u) {
+			t.Errorf("expected %s to be allowed remote config host", u)
+		}
+	}
+
+	disallowedURLs := []string{
+		"http://evil-domain.com/malicious_rules.ini",
+		"http://169.254.169.254/latest/meta-data/",
+		"http://127.0.0.1:25500/version",
+		"https://attacker.io/redirect-to-internal",
+		"http://sub.domain.attacker.com/config.ini",
+	}
+	for _, u := range disallowedURLs {
+		if isAllowedRemoteConfigHost(u) {
+			t.Errorf("expected %s to be disallowed remote config host", u)
+		}
+	}
+}
+

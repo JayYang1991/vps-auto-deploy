@@ -345,4 +345,59 @@ func TestDeleteNodeValidation(t *testing.T) {
 	}
 }
 
+func TestValidateTargetNodeHostSSRF(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setupTestDB(t)
+
+	r := gin.New()
+	r.POST("/api/nodes/deploy", StartDeployNode)
+	r.POST("/api/nodes/import", ImportNode)
+
+	badHosts := []string{
+		"169.254.169.254",
+		"127.0.0.1",
+		"localhost",
+		"::1",
+		"host with space",
+		"host;evil",
+	}
+
+	for _, badHost := range badHosts {
+		// Deploy
+		depBody, _ := json.Marshal(map[string]any{
+			"name":           "Evil Node",
+			"host":           badHost,
+			"ssh_port":       22,
+			"ssh_user":       "root",
+			"admin_username": "admin",
+			"admin_password": "valid_pass_123",
+			"secret_path":    "sec_path",
+		})
+		reqDep, _ := http.NewRequest(http.MethodPost, "/api/nodes/deploy", bytes.NewReader(depBody))
+		reqDep.Header.Set("Content-Type", "application/json")
+		wDep := httptest.NewRecorder()
+		r.ServeHTTP(wDep, reqDep)
+		if wDep.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for bad deploy host %q, got %d: %s", badHost, wDep.Code, wDep.Body.String())
+		}
+
+		// Import
+		impBody, _ := json.Marshal(map[string]any{
+			"name":        "Evil Node",
+			"host":        badHost,
+			"panel_port":  20888,
+			"secret_path": "sec_path",
+			"username":    "admin",
+			"password":    "pass",
+		})
+		reqImp, _ := http.NewRequest(http.MethodPost, "/api/nodes/import", bytes.NewReader(impBody))
+		reqImp.Header.Set("Content-Type", "application/json")
+		wImp := httptest.NewRecorder()
+		r.ServeHTTP(wImp, reqImp)
+		if wImp.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for bad import host %q, got %d: %s", badHost, wImp.Code, wImp.Body.String())
+		}
+	}
+}
+
 

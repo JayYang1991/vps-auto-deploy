@@ -617,6 +617,9 @@ func ProxySubconverterConvert(target, sourceSubURL, configTemplate string, extra
 			port = pVal
 		}
 	}
+	if port < 1 || port > 65535 {
+		port = subconverter.DefaultPort
+	}
 
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d/sub", port)
 	u, err := url.Parse(baseURL)
@@ -644,7 +647,12 @@ func ProxySubconverterConvert(target, sourceSubURL, configTemplate string, extra
 	}
 
 	for k, v := range extraParams {
+		v = strings.TrimSpace(v)
 		if v != "" {
+			// 限制正则参数长度，防范恶意超长正则引发 ReDoS CPU 耗尽
+			if (k == "include" || k == "exclude") && len(v) > 256 {
+				v = v[:256]
+			}
 			q.Set(k, v)
 		}
 	}
