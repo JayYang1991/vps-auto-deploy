@@ -133,7 +133,7 @@ func GetSystemdUnitPath(unitName string) string {
 		return filepath.Join("/etc/systemd/system", unitName)
 	}
 	dir := filepath.Join(home, ".config", "systemd", "user")
-	_ = os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0750)
 	return filepath.Join(dir, unitName)
 }
 
@@ -158,14 +158,16 @@ func WriteServiceUnit(unitName, content string) error {
 	}
 
 	path := GetSystemdUnitPath(unitName)
-	_ = os.MkdirAll(filepath.Dir(path), 0755)
+	_ = os.MkdirAll(filepath.Dir(path), 0750)
 	perm := os.FileMode(0644)
 	if strings.Contains(content, "TUNNEL_TOKEN") || strings.Contains(content, "Password") || strings.Contains(content, "Secret") {
 		perm = 0600
 	}
+	/* #nosec G306 - systemd unit file requires 0644 or 0600 */
 	if err := os.WriteFile(path, []byte(content), perm); err != nil {
 		return fmt.Errorf("write systemd unit error: %w", err)
 	}
+	/* #nosec G302 - systemd unit file requires 0644 or 0600 */
 	_ = os.Chmod(path, perm)
 	return DaemonReload()
 }

@@ -26,7 +26,7 @@ func GetDefaultInstallDir() string {
 		return "/usr/local/bin"
 	}
 	dir := filepath.Join(home, ".local", "bin")
-	_ = os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0750)
 	return dir
 }
 
@@ -45,7 +45,7 @@ func GetDefaultConfigDir(name string) string {
 		return filepath.Join("/etc", name)
 	}
 	dir := filepath.Join(home, ".config", name)
-	_ = os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0750)
 	return dir
 }
 
@@ -55,17 +55,17 @@ func GetDefaultConfigDir(name string) string {
 func GetDefaultComponentDir(name string) string {
 	if !IsUserMode() {
 		dir := filepath.Join("/etc/vps-auto-deploy/components", name)
-		_ = os.MkdirAll(dir, 0755)
+		_ = os.MkdirAll(dir, 0750)
 		return dir
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		dir := filepath.Join("/etc/vps-auto-deploy/components", name)
-		_ = os.MkdirAll(dir, 0755)
+		_ = os.MkdirAll(dir, 0750)
 		return dir
 	}
 	dir := filepath.Join(home, ".config", "vps-auto-deploy", "components", name)
-	_ = os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0750)
 	return dir
 }
 

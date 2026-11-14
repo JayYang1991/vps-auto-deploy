@@ -41,6 +41,7 @@ func findRunningConfigPath() string {
 	}
 	pids := strings.Fields(out)
 	for _, pid := range pids {
+		/* #nosec G304 - reading proc cmdline of discovered PID */
 		cmdlineBytes, err := os.ReadFile(filepath.Join("/proc", pid, "cmdline"))
 		if err != nil {
 			continue
@@ -137,7 +138,7 @@ func EnsureServiceUnit() {
 	content := string(data)
 	if !strings.Contains(content, "ExecReload=") && strings.Contains(content, "[Service]") {
 		newContent := strings.Replace(content, "[Service]", "[Service]\nExecReload=/bin/kill -HUP $MAINPID", 1)
-		/* #nosec G703 */
+		/* #nosec G703, G306 - systemd unit file requires 0644 */
 		_ = os.WriteFile(unitPath, []byte(newContent), 0644)
 		_ = component.DaemonReload()
 	}
@@ -246,22 +247,24 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 	targetBinary := filepath.Clean(component.GetDefaultBinaryPath(DriverName))
 	targetConfig := filepath.Clean(GetConfigPath())
 
-	_ = os.MkdirAll(filepath.Dir(targetBinary), 0755)
+	_ = os.MkdirAll(filepath.Dir(targetBinary), 0750)
 
 	logFn(fmt.Sprintf("安装二进制文件至 %s...", targetBinary))
 	if err := os.Rename(tmpBinary, targetBinary); err != nil {
+		/* #nosec G304 - reading temporary binary extracted from archive */
 		input, err := os.ReadFile(tmpBinary)
 		if err != nil {
 			return err
 		}
-		/* #nosec G703 */
+		/* #nosec G703, G306 - binary executable requires execute permission */
 		if err := os.WriteFile(targetBinary, input, 0755); err != nil {
 			return fmt.Errorf("write binary error: %w", err)
 		}
 	}
+	/* #nosec G302 - binary executable requires execute permission */
 	_ = os.Chmod(targetBinary, 0755)
 
-	_ = os.MkdirAll(filepath.Dir(targetConfig), 0755)
+	_ = os.MkdirAll(filepath.Dir(targetConfig), 0750)
 
 	logFn("配置并更新 Systemd 服务单元...")
 	unitContent := fmt.Sprintf(`[Unit]
@@ -450,6 +453,7 @@ func DeriveRealityPublicKey(privateKey string) string {
 }
 
 func extractBinary(archivePath, targetName string) (string, error) {
+	/* #nosec G304 - reading validated archive from temporary download */
 	file, err := os.Open(archivePath)
 	if err != nil {
 		return "", err
@@ -474,7 +478,8 @@ func extractBinary(archivePath, targetName string) (string, error) {
 
 		if header.Typeflag == tar.TypeReg && filepath.Base(header.Name) == targetName {
 			tmpTarget := filepath.Join(os.TempDir(), fmt.Sprintf("%s-%d", targetName, time.Now().UnixNano()))
-			out, err := os.OpenFile(tmpTarget, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
+			/* #nosec G302, G304 - temporary binary executable extracted from archive */
+			out, err := os.OpenFile(tmpTarget, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0700)
 			if err != nil {
 				return "", err
 			}

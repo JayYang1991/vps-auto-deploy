@@ -124,19 +124,21 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 	logFn("资产下载并完成供应链完整性校验，开始安装...")
 
 	targetBinary := filepath.Clean(component.GetDefaultBinaryPath(DriverName))
-	_ = os.MkdirAll(filepath.Dir(targetBinary), 0755)
+	_ = os.MkdirAll(filepath.Dir(targetBinary), 0750)
 
 	logFn(fmt.Sprintf("安装二进制文件至 %s...", targetBinary))
 	if err := os.Rename(tmpBinary, targetBinary); err != nil {
+		/* #nosec G304 - reading validated downloaded binary from temp path */
 		input, err := os.ReadFile(tmpBinary)
 		if err != nil {
 			return err
 		}
-		/* #nosec G703 */
+		/* #nosec G703, G306 - binary executable requires execute permission */
 		if err := os.WriteFile(targetBinary, input, 0755); err != nil {
 			return fmt.Errorf("write binary error: %w", err)
 		}
 	}
+	/* #nosec G302 - binary executable requires execute permission */
 	_ = os.Chmod(targetBinary, 0755)
 
 	component.SetCachedLatestVersion(DriverName, rel.TagName)

@@ -142,7 +142,8 @@ func RecordTerminalAudit(event, username, clientIP, nodeName, targetAddr, detail
 	}
 
 	for _, p := range auditPaths {
-		_ = os.MkdirAll(filepath.Dir(p), 0755)
+		_ = os.MkdirAll(filepath.Dir(p), 0750)
+		/* #nosec G304 - internal fixed audit log paths */
 		f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err == nil {
 			_, _ = f.WriteString(entry)

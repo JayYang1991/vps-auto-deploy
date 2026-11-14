@@ -103,12 +103,13 @@ func GetSubconverterConfig(c *gin.Context) {
 		// 优先从 SQLite 数据库还原用户备份配置
 		if dbRaw, _ := model.GetSetting("subconverter_raw_ini"); dbRaw != "" {
 			rawBytes = []byte(dbRaw)
-			_ = os.MkdirAll(filepath.Dir(configPath), 0755)
+			_ = os.MkdirAll(filepath.Dir(configPath), 0750)
 			_ = os.WriteFile(configPath, rawBytes, 0600)
 			_ = os.Chmod(configPath, 0600)
 		} else {
 			// 尝试读取 example
 			examplePath := filepath.Join(subconverter.GetComponentDir(), "pref.example.ini")
+			/* #nosec G304 - reading example config file */
 			rawBytes, _ = os.ReadFile(examplePath)
 		}
 	}
@@ -242,7 +243,7 @@ func SaveSubconverterConfig(c *gin.Context) {
 	}
 
 	configPath := filepath.Clean(subconverter.GetConfigPath())
-	_ = os.MkdirAll(filepath.Dir(configPath), 0755)
+	_ = os.MkdirAll(filepath.Dir(configPath), 0750)
 
 	// 2. 备份原配置
 	oldConfig, _ := os.ReadFile(configPath)
@@ -800,7 +801,7 @@ func EnsureCustomRulesFile() error {
 			content = dbRules
 		}
 	}
-	if err := os.MkdirAll(filepath.Dir(rulesPath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(rulesPath), 0750); err != nil {
 		return err
 	}
 	return os.WriteFile(rulesPath, []byte(content), 0600)
@@ -867,6 +868,7 @@ func GetSubconverterCustomRules(c *gin.Context) {
 	compDir := subconverter.GetComponentDir()
 	rulesPath := filepath.Join(compDir, "config", "custom_rules.ini")
 
+	/* #nosec G304 - reading internal custom_rules.ini */
 	data, err := os.ReadFile(rulesPath)
 	exists := true
 	content := string(data)
@@ -874,7 +876,7 @@ func GetSubconverterCustomRules(c *gin.Context) {
 	if err != nil && os.IsNotExist(err) {
 		// 优先从 SQLite 数据库还原用户保存的自定义规则
 		if dbRules, _ := model.GetSetting("subconverter_custom_rules"); dbRules != "" {
-			_ = os.MkdirAll(filepath.Dir(rulesPath), 0755)
+			_ = os.MkdirAll(filepath.Dir(rulesPath), 0750)
 			_ = os.WriteFile(rulesPath, []byte(dbRules), 0600)
 			exists = true
 			content = dbRules
@@ -911,7 +913,7 @@ func SaveSubconverterCustomRules(c *gin.Context) {
 
 	compDir := subconverter.GetComponentDir()
 	configDir := filepath.Join(compDir, "config")
-	if err := os.MkdirAll(configDir, 0755); err != nil {
+	if err := os.MkdirAll(configDir, 0750); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "创建规则目录失败: " + err.Error()})
 		return
 	}

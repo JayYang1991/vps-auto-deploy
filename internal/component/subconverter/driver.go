@@ -84,6 +84,7 @@ func (d *Driver) GetInstalledVersion() (string, error) {
 	// 2. 优先检查安装落盘的权威 Release 版本标记文件
 	// (解决 MetaCubeX upstream 打 release tag v0.9.2 时源码内漏改硬编码 VERSION "v0.9.1-mihomo" 的问题)
 	versionFile := filepath.Join(GetComponentDir(), "version")
+	/* #nosec G304 - internal version marker file */
 	if data, err := os.ReadFile(versionFile); err == nil {
 		if v := strings.TrimSpace(string(data)); v != "" {
 			return v, nil
@@ -102,6 +103,7 @@ func (d *Driver) GetInstalledVersion() (string, error) {
 	}
 
 	// 4. 从可执行文件文本块中提取 SubConverter vX.Y.Z
+	/* #nosec G304 - reading validated component binary */
 	if binData, err := os.ReadFile(bin); err == nil {
 		maxLen := len(binData)
 		if maxLen > 4*1024*1024 {
@@ -191,7 +193,7 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 	_ = d.systemd.Stop()
 
 	compDir := GetComponentDir()
-	if err := os.MkdirAll(compDir, 0755); err != nil {
+	if err := os.MkdirAll(compDir, 0750); err != nil {
 		return fmt.Errorf("create component dir failed: %w", err)
 	}
 
@@ -201,6 +203,7 @@ func (d *Driver) InstallOrUpgrade(version string, logFn func(string)) error {
 	}
 
 	binPath := filepath.Join(compDir, DriverName)
+	/* #nosec G302 - binary executable requires execute permission */
 	if err := os.Chmod(binPath, 0755); err != nil {
 		logFn(fmt.Sprintf("[WARN] 设置二进制执行权限失败: %v", err))
 	}
@@ -252,14 +255,14 @@ skip_failed_links=true
 
 	// 在用户全局 BIN 目录建立符号链接或拷贝，方便 CLI 探测与调用
 	globalBin := component.GetDefaultBinaryPath(DriverName)
-	_ = os.MkdirAll(filepath.Dir(globalBin), 0755)
+	_ = os.MkdirAll(filepath.Dir(globalBin), 0750)
 	if globalBin != binPath {
 		_ = os.Remove(globalBin)
 		_ = os.Symlink(binPath, globalBin)
 	}
 
 	// 写入当前版本标记
-	_ = os.WriteFile(filepath.Join(compDir, "version"), []byte(targetVersion), 0644)
+	_ = os.WriteFile(filepath.Join(compDir, "version"), []byte(targetVersion), 0600)
 
 	logFn("配置并更新 Systemd 服务单元...")
 	unitContent := fmt.Sprintf(`[Unit]
@@ -382,7 +385,7 @@ func EnsurePrefDefaults() {
 		// 若文件不存在，尝试从 SQLite 数据库还原用户备份配置
 		if model.DB != nil {
 			if rawIni, _ := model.GetSetting("subconverter_raw_ini"); rawIni != "" {
-				_ = os.MkdirAll(filepath.Dir(prefPath), 0755)
+				_ = os.MkdirAll(filepath.Dir(prefPath), 0750)
 				_ = os.WriteFile(prefPath, []byte(rawIni), 0600)
 				_ = os.Chmod(prefPath, 0600)
 				data = []byte(rawIni)
@@ -441,7 +444,7 @@ func EnsurePrefDefaults() {
 		customRulesPath := filepath.Join(GetComponentDir(), "config", "custom_rules.ini")
 		if _, err := os.Stat(customRulesPath); os.IsNotExist(err) {
 			if dbRules, _ := model.GetSetting("subconverter_custom_rules"); dbRules != "" {
-				_ = os.MkdirAll(filepath.Dir(customRulesPath), 0755)
+				_ = os.MkdirAll(filepath.Dir(customRulesPath), 0750)
 				_ = os.WriteFile(customRulesPath, []byte(dbRules), 0600)
 			}
 		}
@@ -451,6 +454,7 @@ func EnsurePrefDefaults() {
 // GetSettingFromPref 从 pref.ini 中读取指定 key 的配置值
 func GetSettingFromPref(key string) string {
 	prefPath := GetConfigPath()
+	/* #nosec G304 - reading internal pref.ini */
 	data, err := os.ReadFile(prefPath)
 	if err != nil {
 		return ""
@@ -513,6 +517,7 @@ func UpdateIniKey(content, key, val string) string {
 
 // extractTarGzToDir 将 tar.gz 解包并剥离最外层的 subconverter/ 根目录
 func extractTarGzToDir(archivePath, destDir string) error {
+	/* #nosec G304 - archivePath verified in temporary download directory */
 	f, err := os.Open(archivePath)
 	if err != nil {
 		return err
@@ -557,12 +562,15 @@ func extractTarGzToDir(archivePath, destDir string) error {
 		}
 
 		switch header.Typeflag {
+		case tar.TypeSymlink, tar.TypeLink:
+			// 严密拦截符号链接与硬链接，防范软链接穿越攻击 (Symlink/Hardlink Traversal)
+			continue
 		case tar.TypeDir:
-			if err := os.MkdirAll(targetPath, 0755); err != nil {
+			if err := os.MkdirAll(targetPath, 0750); err != nil {
 				return err
 			}
 		case tar.TypeReg, tar.TypeRegA:
-			if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0750); err != nil {
 				return err
 			}
 
@@ -578,6 +586,7 @@ func extractTarGzToDir(archivePath, destDir string) error {
 			// 安全清洗权限位，严防 SUID/SGID 特殊权限位继承
 			safeMode := (header.FileInfo().Mode() & 0755) &^ (os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
 			safeMode |= 0600
+			/* #nosec G304 - temporary destination file verified by prefix check */
 			outFile, err := os.OpenFile(tmpPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, safeMode)
 			if err != nil {
 				return err

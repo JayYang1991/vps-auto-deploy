@@ -406,6 +406,7 @@ func ParseRouteRuleMap(rule map[string]interface{}, idx int) (*model.RouteRule, 
 
 // ImportExistingSingboxConfig 增量导入（不覆盖已有 Tag）
 func ImportExistingSingboxConfig(cfgPath string) (*ImportStats, error) {
+	/* #nosec G304 - reading singbox configuration file */
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
 		return nil, fmt.Errorf("读取配置文件失败: %w", err)
@@ -518,6 +519,7 @@ func ImportExistingSingboxConfig(cfgPath string) (*ImportStats, error) {
 
 // ForceSyncSingboxConfig 从磁盘配置文件强制加载并 100% 覆盖面板数据库记录
 func ForceSyncSingboxConfig(cfgPath string) (*SyncStats, error) {
+	/* #nosec G304 - reading singbox configuration file */
 	data, err := os.ReadFile(cfgPath)
 	if err != nil {
 		return nil, fmt.Errorf("读取配置文件失败: %w", err)

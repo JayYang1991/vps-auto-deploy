@@ -135,6 +135,7 @@ func EnableBBR(c *gin.Context) {
 
 	// 优先写入现代发行版标准的 /etc/sysctl.d/99-vps-bbr.conf
 	if fi, err := os.Stat("/etc/sysctl.d"); err == nil && fi.IsDir() {
+		/* #nosec G306 - sysctl configuration file requires 0644 */
 		if err := os.WriteFile("/etc/sysctl.d/99-vps-bbr.conf", []byte(bbrContent), 0644); err == nil {
 			_, _ = executil.RunCommand(3*time.Second, "sysctl", "--system")
 			c.JSON(http.StatusOK, gin.H{"message": "BBR enabled successfully via sysctl.d"})
@@ -143,6 +144,7 @@ func EnableBBR(c *gin.Context) {
 	}
 
 	// 降级追加至 /etc/sysctl.conf
+	/* #nosec G302 - sysctl configuration file requires 0644 */
 	f, err := os.OpenFile("/etc/sysctl.conf", os.O_APPEND|os.O_WRONLY|os.O_CREATE, 0644)
 	if err == nil {
 		_, _ = f.WriteString("\n" + bbrContent)

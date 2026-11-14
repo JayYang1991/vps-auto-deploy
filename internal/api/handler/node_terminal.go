@@ -100,8 +100,19 @@ func isAllowedTerminalOrigin(r *http.Request, allowedHost string) bool {
 		return true
 	}
 
-	log.Printf("[WebSocket CheckOrigin] 拦截非法跨源请求 (CSWSH 防护): origin=%s, allowedHost=%s, host=%s, remoteIP=%s", origin, allowedHost, r.Host, r.RemoteAddr)
+	/* #nosec G706 - origin and host are sanitized against CRLF injection via cleanLogString */
+	log.Printf("[WebSocket CheckOrigin] 拦截非法跨源请求 (CSWSH 防护): origin=%s, allowedHost=%s, host=%s, remoteIP=%s", cleanLogString(origin), cleanLogString(allowedHost), cleanLogString(r.Host), cleanLogString(r.RemoteAddr))
 	return false
+}
+
+// cleanLogString 过滤换行符与截断超长字符串，杜绝日志注入 (CWE-117)
+func cleanLogString(s string) string {
+	s = strings.ReplaceAll(s, "\r", "")
+	s = strings.ReplaceAll(s, "\n", "")
+	if len(s) > 128 {
+		return s[:128] + "..."
+	}
+	return s
 }
 
 var upgrader = websocket.Upgrader{
@@ -266,7 +277,7 @@ func NodeTerminalWS(c *gin.Context) {
 	clientIP := middleware.GetRealClientIP(c)
 	ticketInfo, ok := node.ValidateAndConsumeTicket(ticket, id, clientIP)
 	if !ok || ticketInfo == nil {
-		log.Printf("[NodeTerminalWS] 终端票据校验失败或已过期: nodeID=%d, clientIP=%s, ticket=%s", id, clientIP, ticket)
+		log.Printf("[NodeTerminalWS] 终端票据校验失败或已过期: nodeID=%d, clientIP=%s, ticketLen=%d", id, cleanLogString(clientIP), len(ticket))
 		c.String(http.StatusUnauthorized, "invalid or expired terminal ticket")
 		return
 	}

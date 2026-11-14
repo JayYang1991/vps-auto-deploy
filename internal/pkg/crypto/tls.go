@@ -92,7 +92,8 @@ func GenerateSelfSignedCert(certPath, keyPath string, hosts []string) (string, e
 	}
 
 	// 写入证书 cert.pem
-	certOut, err := os.OpenFile(certPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	/* #nosec G304 - internal TLS cert path */
+	certOut, err := os.OpenFile(certPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return "", fmt.Errorf("写入证书文件失败: %w", err)
 	}
@@ -102,6 +103,7 @@ func GenerateSelfSignedCert(certPath, keyPath string, hosts []string) (string, e
 	}
 
 	// 写入私钥 key.pem
+	/* #nosec G304 - internal TLS key path */
 	keyOut, err := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
 		return "", fmt.Errorf("写入私钥文件失败: %w", err)
@@ -121,6 +123,7 @@ func GenerateSelfSignedCert(certPath, keyPath string, hosts []string) (string, e
 
 // GetCertFingerprintFromFile 从现有 cert.pem 中读取并计算 SHA-256 指纹
 func GetCertFingerprintFromFile(certPath string) (string, error) {
+	/* #nosec G304 - internal TLS cert path */
 	data, err := os.ReadFile(certPath)
 	if err != nil {
 		return "", err

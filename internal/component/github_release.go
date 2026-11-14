@@ -141,6 +141,7 @@ func FetchLatestRelease(owner, repo string) (*GitHubRelease, error) {
 
 // ComputeFileSHA256 计算文件的 SHA-256 十六进制小写哈希
 func ComputeFileSHA256(filePath string) (string, error) {
+	/* #nosec G304 - reading validated local file */
 	f, err := os.Open(filePath)
 	if err != nil {
 		return "", err
@@ -259,6 +260,7 @@ func DownloadFileWithChecksum(downloadURL, destPath, expectedHash string) error 
 			continue
 		}
 
+		/* #nosec G302, G304 - downloaded binary file requires executable permission */
 		out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
 		if err != nil {
 			resp.Body.Close()

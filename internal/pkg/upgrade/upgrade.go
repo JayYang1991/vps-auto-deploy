@@ -41,22 +41,23 @@ type PackageInfo struct {
 func GetPackageDir() string {
 	if os.Geteuid() == 0 {
 		dir := "/etc/vps-auto-deploy/packages"
-		_ = os.MkdirAll(dir, 0755)
+		_ = os.MkdirAll(dir, 0750)
 		return dir
 	}
 	home, err := os.UserHomeDir()
 	if err == nil && home != "" {
 		dir := filepath.Join(home, ".config", "vps-auto-deploy", "packages")
-		_ = os.MkdirAll(dir, 0755)
+		_ = os.MkdirAll(dir, 0750)
 		return dir
 	}
 	dir := "./packages"
-	_ = os.MkdirAll(dir, 0755)
+	_ = os.MkdirAll(dir, 0750)
 	return dir
 }
 
 // ComputeFileSHA256 计算文件的 SHA-256 十六进制哈希串
 func ComputeFileSHA256(filePath string) (string, error) {
+	/* #nosec G304 - internal file verification */
 	f, err := os.Open(filePath)
 	if err != nil {
 		return "", err
@@ -111,6 +112,7 @@ func ExtractVersionFromBinary(filePath string) string {
 	}
 
 	// 2. 备选方案：从文件前 4MB 静态扫描语义化版本正则
+	/* #nosec G304 - scanning internal binary asset */
 	f, err := os.Open(filePath)
 	if err == nil {
 		defer f.Close()
@@ -216,6 +218,7 @@ func InspectAndSavePackage(srcPath, origFileName string) (*PackageInfo, error) {
 	if err := copyFile(finalBinary, destBinary); err != nil {
 		return nil, fmt.Errorf("保存安装包至仓库失败: %w", err)
 	}
+	/* #nosec G302 - binary executable requires execute permission */
 	_ = os.Chmod(destBinary, 0755)
 
 	info := &PackageInfo{
@@ -232,7 +235,7 @@ func InspectAndSavePackage(srcPath, origFileName string) (*PackageInfo, error) {
 	}
 
 	metaBytes, _ := json.MarshalIndent(info, "", "  ")
-	_ = os.WriteFile(destMeta, metaBytes, 0644)
+	_ = os.WriteFile(destMeta, metaBytes, 0600)
 
 	return info, nil
 }
@@ -249,6 +252,7 @@ func ListPackages() ([]PackageInfo, error) {
 	for _, f := range files {
 		if !f.IsDir() && strings.HasSuffix(f.Name(), ".json") {
 			metaPath := filepath.Join(pkgDir, f.Name())
+			/* #nosec G304 - reading package directory metadata */
 			data, err := os.ReadFile(metaPath)
 			if err == nil {
 				var item PackageInfo
@@ -349,6 +353,7 @@ func ApplyLocalUpgrade(srcBinaryPath string) error {
 	if err := copyFile(srcBinaryPath, tmpDest); err != nil {
 		return fmt.Errorf("写入临时程序失败: %w", err)
 	}
+	/* #nosec G302 - binary executable requires execute permission */
 	if err := os.Chmod(tmpDest, 0755); err != nil {
 		_ = os.Remove(tmpDest)
 		return fmt.Errorf("赋予执行权限失败: %w", err)
@@ -377,13 +382,15 @@ func RestartServiceAsync(delay time.Duration) {
 
 // 工具函数：文件复制
 func copyFile(src, dst string) error {
+	/* #nosec G304 - internal file copy */
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
 
-	_ = os.MkdirAll(filepath.Dir(dst), 0755)
+	_ = os.MkdirAll(filepath.Dir(dst), 0750)
+	/* #nosec G304 - internal destination file creation */
 	out, err := os.Create(dst)
 	if err != nil {
 		return err
@@ -403,6 +410,7 @@ const (
 
 // 解压 tar.gz
 func extractTarGz(src, destDir string) error {
+	/* #nosec G304 - archive file path from verified repository */
 	f, err := os.Open(src)
 	if err != nil {
 		return err
@@ -432,14 +440,18 @@ func extractTarGz(src, destDir string) error {
 		}
 
 		switch header.Typeflag {
+		case tar.TypeSymlink, tar.TypeLink:
+			// 严密拦截符号链接与硬链接，防范软链接穿越攻击 (Symlink/Hardlink Traversal)
+			continue
 		case tar.TypeDir:
-			_ = os.MkdirAll(target, 0755)
+			_ = os.MkdirAll(target, 0750)
 		case tar.TypeReg:
-			_ = os.MkdirAll(filepath.Dir(target), 0755)
+			_ = os.MkdirAll(filepath.Dir(target), 0750)
 			// 安全清洗权限位，严防 SUID/SGID 特殊权限逃逸与越权
 			perm := uint32(header.Mode & 0777)
 			safeMode := (os.FileMode(perm) & 0755) &^ (os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
 			safeMode |= 0600
+			/* #nosec G304 - destination target verified via isPathSafe */
 			outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, safeMode)
 			if err != nil {
 				return err
@@ -489,14 +501,14 @@ func extractZip(src, destDir string) error {
 			continue // 防 Zip Slip 路径穿透
 		}
 		if f.FileInfo().IsDir() {
-			_ = os.MkdirAll(target, 0755)
+			_ = os.MkdirAll(target, 0750)
 			continue
 		}
 		// 严密拦截符号链接，防范软链接穿越攻击 (Symlink Traversal)
 		if f.Mode()&os.ModeSymlink != 0 {
 			continue
 		}
-		_ = os.MkdirAll(filepath.Dir(target), 0755)
+		_ = os.MkdirAll(filepath.Dir(target), 0750)
 		rc, err := f.Open()
 		if err != nil {
 			return err
@@ -504,6 +516,7 @@ func extractZip(src, destDir string) error {
 		// 安全清洗权限位，剥离 SUID/SGID 特殊位
 		safeMode := (f.Mode() & 0755) &^ (os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
 		safeMode |= 0600
+		/* #nosec G304 - destination target verified via isPathSafe */
 		outFile, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR|os.O_TRUNC, safeMode)
 		if err != nil {
 			rc.Close()

@@ -69,6 +69,7 @@ type UpgradeSSHRequest = UpgradeRequest
 
 // computeFileSHA256 计算本地指定文件的 SHA-256 十六进制哈希串
 func computeFileSHA256(filePath string) (string, error) {
+	/* #nosec G304 - reading validated local file */
 	f, err := os.Open(filePath)
 	if err != nil {
 		return "", err
@@ -418,6 +419,7 @@ func RunDeploySSH(task *DeployTask, req DeploySSHRequest) {
 			return
 		}
 
+		/* #nosec G304 - reading validated local panel executable */
 		file, err := os.Open(exePath)
 		if err != nil {
 			session.Close()
@@ -831,6 +833,7 @@ func RunUpgradeAPI(task *DeployTask, req UpgradeRequest) {
 	// 5. 推送二进制升级包流
 	if needPush {
 		task.AddLog(fmt.Sprintf("开始向远端节点推流最新版可执行程序 (%s)...", filepath.Base(binPath)))
+		/* #nosec G304 - reading validated local package binary */
 		file, err := os.Open(binPath)
 		if err != nil {
 			task.Status = "failed"
@@ -1120,7 +1123,8 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 				return
 			}
 
-			file, err := os.Open(exePath)
+			/* #nosec G304 - reading validated local panel executable */
+		file, err := os.Open(exePath)
 			if err != nil {
 				session.Close()
 				task.Status = "failed"

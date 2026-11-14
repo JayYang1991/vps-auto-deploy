@@ -14,6 +14,7 @@ func RunCommand(timeout time.Duration, name string, args ...string) (string, err
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
+	// #nosec G204 - name and args are explicitly passed as argument slice, no shell expansion
 	cmd := exec.CommandContext(ctx, name, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -29,6 +30,7 @@ func StreamJournalctlLogs(ctx context.Context, unit string, lines int) (<-chan s
 	if os.Geteuid() != 0 {
 		args = append([]string{"--user"}, args...)
 	}
+	// #nosec G204 - journalctl binary and args are strictly parameterized
 	cmd := exec.CommandContext(ctx, "journalctl", args...)
 
 	stdout, err := cmd.StdoutPipe()

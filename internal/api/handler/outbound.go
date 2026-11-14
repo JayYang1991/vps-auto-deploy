@@ -364,6 +364,7 @@ func GetSingboxFullConfig(c *gin.Context) {
 	rawJSON, _ := json.MarshalIndent(cfg, "", "  ")
 
 	cfgPath := singbox.GetConfigPath()
+	/* #nosec G304 - reading configured singbox config file */
 	diskBytes, fileErr := os.ReadFile(cfgPath)
 	fileExists := fileErr == nil
 	diskRawJSON := ""
