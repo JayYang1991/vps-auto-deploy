@@ -18,6 +18,11 @@ type SubResult struct {
 
 // GetMemberByToken 根据 sub_token 获取有效成员
 func GetMemberByToken(token string) (*model.Member, error) {
+	token = strings.TrimSpace(token)
+	if token == "" || len(token) > 128 {
+		return nil, fmt.Errorf("invalid subscription token")
+	}
+
 	var member model.Member
 	err := model.DB.QueryRow("SELECT id, name, uuid, sub_token, enabled FROM members WHERE sub_token = ?", token).
 		Scan(&member.ID, &member.Name, &member.UUID, &member.SubToken, &member.Enabled)

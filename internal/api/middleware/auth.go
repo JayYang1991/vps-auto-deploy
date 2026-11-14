@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -144,8 +145,9 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 		if tokenStr == "" {
 			tokenQuery := c.Query("token")
 			if tokenQuery != "" {
-				reqPath := c.Request.URL.Path
-				isAllowedSSE := strings.Contains(reqPath, "logs") || strings.Contains(reqPath, "sse")
+				cleanPath := path.Clean(c.Request.URL.Path)
+				baseName := path.Base(cleanPath)
+				isAllowedSSE := strings.Contains(baseName, "logs") || strings.Contains(baseName, "sse")
 				if !isAllowedSSE {
 					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 						"error": "安全拦截：禁止在常规 REST API 中通过 URL Query 传递 Token，请使用 Authorization 请求头或申请 Stream Ticket",
