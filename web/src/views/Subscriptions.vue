@@ -2219,6 +2219,12 @@ watch(
       loadInventory()
     } else if (sub === 'members') {
       activeSubSection.value = 'members'
+    } else if (!sub && tab === 'subscriptions') {
+      const saved = localStorage.getItem('subscriptions_active_sub_section')
+      if (saved && ['members', 'subconverter', 'cf_preferred', 'inventory'].includes(saved)) {
+        activeSubSection.value = saved as any
+        router.replace({ path: route.path, query: { ...route.query, sub: saved } })
+      }
     }
   },
   { immediate: true }
