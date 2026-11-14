@@ -190,6 +190,24 @@ func TestNodeProxyWithTLSFingerprint(t *testing.T) {
 			t.Fatalf("Expected master_settings response, got: %s", w.Body.String())
 		}
 	}
+
+	// 测试 D：访问优选 IP /api/cf-preferred/ips，即使带 X-Target-Node-ID 也必须保留在主控本地处理
+	{
+		sec.GET("/api/cf-preferred/ips", func(c *gin.Context) {
+			c.JSON(http.StatusOK, gin.H{"status": "master_cf_preferred"})
+		})
+		req, _ := http.NewRequest(http.MethodGet, "/mastersecret/api/cf-preferred/ips", nil)
+		req.Header.Set("X-Target-Node-ID", "2")
+		w := newTestRecorder()
+		r.ServeHTTP(w, req)
+
+		if w.Code != http.StatusOK {
+			t.Fatalf("Expected 200 OK for master cf-preferred, got %d: %s", w.Code, w.Body.String())
+		}
+		if !strings.Contains(w.Body.String(), "master_cf_preferred") {
+			t.Fatalf("Expected master_cf_preferred response, got: %s", w.Body.String())
+		}
+	}
 }
 
 func TestPinnedTransportCaching(t *testing.T) {

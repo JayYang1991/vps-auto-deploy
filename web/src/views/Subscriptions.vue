@@ -30,7 +30,7 @@
       <!-- 子业务分类切换器 -->
       <div style="display: flex; gap: 0.5rem; background: #0f172a; padding: 0.25rem; border-radius: 0.5rem; border: 1px solid #334155;">
         <button
-          @click="activeSubSection = 'members'"
+          @click="switchSubSection('members')"
           :class="['btn', activeSubSection === 'members' ? 'btn-primary' : 'btn-secondary']"
           style="padding: 0.35rem 0.85rem; font-size: 0.8rem; border: none;"
           type="button"
@@ -42,7 +42,7 @@
         </button>
 
         <button
-          @click="activeSubSection = 'subconverter'"
+          @click="switchSubSection('subconverter')"
           :class="['btn', activeSubSection === 'subconverter' ? 'btn-primary' : 'btn-secondary']"
           style="padding: 0.35rem 0.85rem; font-size: 0.8rem; border: none;"
           type="button"
@@ -58,7 +58,7 @@
         </button>
 
         <button
-          @click="activeSubSection = 'cf_preferred'"
+          @click="switchSubSection('cf_preferred')"
           :class="['btn', activeSubSection === 'cf_preferred' ? 'btn-primary' : 'btn-secondary']"
           style="padding: 0.35rem 0.85rem; font-size: 0.8rem; border: none;"
           type="button"
@@ -70,7 +70,7 @@
         </button>
 
         <button
-          @click="activeSubSection = 'inventory'"
+          @click="switchSubSection('inventory')"
           :class="['btn', activeSubSection === 'inventory' ? 'btn-primary' : 'btn-secondary']"
           style="padding: 0.35rem 0.85rem; font-size: 0.8rem; border: none;"
           type="button"
@@ -903,7 +903,7 @@
     </div>
 
     <!-- ==================== 版块四：节点清单 (按节点主机分组) ==================== -->
-    <div v-if="activeSubSection === 'inventory'">
+    <div v-else-if="activeSubSection === 'inventory'">
       <!-- 控制与操作栏 -->
       <div class="card" style="margin-bottom: 1.25rem;">
         <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 1rem;">
@@ -1329,7 +1329,7 @@
 
 <script setup lang="ts">
 import { ref, shallowRef, reactive, computed, onMounted, onUnmounted, onActivated, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import QrcodeVue from 'qrcode.vue'
 import api from '../api'
 import { useToast, copyToClipboard } from '../composables/useToast'
@@ -1337,10 +1337,35 @@ import { useConfirm } from '../composables/useConfirm'
 import VirtualCodePreview from '../components/VirtualCodePreview.vue'
 
 const route = useRoute()
+const router = useRouter()
 const { toast } = useToast()
 const { showConfirm } = useConfirm()
 
-const activeSubSection = ref<'members' | 'subconverter' | 'cf_preferred' | 'inventory'>('members')
+function getInitialSubSection(): 'members' | 'subconverter' | 'cf_preferred' | 'inventory' {
+  const qSub = (route.query.sub as string) || (route.query.tab as string) || ''
+  if (qSub === 'subconverter') return 'subconverter'
+  if (qSub === 'cf_preferred' || qSub === 'cfip') return 'cf_preferred'
+  if (qSub === 'inventory' || qSub === 'nodelist') return 'inventory'
+  if (qSub === 'members') return 'members'
+
+  const saved = localStorage.getItem('subscriptions_active_sub_section')
+  if (saved === 'subconverter' || saved === 'cf_preferred' || saved === 'inventory' || saved === 'members') {
+    return saved
+  }
+  return 'members'
+}
+
+const initialSubSection = getInitialSubSection()
+const activeSubSection = ref<'members' | 'subconverter' | 'cf_preferred' | 'inventory'>(initialSubSection)
+
+function switchSubSection(sec: 'members' | 'subconverter' | 'cf_preferred' | 'inventory') {
+  activeSubSection.value = sec
+  localStorage.setItem('subscriptions_active_sub_section', sec)
+  router.replace({
+    path: route.path,
+    query: { ...route.query, tab: 'subscriptions', sub: sec },
+  })
+}
 const members = ref<any[]>([])
 const loading = ref(true)
 
@@ -1864,7 +1889,7 @@ const cfPrefStatus = reactive({
 })
 
 const cfIps = ref<any[]>([])
-const loadingCfIps = ref(false)
+const loadingCfIps = ref(initialSubSection === 'cf_preferred')
 const fetchingCf = ref(false)
 const savingCfSettings = ref(false)
 const cfSearchKeyword = ref('')
@@ -1877,34 +1902,47 @@ function formatDateTime(str?: string): string {
   return d.toLocaleString('zh-CN', { hour12: false })
 }
 
+let inFlightLoadCFPrefStatus: Promise<void> | null = null
 async function loadCFPrefStatus() {
-  try {
-    const res = await api.get('/cf-preferred/status')
-    if (res.data) {
-      Object.assign(cfPrefStatus, res.data)
-      if (res.data.last_fetch_status && res.data.last_fetch_status.startsWith('error:')) {
-        cfFetchError.value = res.data.last_fetch_status.replace(/^error:\s*/, '')
-      } else if (res.data.last_fetch_status === 'success') {
-        cfFetchError.value = ''
+  if (inFlightLoadCFPrefStatus) return inFlightLoadCFPrefStatus
+  inFlightLoadCFPrefStatus = (async () => {
+    try {
+      const res = await api.get('/cf-preferred/status')
+      if (res.data) {
+        Object.assign(cfPrefStatus, res.data)
+        if (res.data.last_fetch_status && res.data.last_fetch_status.startsWith('error:')) {
+          cfFetchError.value = res.data.last_fetch_status.replace(/^error:\s*/, '')
+        } else if (res.data.last_fetch_status === 'success') {
+          cfFetchError.value = ''
+        }
       }
+    } catch (err: any) {
+      console.error('加载优选 IP 配置失败:', err)
+    } finally {
+      inFlightLoadCFPrefStatus = null
     }
-  } catch (err: any) {
-    console.error('加载优选 IP 配置失败:', err)
-  }
+  })()
+  return inFlightLoadCFPrefStatus
 }
 
-async function loadCFIps() {
+let inFlightLoadCFIps: Promise<void> | null = null
+async function loadCFIps(force = false) {
+  if (inFlightLoadCFIps && !force) return inFlightLoadCFIps
   loadingCfIps.value = true
-  try {
-    const params = cfSearchKeyword.value.trim() ? { keyword: cfSearchKeyword.value.trim() } : {}
-    const res = await api.get('/cf-preferred/ips', { params })
-    cfIps.value = res.data || []
-    cfPrefStatus.total_count = cfIps.value.length
-  } catch (err: any) {
-    toast.error('加载优选 IP 列表失败: ' + (err.response?.data?.error || err.message))
-  } finally {
-    loadingCfIps.value = false
-  }
+  inFlightLoadCFIps = (async () => {
+    try {
+      const params = cfSearchKeyword.value.trim() ? { keyword: cfSearchKeyword.value.trim() } : {}
+      const res = await api.get('/cf-preferred/ips', { params })
+      cfIps.value = Array.isArray(res.data) ? res.data : []
+      cfPrefStatus.total_count = cfIps.value.length
+    } catch (err: any) {
+      toast.error('加载优选 IP 列表失败: ' + (err.response?.data?.error || err.message))
+    } finally {
+      loadingCfIps.value = false
+      inFlightLoadCFIps = null
+    }
+  })()
+  return inFlightLoadCFIps
 }
 
 async function saveCFPrefSettings() {
@@ -1944,7 +1982,7 @@ async function manualFetchCFIps() {
       toast.warning('优选 IP 同步完成，但未发现有效可用节点')
     }
     await loadCFPrefStatus()
-    await loadCFIps()
+    await loadCFIps(true)
   } catch (err: any) {
     const errMsg = err.response?.data?.error || err.message || '网络连接或解析异常'
     cfFetchError.value = errMsg
@@ -2169,22 +2207,25 @@ function openInboundQR(link: string, tag: string) {
 }
 
 watch(
-  () => route.query,
-  (query) => {
-    if (query.sub === 'subconverter' || query.tab === 'subconverter') {
+  () => [route.query.tab, route.query.sub],
+  ([tab, sub]) => {
+    if (sub === 'subconverter' || tab === 'subconverter') {
       activeSubSection.value = 'subconverter'
-    } else if (query.sub === 'cf_preferred' || query.tab === 'cf_preferred' || query.sub === 'cfip') {
+    } else if (sub === 'cf_preferred' || tab === 'cf_preferred' || sub === 'cfip' || tab === 'cfip') {
       activeSubSection.value = 'cf_preferred'
       loadCFIps()
-    } else if (query.sub === 'inventory' || query.tab === 'inventory' || query.sub === 'nodelist') {
+    } else if (sub === 'inventory' || tab === 'inventory' || sub === 'nodelist' || tab === 'nodelist') {
       activeSubSection.value = 'inventory'
       loadInventory()
+    } else if (sub === 'members') {
+      activeSubSection.value = 'members'
     }
   },
   { immediate: true }
 )
 
 watch(activeSubSection, (sec) => {
+  localStorage.setItem('subscriptions_active_sub_section', sec)
   if (sec === 'cf_preferred') {
     loadCFPrefStatus()
     loadCFIps()
@@ -2192,6 +2233,16 @@ watch(activeSubSection, (sec) => {
     loadInventory()
   }
 })
+
+function handleNodeContextChanged() {
+  loadMembers()
+  if (activeSubSection.value === 'cf_preferred') {
+    loadCFPrefStatus()
+    loadCFIps(true)
+  } else if (activeSubSection.value === 'inventory') {
+    loadInventory()
+  }
+}
 
 onMounted(async () => {
   await Promise.all([
@@ -2207,7 +2258,7 @@ onMounted(async () => {
   } else if (activeSubSection.value === 'inventory') {
     await loadInventory()
   }
-  window.addEventListener('node-context-changed', loadMembers)
+  window.addEventListener('node-context-changed', handleNodeContextChanged)
 })
 
 onActivated(async () => {
@@ -2221,7 +2272,7 @@ onActivated(async () => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener('node-context-changed', loadMembers)
+  window.removeEventListener('node-context-changed', handleNodeContextChanged)
 })
 </script>
 

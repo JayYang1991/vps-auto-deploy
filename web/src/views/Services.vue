@@ -283,6 +283,9 @@ function syncRoute() {
   const query: Record<string, string> = { tab: activeComponent.value }
   if (activeComponent.value === 'singbox') {
     query.sub = singboxSubTab.value
+  } else if (activeComponent.value === 'subscriptions') {
+    const sub = (route.query.sub as string) || localStorage.getItem('subscriptions_active_sub_section') || 'members'
+    query.sub = sub
   }
   router.replace({ path: '/services', query })
 }
@@ -381,6 +384,8 @@ function parseRouteParams() {
   }
   if (tab === 'subconverter' || tab === 'cf_preferred' || tab === 'cfip' || tab === 'inventory' || tab === 'nodelist') {
     activeComponent.value = 'subscriptions'
+    const targetSub = (tab === 'cfip' ? 'cf_preferred' : (tab === 'nodelist' ? 'inventory' : tab))
+    localStorage.setItem('subscriptions_active_sub_section', targetSub)
     return
   }
 

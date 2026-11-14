@@ -75,7 +75,9 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 			strings.HasPrefix(reqPath, basePrefix+"/cf-preferred") ||
 			strings.HasPrefix(reqPath, basePrefix+"/subscription") ||
 			strings.HasPrefix(reqPath, basePrefix+"/cluster") ||
-			strings.HasPrefix(reqPath, basePrefix+"/system/upgrade") {
+			strings.HasPrefix(reqPath, basePrefix+"/system/upgrade") ||
+			strings.Contains(reqPath, "/cf-preferred") ||
+			strings.Contains(reqPath, "/subscription") {
 			c.Next()
 			return
 		}
