@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -613,7 +614,9 @@ func ForceSyncSingboxConfig(cfgPath string) (*SyncStats, error) {
 			err := tx.QueryRow("SELECT id FROM members WHERE uuid = ?", uuidStr).Scan(&existingID)
 			if err == sql.ErrNoRows {
 				b := make([]byte, 8)
-				_, _ = rand.Read(b)
+				if _, err := io.ReadFull(rand.Reader, b); err != nil {
+					continue
+				}
 				subToken := hex.EncodeToString(b)
 				_, err = tx.Exec(
 					"INSERT INTO members (name, uuid, sub_token, enabled, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)",
@@ -834,7 +837,9 @@ func syncMembersFromInbounds(inbounds []map[string]interface{}, now time.Time, o
 			err := model.DB.QueryRow("SELECT id FROM members WHERE uuid = ?", uuidStr).Scan(&existingID)
 			if err != nil {
 				b := make([]byte, 8)
-				_, _ = rand.Read(b)
+				if _, err := io.ReadFull(rand.Reader, b); err != nil {
+					continue
+				}
 				subToken := hex.EncodeToString(b)
 
 				_, err = model.DB.Exec(

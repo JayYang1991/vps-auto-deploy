@@ -251,12 +251,17 @@ func UploadUpgradePackage(c *gin.Context) {
 	}
 	defer os.Remove(tempFile.Name())
 
-	if _, err := io.Copy(tempFile, file); err != nil {
-		tempFile.Close()
+	const maxUploadSize = 300 * 1024 * 1024 // 单包上限 300MB 防 DoS 磁盘耗尽
+	written, err := io.Copy(tempFile, io.LimitReader(file, maxUploadSize+1))
+	_ = tempFile.Close()
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "写入上传文件失败: " + err.Error()})
 		return
 	}
-	tempFile.Close()
+	if written > maxUploadSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "上传安装包超出大小限制 (最大 300MB)"})
+		return
+	}
 
 	info, err := upgrade.InspectAndSavePackage(tempFile.Name(), header.Filename)
 	if err != nil {
@@ -328,12 +333,17 @@ func SelfUpgradeSystem(c *gin.Context) {
 		}
 	}
 
-	if _, err := io.Copy(tempFile, srcReader); err != nil {
-		tempFile.Close()
+	const maxBinarySize = 150 * 1024 * 1024 // 单二进制上限 150MB 防 DoS 磁盘耗尽
+	written, err := io.Copy(tempFile, io.LimitReader(srcReader, maxBinarySize+1))
+	_ = tempFile.Close()
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "接收升级数据流失败: " + err.Error()})
 		return
 	}
-	tempFile.Close()
+	if written > maxBinarySize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "升级二进制文件超出大小限制 (最大 150MB)"})
+		return
+	}
 
 	// 校验 ELF 架构
 	arch, err := upgrade.ParseELFArch(tempFile.Name())

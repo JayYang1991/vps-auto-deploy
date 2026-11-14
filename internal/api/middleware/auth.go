@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -31,7 +32,9 @@ var (
 // IssueStreamTicket 签发 30 秒单次有效的 SSE 实时日志流临时 Ticket (消除 URL 中的长期 JWT 泄露隐患)
 func IssueStreamTicket(username string, ttl time.Duration) string {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		return fmt.Sprintf("%032x", time.Now().UnixNano())
+	}
 	ticket := hex.EncodeToString(b)
 
 	streamTicketMu.Lock()

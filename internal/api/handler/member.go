@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"io"
 	"log"
 	"net/http"
 	"strconv"
@@ -70,7 +71,10 @@ func CreateMember(c *gin.Context) {
 	}
 
 	subBytes := make([]byte, 8)
-	_, _ = rand.Read(subBytes)
+	if _, err := io.ReadFull(rand.Reader, subBytes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "生成订阅令牌失败: " + err.Error()})
+		return
+	}
 	subToken := hex.EncodeToString(subBytes)
 
 	now := time.Now()
@@ -111,7 +115,10 @@ func ResetMemberToken(c *gin.Context) {
 	id, _ := strconv.ParseInt(idStr, 10, 64)
 
 	subBytes := make([]byte, 8)
-	_, _ = rand.Read(subBytes)
+	if _, err := io.ReadFull(rand.Reader, subBytes); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "重置订阅令牌失败: " + err.Error()})
+		return
+	}
 	newToken := hex.EncodeToString(subBytes)
 
 	_, err := model.DB.Exec("UPDATE members SET sub_token = ?, updated_at = ? WHERE id = ?", newToken, time.Now(), id)

@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"path/filepath"
@@ -213,40 +214,51 @@ func initDefaults() error {
 	// 1. 初始化 JWT 传输密钥与静态敏感数据加密密钥（密钥隔离体系 Key Separation）
 	if _, err := GetSetting("jwt_secret"); err != nil {
 		b := make([]byte, 32)
-		rand.Read(b)
-		SetSetting("jwt_secret", hex.EncodeToString(b))
+		if _, err := io.ReadFull(rand.Reader, b); err != nil {
+			return fmt.Errorf("generate jwt_secret failed: %w", err)
+		}
+		_ = SetSetting("jwt_secret", hex.EncodeToString(b))
 	}
 	if _, err := GetSetting("data_encryption_key"); err != nil {
 		jwtSecret, _ := GetSetting("jwt_secret")
 		if jwtSecret != "" {
 			// 若已有系统升级，基于已有 jwt_secret 派生，确保历史数据解密 100% 兼容无感
 			derived := crypto.DeriveKey(jwtSecret)
-			SetSetting("data_encryption_key", hex.EncodeToString(derived))
+			_ = SetSetting("data_encryption_key", hex.EncodeToString(derived))
 		} else {
 			b := make([]byte, 32)
-			rand.Read(b)
-			SetSetting("data_encryption_key", hex.EncodeToString(b))
+			if _, err := io.ReadFull(rand.Reader, b); err != nil {
+				return fmt.Errorf("generate data_encryption_key failed: %w", err)
+			}
+			_ = SetSetting("data_encryption_key", hex.EncodeToString(b))
 		}
 	}
 
 	// 2. 初始化管理员账号（初次生成高强随机密码，杜绝默认弱口令风险）
 	if _, err := GetSetting("admin_username"); err != nil {
-		SetSetting("admin_username", "admin")
+		_ = SetSetting("admin_username", "admin")
 	}
 	if _, err := GetSetting("admin_password_hash"); err != nil {
 		b := make([]byte, 8)
-		rand.Read(b)
+		if _, err := io.ReadFull(rand.Reader, b); err != nil {
+			return fmt.Errorf("generate initial admin password failed: %w", err)
+		}
 		initPass := "admin_" + hex.EncodeToString(b)
-		hash, _ := bcrypt.GenerateFromPassword([]byte(initPass), bcrypt.DefaultCost)
-		SetSetting("admin_password_hash", string(hash))
-		SetSetting("initial_admin_password", initPass)
+		hash, err := bcrypt.GenerateFromPassword([]byte(initPass), bcrypt.DefaultCost)
+		if err != nil {
+			return fmt.Errorf("hash initial admin password failed: %w", err)
+		}
+		_ = SetSetting("admin_password_hash", string(hash))
+		_ = SetSetting("initial_admin_password", initPass)
 	}
 
 	// 3. 初始化安全访问入口 (Secret Base Path)
 	if _, err := GetSetting("secret_path"); err != nil {
 		b := make([]byte, 4)
-		rand.Read(b)
-		SetSetting("secret_path", hex.EncodeToString(b))
+		if _, err := io.ReadFull(rand.Reader, b); err != nil {
+			return fmt.Errorf("generate secret_path failed: %w", err)
+		}
+		_ = SetSetting("secret_path", hex.EncodeToString(b))
 	}
 
 	// 4. 若无成员，初始化默认所有者成员
@@ -254,7 +266,9 @@ func initDefaults() error {
 	err := DB.QueryRow("SELECT COUNT(*) FROM members").Scan(&memberCount)
 	if err == nil && memberCount == 0 {
 		subBytes := make([]byte, 8)
-		rand.Read(subBytes)
+		if _, err := io.ReadFull(rand.Reader, subBytes); err != nil {
+			return fmt.Errorf("generate member sub_token failed: %w", err)
+		}
 		now := time.Now()
 		_, _ = DB.Exec(
 			"INSERT INTO members (name, uuid, sub_token, enabled, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)",

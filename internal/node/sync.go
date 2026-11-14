@@ -76,7 +76,7 @@ func SyncMembersToNode(node *model.Node, members []model.Member) error {
 
 	// 若 Token 偶发失效 (401)，尝试自愈解密密码重新登录刷新 Token
 	if resp.StatusCode == http.StatusUnauthorized && node.PasswordEncrypted != "" {
-		resp.Body.Close()
+		_ = resp.Body.Close()
 		rawPass, decErr := model.DecryptSensitiveData(node.PasswordEncrypted)
 		if decErr == nil && rawPass != "" {
 			newToken, logErr := LoginNode(node.Host, node.PanelPort, node.SecretPath, node.Username, rawPass, node.UseTLS, node.CertFingerprint)
@@ -88,10 +88,11 @@ func SyncMembersToNode(node *model.Node, members []model.Member) error {
 				if retryErr == nil {
 					reqRetry.Header.Set("Content-Type", "application/json")
 					reqRetry.Header.Set("Authorization", "Bearer "+newToken)
-					resp, err = client.Do(reqRetry)
-					if err != nil {
-						return fmt.Errorf("凭据刷新后重试发送失败: %w", err)
+					retryResp, retryErr := client.Do(reqRetry)
+					if retryErr != nil {
+						return fmt.Errorf("凭据刷新后重试发送失败: %w", retryErr)
 					}
+					resp = retryResp
 				}
 			}
 		}

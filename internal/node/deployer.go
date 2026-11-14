@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -97,7 +98,10 @@ func GenerateRandomPassword(length int) string {
 // GenerateRandomHex 生成指定长度的随机十六进制串
 func GenerateRandomHex(n int) string {
 	b := make([]byte, n)
-	rand.Read(b)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		// 容灾保障极端情况下不生成全零空串
+		return fmt.Sprintf("%0*x", n*2, time.Now().UnixNano())
+	}
 	return hex.EncodeToString(b)
 }
 
@@ -307,7 +311,7 @@ func RunDeploySSH(task *DeployTask, req DeploySSHRequest) {
 		Auth: authMethods,
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			currentFP := ssh.FingerprintSHA256(key)
-			if existingSSHHostKey != "" && currentFP != existingSSHHostKey {
+			if existingSSHHostKey != "" && subtle.ConstantTimeCompare([]byte(currentFP), []byte(existingSSHHostKey)) != 1 {
 				return fmt.Errorf("【安全拦截】SSH 主机指纹不匹配！已记录指纹: %s, 实际指纹: %s (防中间人冒充)", existingSSHHostKey, currentFP)
 			}
 			remoteSSHHostKey = currentFP
@@ -991,7 +995,7 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 		Auth: authMethods,
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			currentFP := ssh.FingerprintSHA256(key)
-			if existingSSHHostKey != "" && currentFP != existingSSHHostKey {
+			if existingSSHHostKey != "" && subtle.ConstantTimeCompare([]byte(currentFP), []byte(existingSSHHostKey)) != 1 {
 				return fmt.Errorf("【安全拦截】SSH 主机指纹不匹配！已记录指纹: %s, 实际指纹: %s", existingSSHHostKey, currentFP)
 			}
 			remoteSSHHostKey = currentFP

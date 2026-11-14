@@ -413,7 +413,9 @@ func GenerateRealityKeypair() (privateKey, publicKey, shortID string, err error)
 	}
 
 	sidBytes := make([]byte, 4)
-	_, _ = rand.Read(sidBytes)
+	if _, err := io.ReadFull(rand.Reader, sidBytes); err != nil {
+		return "", "", "", fmt.Errorf("generate short_id failed: %w", err)
+	}
 	shortID = hex.EncodeToString(sidBytes)
 
 	return privateKey, publicKey, shortID, nil

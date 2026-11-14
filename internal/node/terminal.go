@@ -2,6 +2,7 @@ package node
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -53,7 +54,9 @@ const (
 // IssueTerminalTicket 为目标节点签发一个一次性有效、30秒有效期的终端票据，并安全绑定临时凭据与合法来源域名
 func IssueTerminalTicket(nodeID int64, username, clientIP, allowedHost, tempUser, tempPass, tempKey string, ttl time.Duration) string {
 	b := make([]byte, 16)
-	_, _ = rand.Read(b)
+	if _, err := io.ReadFull(rand.Reader, b); err != nil {
+		return fmt.Sprintf("%032x", time.Now().UnixNano())
+	}
 	ticket := hex.EncodeToString(b)
 
 	ticketLock.Lock()
@@ -449,7 +452,7 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 		Auth: authMethods,
 		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
 			currentFP := ssh.FingerprintSHA256(key)
-			if node.SSHHostKey != "" && currentFP != node.SSHHostKey {
+			if node.SSHHostKey != "" && subtle.ConstantTimeCompare([]byte(currentFP), []byte(node.SSHHostKey)) != 1 {
 				return fmt.Errorf("【安全拦截】SSH 主机指纹不匹配！已记录: %s, 实际: %s (防中间人冒充)", node.SSHHostKey, currentFP)
 			}
 			if node.SSHHostKey == "" {
