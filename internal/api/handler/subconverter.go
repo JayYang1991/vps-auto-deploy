@@ -2,6 +2,9 @@ package handler
 
 import (
 	"bufio"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -633,8 +636,19 @@ func ProxySubconverterConvert(target, sourceSubURL, configTemplate string, extra
 	q := u.Query()
 	q.Set("target", target)
 	q.Set("url", adaptedSource)
-	if configTemplate != "" {
-		q.Set("config", configTemplate)
+
+	// 若 configTemplate 为外部 URL，通过安全抓取引擎预取为本地受管缓存文件，彻底切断 C++ 层的网络访问
+	finalConfigTemplate := configTemplate
+	if strings.HasPrefix(finalConfigTemplate, "http://") || strings.HasPrefix(finalConfigTemplate, "https://") {
+		cachedPath, err := ResolveAndCacheRemoteTemplate(finalConfigTemplate)
+		if err != nil {
+			return nil, "", fmt.Errorf("安全预取外部规则模板失败: %w", err)
+		}
+		finalConfigTemplate = cachedPath
+	}
+
+	if finalConfigTemplate != "" {
+		q.Set("config", finalConfigTemplate)
 	}
 
 	// 若启用了 api_access_token 鉴权保护，自动挂载访问令牌
@@ -813,6 +827,119 @@ func EnsureCustomRulesFile() error {
 		return err
 	}
 	return os.WriteFile(rulesPath, []byte(content), 0600)
+}
+
+// ResolveAndCacheRemoteTemplate 安全预取远程规则模板并写入受管组件本地缓存目录
+// 严格执行 SSRF 拦截、HTTPS 约束、防 302 重定向逃逸与体积限制
+// 返回由 C++ Subconverter 识别的相对安全路径 (如 config/cache/<hash>.ini)
+func ResolveAndCacheRemoteTemplate(remoteURL string) (string, error) {
+	remoteURL = strings.TrimSpace(remoteURL)
+	if remoteURL == "" {
+		return "", fmt.Errorf("remote template url is empty")
+	}
+
+	u, err := url.Parse(remoteURL)
+	if err != nil {
+		return "", fmt.Errorf("invalid url format: %w", err)
+	}
+
+	// 1. 强制 HTTPS 传输 (防止明文 HTTP 被中间人劫持或篡改)
+	if strings.ToLower(u.Scheme) != "https" {
+		return "", fmt.Errorf("【安全拦截】规则集必须使用安全 HTTPS 协议，禁止使用不安全的 HTTP 协议")
+	}
+
+	// 2. 初始 URL 进行 SSRF 校验与域名白名单比对
+	if err := netutil.ValidatePublicURL(remoteURL); err != nil {
+		return "", fmt.Errorf("【SSRF拦截】外部模板 URL 不合法: %w", err)
+	}
+	if !isAllowedRemoteConfigHost(remoteURL) {
+		return "", fmt.Errorf("【安全拦截】外部规则集域名 (%s) 未列入受信任名单 (仅允许 GitHub、jsDelivr 等主流开源源或后台登记域名)", u.Hostname())
+	}
+
+	// 3. 计算唯一缓存标识
+	compDir := subconverter.GetComponentDir()
+	cacheDir := filepath.Join(compDir, "config", "cache")
+	if err := os.MkdirAll(cacheDir, 0750); err != nil {
+		return "", fmt.Errorf("failed to create cache dir: %w", err)
+	}
+
+	h := sha256.Sum256([]byte(remoteURL))
+	hashName := hex.EncodeToString(h[:16]) + ".ini"
+	targetPath := filepath.Join(cacheDir, hashName)
+	relPath := filepath.Join("config", "cache", hashName)
+
+	// 4. 检查本地现有缓存有效性 (1小时内免重复抓取，加速转换并防御滥用与频率限制)
+	if fi, err := os.Stat(targetPath); err == nil && time.Since(fi.ModTime()) < 1*time.Hour && fi.Size() > 0 {
+		return relPath, nil
+	}
+
+	// 5. 构造防 302 重定向内网逃逸的高安全 HTTP 客户端
+	client := &http.Client{
+		Timeout: 15 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("stopped after 5 redirects")
+			}
+			// 重定向目标必须同样是 HTTPS
+			if strings.ToLower(req.URL.Scheme) != "https" {
+				return fmt.Errorf("【安全拦截】重定向目标非 HTTPS 协议: %s", req.URL.Scheme)
+			}
+			// 重定向目标必须再次经过严格 SSRF 校验 (防止 302 转向 127.0.0.1 或内网私有地址)
+			if err := netutil.ValidatePublicURL(req.URL.String()); err != nil {
+				return fmt.Errorf("【SSRF拦截】重定向目标包含危险私有地址: %w", err)
+			}
+			// 重定向目标必须依然符合域名白名单
+			if !isAllowedRemoteConfigHost(req.URL.String()) {
+				return fmt.Errorf("【安全拦截】重定向目标域名 (%s) 不在受信任名单内", req.URL.Hostname())
+			}
+			return nil
+		},
+	}
+
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, remoteURL, nil)
+	if err != nil {
+		return "", fmt.Errorf("create http request failed: %w", err)
+	}
+	req.Header.Set("User-Agent", "VPS-Auto-Deploy/1.0 (Safe Template Fetcher)")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		// 若远程抓取失败但本地存在旧缓存，则优雅降级复用旧缓存
+		if _, statErr := os.Stat(targetPath); statErr == nil {
+			return relPath, nil
+		}
+		return "", fmt.Errorf("获取远程模板失败 (%s): %w", remoteURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		if _, statErr := os.Stat(targetPath); statErr == nil {
+			return relPath, nil
+		}
+		return "", fmt.Errorf("远程模板服务器响应异常: HTTP %d", resp.StatusCode)
+	}
+
+	// 6. 限制单文件读取上限为 5MB (防止内存溢出与超大文件 DoS)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 5*1024*1024))
+	if err != nil {
+		return "", fmt.Errorf("read template body failed: %w", err)
+	}
+	if len(body) == 0 {
+		return "", fmt.Errorf("远程模板内容为空")
+	}
+
+	// 7. 原子性落盘缓存
+	tmpPath := targetPath + ".tmp"
+	/* #nosec G306 - permissions 0600 is secure */
+	if err := os.WriteFile(tmpPath, body, 0600); err != nil {
+		return "", fmt.Errorf("write cache file failed: %w", err)
+	}
+	if err := os.Rename(tmpPath, targetPath); err != nil {
+		_ = os.Remove(tmpPath)
+		return "", fmt.Errorf("rename cache file failed: %w", err)
+	}
+
+	return relPath, nil
 }
 
 // IsSafeLocalTemplate 检查指定的模板路径是否为安全合法的本地相对模板文件 (防目录穿越 LFI 攻击)

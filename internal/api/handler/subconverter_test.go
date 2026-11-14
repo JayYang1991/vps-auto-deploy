@@ -2,6 +2,8 @@ package handler
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -298,4 +300,59 @@ func TestPatchSingboxTLSAndTransportSNI(t *testing.T) {
 	if headers["Host"] != "argo.example.com" {
 		t.Errorf("expected transport.headers.Host == 'argo.example.com', got '%v'", headers["Host"])
 	}
+}
+
+func TestResolveAndCacheRemoteTemplate_Security(t *testing.T) {
+	// 1. 空 URL
+	if _, err := ResolveAndCacheRemoteTemplate(""); err == nil {
+		t.Errorf("expected error for empty url")
+	}
+
+	// 2. 非 HTTPS 协议
+	if _, err := ResolveAndCacheRemoteTemplate("http://raw.githubusercontent.com/test.ini"); err == nil {
+		t.Errorf("expected error for non-https url")
+	}
+
+	// 3. SSRF 回环与局域网 IP
+	if _, err := ResolveAndCacheRemoteTemplate("https://127.0.0.1:25500/test.ini"); err == nil {
+		t.Errorf("expected error for loopback ip")
+	}
+	if _, err := ResolveAndCacheRemoteTemplate("https://192.168.1.1/test.ini"); err == nil {
+		t.Errorf("expected error for private ip")
+	}
+
+	// 4. 未受信任域名
+	if _, err := ResolveAndCacheRemoteTemplate("https://evil-attacker.com/rule.ini"); err == nil {
+		t.Errorf("expected error for untrusted domain")
+	}
+
+	// 5. 本地缓存复用测试
+	compDir := subconverter.GetComponentDir()
+	cacheDir := filepath.Join(compDir, "config", "cache")
+	_ = os.MkdirAll(cacheDir, 0755)
+
+	testURL := "https://raw.githubusercontent.com/JayYang1991/ACL4SSR/refs/heads/main/Clash/config/ACL4SSR_Online_Bespoke.ini"
+	// 手动创建缓存文件模拟已缓存状态
+	h := sha256Sum([]byte(testURL))
+	mockCacheFile := filepath.Join(cacheDir, h + ".ini")
+	_ = os.WriteFile(mockCacheFile, []byte("[custom]\nrule=direct\n"), 0600)
+	defer os.Remove(mockCacheFile)
+
+	rel, err := ResolveAndCacheRemoteTemplate(testURL)
+	if err != nil {
+		t.Fatalf("expected cache hit for testURL, got error: %v", err)
+	}
+	expectedRel := filepath.Join("config", "cache", h + ".ini")
+	if rel != expectedRel {
+		t.Errorf("expected rel path %s, got %s", expectedRel, rel)
+	}
+
+	if !IsSafeLocalTemplate(rel) {
+		t.Errorf("expected cached path %s to be recognized as safe local template", rel)
+	}
+}
+
+func sha256Sum(b []byte) string {
+	h := sha256.Sum256(b)
+	return hex.EncodeToString(h[:16])
 }

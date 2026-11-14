@@ -12,7 +12,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"vps-auto-deploy/internal/component/subconverter"
 	"vps-auto-deploy/internal/model"
-	"vps-auto-deploy/internal/pkg/netutil"
 	"vps-auto-deploy/internal/subgen"
 )
 
@@ -28,11 +27,13 @@ func isAllowedRemoteConfigHost(rawURL string) bool {
 	allowedDomains := []string{
 		"raw.githubusercontent.com",
 		"gist.githubusercontent.com",
+		"github.com",
 		"cdn.jsdelivr.net",
 		"fastly.jsdelivr.net",
 		"testingcf.jsdelivr.net",
 		"ghproxy.net",
 		"mirror.ghproxy.com",
+		"gitlab.com",
 	}
 	for _, d := range allowedDomains {
 		if host == d || strings.HasSuffix(host, "."+d) {
@@ -43,6 +44,15 @@ func isAllowedRemoteConfigHost(rawURL string) bool {
 	if savedCustom, _ := model.GetSetting("subconverter_pref_custom_url"); savedCustom != "" {
 		if su, err := url.Parse(savedCustom); err == nil && strings.EqualFold(su.Hostname(), host) {
 			return true
+		}
+	}
+	// 若管理员在系统设置中配置了额外的信任模板域名列表 (逗号分隔)
+	if extraDomains, _ := model.GetSetting("subconverter_allowed_template_domains"); extraDomains != "" {
+		for _, ed := range strings.Split(extraDomains, ",") {
+			cleanEd := strings.ToLower(strings.TrimSpace(ed))
+			if cleanEd != "" && (host == cleanEd || strings.HasSuffix(host, "."+cleanEd)) {
+				return true
+			}
 		}
 	}
 	return false
@@ -137,7 +147,7 @@ func ServeSubscription(c *gin.Context) {
 	}
 
 	// 3. 优先使用 Subconverter 引擎生成最终客户端配置文件
-	// 安全防御策略 (VULN-02)：公开免认证订阅接口仅允许选用后台预置的受管本地规则模板 (防外部 URL SSRF 与注入放大)
+	// 安全防御策略：允许选用受管本地规则模板与受信任公网规则集 URL (经 Go 主控安全预取并缓存落盘，彻底杜绝 C++ 层 SSRF / 302 逃逸)
 	requestedTpl := strings.TrimSpace(c.Query("template"))
 	if requestedTpl == "" {
 		requestedTpl = strings.TrimSpace(config)
@@ -147,8 +157,15 @@ func ServeSubscription(c *gin.Context) {
 	if requestedTpl != "" {
 		if IsSafeLocalTemplate(requestedTpl) {
 			configTemplate = requestedTpl
+		} else if strings.HasPrefix(requestedTpl, "https://") || strings.HasPrefix(requestedTpl, "http://") {
+			cachedRelPath, err := ResolveAndCacheRemoteTemplate(requestedTpl)
+			if err != nil {
+				c.String(http.StatusBadRequest, "Invalid template: %v", err)
+				return
+			}
+			configTemplate = cachedRelPath
 		} else {
-			c.String(http.StatusBadRequest, "Invalid template: 订阅端点仅允许选用受管本地规则模板 (如 config/custom_rules.ini)")
+			c.String(http.StatusBadRequest, "Invalid template: 订阅端点仅允许选用受管本地规则模板 (如 config/custom_rules.ini) 或受信任 HTTPS 外部规则集 URL")
 			return
 		}
 	} else {
@@ -166,22 +183,22 @@ func ServeSubscription(c *gin.Context) {
 		} else {
 			configTemplate = "https://raw.githubusercontent.com/JayYang1991/ACL4SSR/refs/heads/main/Clash/config/ACL4SSR_Online_Bespoke.ini"
 		}
+
+		if strings.HasPrefix(configTemplate, "https://") || strings.HasPrefix(configTemplate, "http://") {
+			cachedRelPath, err := ResolveAndCacheRemoteTemplate(configTemplate)
+			if err != nil {
+				c.String(http.StatusBadRequest, "Invalid default config template: %v", err)
+				return
+			}
+			configTemplate = cachedRelPath
+		}
 	}
 
 	if configTemplate == "config/custom_rules.ini" {
 		_ = EnsureCustomRulesFile()
 	}
 
-	if strings.HasPrefix(configTemplate, "http://") || strings.HasPrefix(configTemplate, "https://") {
-		if err := netutil.ValidatePublicURL(configTemplate); err != nil {
-			c.String(http.StatusBadRequest, "Invalid config template: %v", err)
-			return
-		}
-		if !isAllowedRemoteConfigHost(configTemplate) {
-			c.String(http.StatusForbidden, "Security Policy: 远程规则集域名未列入受信任名单")
-			return
-		}
-	} else if !IsSafeLocalTemplate(configTemplate) {
+	if !IsSafeLocalTemplate(configTemplate) {
 		c.String(http.StatusBadRequest, "Invalid config template: 仅支持受管本地规则模板 (如 config/custom_rules.ini)")
 		return
 	}
