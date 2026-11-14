@@ -521,7 +521,7 @@
 
             <div>
               <label class="form-label">API 访问 Token (可选)</label>
-              <input v-model="subForm.api_token" type="text" class="input" placeholder="留空则不开启密码鉴权" />
+              <input v-model="subForm.api_token" type="text" class="input" placeholder="留空则不开启密码鉴权" autocomplete="off" />
             </div>
 
             <div>
@@ -803,16 +803,46 @@
           </button>
         </div>
 
-        <!-- 搜索过滤 -->
-        <div style="margin-bottom: 1rem;">
-          <input
-            v-model="cfSearchKeyword"
-            @input="() => loadCFIps(true)"
-            type="text"
-            class="input"
-            placeholder="🔍 搜索优选 IP / 地区备注 (如 SG, JP, 443)..."
-            style="font-size: 0.825rem;"
-          />
+        <!-- 搜索过滤与快捷重置 -->
+        <div style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+          <div style="position: relative; flex: 1;">
+            <input
+              v-model="cfSearchKeyword"
+              @input="() => loadCFIps(true)"
+              type="text"
+              name="cf_search_keyword_filter_query_no_autofill"
+              id="cf-preferred-search-input"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
+              class="input"
+              placeholder="🔍 搜索优选 IP / 地区备注 (如 SG, JP, 443)..."
+              style="font-size: 0.825rem; width: 100%; padding-right: 2.2rem;"
+            />
+            <button
+              v-if="cfSearchKeyword"
+              type="button"
+              @click="cfSearchKeyword = ''; loadCFIps(true)"
+              style="position: absolute; right: 0.6rem; top: 50%; transform: translateY(-50%); background: none; border: none; color: #94a3b8; cursor: pointer; padding: 0.2rem; font-size: 0.85rem; line-height: 1;"
+              title="清空搜索"
+            >
+              ✕
+            </button>
+          </div>
+          <button
+            v-if="cfSearchKeyword"
+            type="button"
+            @click="cfSearchKeyword = ''; loadCFIps(true)"
+            class="btn btn-secondary"
+            style="font-size: 0.775rem; padding: 0.35rem 0.75rem; white-space: nowrap;"
+          >
+            <span>🔄</span>
+            <span>清空筛选</span>
+          </button>
         </div>
 
         <!-- 列表表格：非破坏性安全加载展示 (Stale-While-Revalidate) -->
@@ -823,13 +853,16 @@
         <div v-else-if="!loadingCfIps && cfIps.length === 0" style="text-align: center; padding: 3rem 1rem; color: #94a3b8; background: rgba(15, 23, 42, 0.4); border-radius: 0.5rem; border: 1px dashed #334155;">
           <div style="font-size: 2.2rem; margin-bottom: 0.5rem;">📡</div>
           <div style="font-size: 0.95rem; font-weight: 600; color: #cbd5e1; margin-bottom: 0.35rem;">
-            {{ cfSearchKeyword.trim() ? '未找到匹配的优选 IP 节点' : '本地暂无持久化的 Cloudflare 优选 IP' }}
+            {{ cfSearchKeyword.trim() ? `未找到与 “${cfSearchKeyword.trim()}” 匹配的优选 IP 节点` : '本地暂无持久化的 Cloudflare 优选 IP' }}
           </div>
           <div v-if="cfFetchError" style="max-width: 500px; margin: 0.5rem auto 1rem; padding: 0.5rem 0.85rem; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 0.375rem; color: #fca5a5; font-size: 0.8rem; text-align: left;">
             ❌ 最近一次抓取失败: {{ cfFetchError }}
           </div>
+          <div v-else-if="cfPrefStatus.total_count > 0 && cfSearchKeyword.trim()" style="font-size: 0.825rem; color: #f59e0b; margin: 0.5rem auto 1rem; max-width: 480px; background: rgba(245, 158, 11, 0.1); padding: 0.5rem 0.85rem; border-radius: 0.375rem; border: 1px solid rgba(245, 158, 11, 0.25);">
+            💡 本地已持久化 <strong>{{ cfPrefStatus.total_count }}</strong> 个优选节点，当前因搜索过滤条件未匹配到任何结果。
+          </div>
           <p v-else style="font-size: 0.8rem; max-width: 480px; margin: 0 auto 1.25rem; color: #64748b;">
-            {{ cfSearchKeyword.trim() ? '请尝试更换搜索关键词或清空搜索框' : '点击右上角「立即重新获取」按钮，系统将立即从优选订阅源获取最新优选节点并保存在本地数据库中' }}
+            {{ cfSearchKeyword.trim() ? '请尝试更换搜索关键词或点击下方按钮清空搜索条件' : '点击右上角「立即重新获取」按钮，系统将立即从优选订阅源获取最新优选节点并保存在本地数据库中' }}
           </p>
           <button v-if="!cfSearchKeyword.trim()" @click="manualFetchCFIps" class="btn btn-primary" :disabled="fetchingCf">
             <span>⚡</span>
@@ -837,7 +870,7 @@
           </button>
           <button v-else @click="cfSearchKeyword = ''; loadCFIps(true)" class="btn btn-secondary">
             <span>🔄</span>
-            <span>清空搜索条件</span>
+            <span>清空搜索条件 (显示全量 {{ cfPrefStatus.total_count }} 个节点)</span>
           </button>
         </div>
 
@@ -934,10 +967,28 @@
               <input
                 v-model="inventorySearchKeyword"
                 type="text"
+                name="inventory_search_keyword_filter_query_no_autofill"
+                id="inventory-search-filter-input"
+                autocomplete="off"
+                autocorrect="off"
+                autocapitalize="off"
+                spellcheck="false"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-form-type="other"
                 placeholder="搜索节点名 / 主机 / 标签 / 端口 / 协议..."
                 class="input"
-                style="padding: 0.35rem 0.75rem; font-size: 0.85rem; width: 100%;"
+                style="padding: 0.35rem 2rem 0.35rem 0.75rem; font-size: 0.85rem; width: 100%;"
               />
+              <button
+                v-if="inventorySearchKeyword"
+                type="button"
+                @click="inventorySearchKeyword = ''"
+                style="position: absolute; right: 0.5rem; top: 50%; transform: translateY(-50%); background: none; border: none; color: #94a3b8; cursor: pointer; padding: 0.2rem; font-size: 0.85rem; line-height: 1;"
+                title="清空搜索"
+              >
+                ✕
+              </button>
             </div>
 
             <button
@@ -1999,6 +2050,8 @@ async function manualFetchCFIps() {
     const count = res.data?.data?.count || 0
     if (count > 0) {
       toast.success(`优选 IP 同步成功！已成功持久化 ${count} 个节点`)
+      // 成功重新获取后重置搜索词（防止因浏览器误填充或历史搜索过滤导致表格显示为空）
+      cfSearchKeyword.value = ''
     } else {
       toast.warning('优选 IP 同步完成，但未发现有效可用节点')
     }
@@ -2257,9 +2310,11 @@ watch(
 watch(activeSubSection, (sec) => {
   localStorage.setItem('subscriptions_active_sub_section', sec)
   if (sec === 'cf_preferred') {
+    cfSearchKeyword.value = ''
     loadCFPrefStatus()
     loadCFIps()
   } else if (sec === 'inventory') {
+    inventorySearchKeyword.value = ''
     loadInventory()
   }
 })

@@ -257,7 +257,7 @@
 
             <div v-if="deployReq.auth_type === 'password'" class="form-group full-width">
               <label>SSH 登录密码 <span class="req">*</span></label>
-              <input v-model="deployReq.ssh_password" type="password" placeholder="输入远程主机 root 密码" />
+              <input v-model="deployReq.ssh_password" type="password" placeholder="输入远程主机 root 密码" autocomplete="new-password" />
             </div>
 
             <div v-else class="form-group full-width">
@@ -281,12 +281,12 @@
 
             <div class="form-group">
               <label>管理账号</label>
-              <input v-model="deployReq.admin_username" type="text" placeholder="admin" />
+              <input v-model="deployReq.admin_username" type="text" placeholder="admin" autocomplete="off" />
             </div>
 
             <div class="form-group">
               <label>管理密码 (留空随机生成)</label>
-              <input v-model="deployReq.admin_password" type="text" placeholder="留空则自动生成高强度随机密码" />
+              <input v-model="deployReq.admin_password" type="password" placeholder="留空则自动生成高强度随机密码" autocomplete="new-password" />
             </div>
 
             <div class="form-group">
@@ -405,12 +405,12 @@
 
             <div class="form-group">
               <label>管理员账号 <span class="req">*</span></label>
-              <input v-model="importReq.username" type="text" placeholder="admin" />
+              <input v-model="importReq.username" type="text" placeholder="admin" autocomplete="off" />
             </div>
 
             <div class="form-group">
               <label>管理员密码 <span class="req">*</span></label>
-              <input v-model="importReq.password" type="password" placeholder="输入该面板的管理员密码" />
+              <input v-model="importReq.password" type="password" placeholder="输入该面板的管理员密码" autocomplete="new-password" />
             </div>
 
             <div class="form-group full-width" style="margin-top: 0.25rem;">
