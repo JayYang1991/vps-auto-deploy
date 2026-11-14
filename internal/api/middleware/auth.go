@@ -233,11 +233,11 @@ func SecurityHeadersMiddleware() gin.HandlerFunc {
 	}
 }
 
-// MaxBodySizeMiddleware 限制全局请求体体积 (防内存 DoS 炸弹，排除包上传路由)
+// MaxBodySizeMiddleware 限制全局请求体体积 (防内存 DoS 炸弹，排除包上传与节点自升级等大数据流路由)
 func MaxBodySizeMiddleware(limitBytes int64) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		p := c.Request.URL.Path
-		if strings.HasSuffix(p, "/system/upgrade/package") {
+		p := strings.TrimRight(c.Request.URL.Path, "/")
+		if strings.HasSuffix(p, "/system/upgrade/package") || strings.HasSuffix(p, "/system/self-upgrade") {
 			c.Next()
 			return
 		}

@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -274,6 +275,63 @@ func TestCORSMiddlewareLoopbackProxy(t *testing.T) {
 	r.ServeHTTP(w4, req4)
 	if w4.Header().Get("Access-Control-Allow-Origin") != "" {
 		t.Fatalf("expected CORS to reject spoofed Host header from non-loopback remote, got %q", w4.Header().Get("Access-Control-Allow-Origin"))
+	}
+}
+
+func TestMaxBodySizeMiddleware(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	r := gin.New()
+	r.Use(MaxBodySizeMiddleware(1024)) // 限制 1KB
+	r.POST("/api/normal", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"size": len(body)})
+	})
+	r.POST("/api/system/upgrade/package", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"size": len(body)})
+	})
+	r.POST("/fa480cbd/api/system/self-upgrade", func(c *gin.Context) {
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"size": len(body)})
+	})
+
+	largeData := strings.Repeat("A", 4096) // 4KB > 1KB
+
+	// 1. 普通路由超过 1KB 应被 MaxBytesReader 拦截
+	w1 := httptest.NewRecorder()
+	req1, _ := http.NewRequest(http.MethodPost, "/api/normal", strings.NewReader(largeData))
+	r.ServeHTTP(w1, req1)
+	if w1.Code != http.StatusInternalServerError || !strings.Contains(w1.Body.String(), "request body too large") {
+		t.Fatalf("expected 500 request body too large, got %d: %s", w1.Code, w1.Body.String())
+	}
+
+	// 2. /system/upgrade/package 路由应豁免全局限制
+	w2 := httptest.NewRecorder()
+	req2, _ := http.NewRequest(http.MethodPost, "/api/system/upgrade/package", strings.NewReader(largeData))
+	r.ServeHTTP(w2, req2)
+	if w2.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for package upgrade, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	// 3. /system/self-upgrade 路由应豁免全局限制
+	w3 := httptest.NewRecorder()
+	req3, _ := http.NewRequest(http.MethodPost, "/fa480cbd/api/system/self-upgrade", strings.NewReader(largeData))
+	r.ServeHTTP(w3, req3)
+	if w3.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for self-upgrade, got %d: %s", w3.Code, w3.Body.String())
 	}
 }
 

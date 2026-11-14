@@ -889,8 +889,60 @@ func RunUpgradeAPI(task *DeployTask, req UpgradeRequest) {
 
 		respBody, _ := io.ReadAll(io.LimitReader(upResp.Body, 64*1024))
 		if upResp.StatusCode != http.StatusOK {
+			errDetail := string(respBody)
+			if strings.Contains(errDetail, "request body too large") {
+				task.AddLog(fmt.Sprintf("[WARN] 远端节点拒绝升级 (HTTP 500: %s)", errDetail))
+				task.AddLog("远端正在运行旧版守护程序 (全局 2MB 限制未放行 self-upgrade)，正在检查是否具备 SSH 救援凭据...")
+
+				// 尝试自动无缝切换 SSH 救援通道
+				var rawPass, rawKey string
+				if targetNode != nil {
+					if targetNode.SSHKeyEncrypted != "" {
+						rawKey, _ = model.DecryptSensitiveData(targetNode.SSHKeyEncrypted)
+					}
+					if targetNode.SSHPasswordEncrypted != "" {
+						rawPass, _ = model.DecryptSensitiveData(targetNode.SSHPasswordEncrypted)
+					}
+				}
+				if req.SSHPassword != "" {
+					rawPass = req.SSHPassword
+				}
+				if req.SSHPrivateKey != "" {
+					rawKey = req.SSHPrivateKey
+				}
+
+				if rawPass != "" || rawKey != "" {
+					task.AddLog("✓ 已自动提取目标主机 SSH 凭据，正在无缝切换到底层 SSH 救援通道执行推流升级...")
+					sshPort := targetNode.SSHPort
+					if sshPort <= 0 {
+						sshPort = 22
+					}
+					sshUser := targetNode.SSHUser
+					if strings.TrimSpace(sshUser) == "" {
+						sshUser = "root"
+					}
+					sshReq := UpgradeRequest{
+						NodeID:        targetNode.ID,
+						Host:          targetNode.Host,
+						SSHPort:       sshPort,
+						SSHUser:       sshUser,
+						SSHPassword:   rawPass,
+						SSHPrivateKey: rawKey,
+						PackageID:     req.PackageID,
+						Force:         req.Force,
+					}
+					RunUpgradeSSH(task, sshReq)
+					return
+				}
+
+				task.Status = "failed"
+				task.Error = fmt.Sprintf("远端节点拒绝升级 (HTTP %d): %s\n[解决方案] 远端旧版节点限制单次请求体不得大于 2MB。请在集群节点列表中点击「升级」并切换至「🚑 SSH 救援模式」升级远端主机；本次升级后即可永久支持原生 Zero-SSH 免密升级！", upResp.StatusCode, errDetail)
+				task.AddLog("[ERROR] " + task.Error)
+				return
+			}
+
 			task.Status = "failed"
-			task.Error = fmt.Sprintf("远端节点拒绝升级 (HTTP %d): %s", upResp.StatusCode, string(respBody))
+			task.Error = fmt.Sprintf("远端节点拒绝升级 (HTTP %d): %s", upResp.StatusCode, errDetail)
 			task.AddLog("[ERROR] " + task.Error)
 			return
 		}
@@ -975,6 +1027,31 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 	}
 
 	task.AddLog(fmt.Sprintf("开始连接远程主机 %s:%d 进行软件推流升级 (用户: %s)...", req.Host, req.SSHPort, req.SSHUser))
+
+	// 自动从纳管节点凭据库解密装载 SSH 凭据 (若请求中未提供明文密码/私钥)
+	if req.SSHPassword == "" && req.SSHPrivateKey == "" && targetNode != nil {
+		if targetNode.SSHKeyEncrypted != "" {
+			if rawKey, err := model.DecryptSensitiveData(targetNode.SSHKeyEncrypted); err == nil && rawKey != "" {
+				req.SSHPrivateKey = rawKey
+				req.AuthType = "key"
+				task.AddLog("已自动从集群凭据库解密装载目标节点的 SSH 私钥进行认证...")
+			}
+		}
+		if req.SSHPrivateKey == "" && targetNode.SSHPasswordEncrypted != "" {
+			if rawPass, err := model.DecryptSensitiveData(targetNode.SSHPasswordEncrypted); err == nil && rawPass != "" {
+				req.SSHPassword = rawPass
+				req.AuthType = "password"
+				task.AddLog("已自动从集群凭据库解密装载目标节点的 SSH 登录密码进行认证...")
+			}
+		}
+	}
+
+	if req.SSHPassword == "" && req.SSHPrivateKey == "" {
+		task.Status = "failed"
+		task.Error = "缺少 SSH 认证凭据 (未提供密码或私钥，且该节点未持久化保存 SSH 凭据)"
+		task.AddLog("[ERROR] " + task.Error)
+		return
+	}
 
 	// 2. 建立 SSH 认证配置并校验 TOFU 主机指纹
 	var authMethods []ssh.AuthMethod
