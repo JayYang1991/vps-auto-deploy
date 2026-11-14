@@ -1,6 +1,7 @@
 package crypto
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -33,6 +34,21 @@ func TestAESGCMEncryptDecrypt(t *testing.T) {
 	_, err = DecryptAESGCM(encrypted, wrongKey)
 	if err == nil {
 		t.Fatalf("Expected error when decrypting with wrong key, got nil")
+	}
+
+	// Test prefix and backward compatibility
+	if !strings.HasPrefix(encrypted, CipherPrefix) {
+		t.Fatalf("Expected encrypted text to have prefix %s, got %s", CipherPrefix, encrypted)
+	}
+
+	// Test legacy un-prefixed ciphertext decryption
+	legacyCipher := strings.TrimPrefix(encrypted, CipherPrefix)
+	decryptedLegacy, err := DecryptAESGCM(legacyCipher, key)
+	if err != nil {
+		t.Fatalf("Failed to decrypt legacy un-prefixed ciphertext: %v", err)
+	}
+	if decryptedLegacy != rawPassword {
+		t.Fatalf("Decrypted legacy %s != raw %s", decryptedLegacy, rawPassword)
 	}
 }
 

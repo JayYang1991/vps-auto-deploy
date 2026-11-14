@@ -231,8 +231,8 @@ func SecurityHeadersMiddleware() gin.HandlerFunc {
 		c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
 		// 启用基础 XSS 防护过滤
 		c.Writer.Header().Set("X-XSS-Protection", "1; mode=block")
-		// 严控 Referrer 泄露系统 Secret 路径
-		c.Writer.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		// 严禁通过 Referer 泄露后台路径及订阅 Token URL (SEC-07 防御)
+		c.Writer.Header().Set("Referrer-Policy", "no-referrer")
 		// 注入严苛内容安全策略 (CSP)，防范 XSS、未授权脚本与恶意跨站嵌入
 		c.Writer.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none';")
 		// 若为 HTTPS 连接，自动启用 HSTS

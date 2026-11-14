@@ -1,6 +1,7 @@
 package netutil
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -34,10 +35,22 @@ func AllowInboundPort(port int, protocol string, listen string) error {
 	return AllowPort(port, protocol)
 }
 
+// AllowFirewallPort 安全放行指定协议端口 (带参数与协议严格白名单校验)
+func AllowFirewallPort(ctx context.Context, port int, proto string) error {
+	if err := executil.ValidatePort(port); err != nil {
+		return err
+	}
+	proto = strings.ToLower(strings.TrimSpace(proto))
+	if proto != "tcp" && proto != "udp" && proto != "both" && proto != "" {
+		return fmt.Errorf("invalid protocol: must be tcp, udp or both, got %q", proto)
+	}
+	return AllowPort(port, proto)
+}
+
 // AllowPort 探测系统启用的防火墙体系（UFW、Firewalld、iptables、ip6tables）并幂等放行端口
 func AllowPort(port int, protocol string) error {
-	if port <= 0 || port > 65535 {
-		return fmt.Errorf("invalid port number: %d", port)
+	if err := executil.ValidatePort(port); err != nil {
+		return err
 	}
 
 	if runtime.GOOS != "linux" {

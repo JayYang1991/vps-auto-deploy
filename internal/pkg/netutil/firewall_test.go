@@ -56,5 +56,13 @@ func TestAllowPortValidation(t *testing.T) {
 		{Port: 8443, Protocol: "vless-reality", Listen: "0.0.0.0"},
 		{Port: 20443, Protocol: "hysteria2", Listen: "::"},
 	})
+
+	// AllowFirewallPort 测试
+	if err := AllowFirewallPort(nil, 80, "invalid-proto"); err == nil {
+		t.Errorf("AllowFirewallPort with invalid protocol expected error, got nil")
+	}
+	if err := AllowFirewallPort(nil, 80, "tcp"); err != nil {
+		t.Errorf("AllowFirewallPort with tcp unexpected error: %v", err)
+	}
 }
 

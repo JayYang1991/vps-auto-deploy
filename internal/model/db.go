@@ -586,10 +586,17 @@ func DecryptSensitiveData(cipherText string) (string, error) {
 		return plain, nil
 	}
 
-	// 2. 平滑回退：尝试历史基于 jwt_secret 派生的主控密钥
+	// 2. 平滑回退：尝试基于 jwt_secret 派生的加盐主控密钥
 	jwtSecret, errJWT := GetSetting("jwt_secret")
 	if errJWT == nil && jwtSecret != "" {
-		legacyKey := crypto.DeriveKey(jwtSecret)
+		saltedKey := crypto.DeriveKey(jwtSecret)
+		plainSalted, errSalted := crypto.DecryptAESGCM(cipherText, saltedKey)
+		if errSalted == nil {
+			return plainSalted, nil
+		}
+
+		// 3. 平滑回退：尝试历史版本基于原始 SHA-256 派生的主控密钥
+		legacyKey := crypto.DeriveKeyLegacy(jwtSecret)
 		plainLegacy, errLegacy := crypto.DecryptAESGCM(cipherText, legacyKey)
 		if errLegacy == nil {
 			return plainLegacy, nil
@@ -639,7 +646,7 @@ func MigrateLegacyEncryptedData() error {
 		// 检查并重加密 password_encrypted
 		if item.passEnc != "" {
 			if _, err := crypto.DecryptAESGCM(item.passEnc, newKey); err != nil {
-				if plain, err := crypto.DecryptAESGCM(item.passEnc, legacyKey); err == nil {
+				if plain, err := DecryptSensitiveData(item.passEnc); err == nil && plain != "" {
 					if reEnc, err := crypto.EncryptAESGCM(plain, newKey); err == nil {
 						item.passEnc = reEnc
 						changed = true
@@ -651,7 +658,7 @@ func MigrateLegacyEncryptedData() error {
 		// 检查并重加密 ssh_password_encrypted
 		if item.sshPassEnc != "" {
 			if _, err := crypto.DecryptAESGCM(item.sshPassEnc, newKey); err != nil {
-				if plain, err := crypto.DecryptAESGCM(item.sshPassEnc, legacyKey); err == nil {
+				if plain, err := DecryptSensitiveData(item.sshPassEnc); err == nil && plain != "" {
 					if reEnc, err := crypto.EncryptAESGCM(plain, newKey); err == nil {
 						item.sshPassEnc = reEnc
 						changed = true
@@ -663,7 +670,7 @@ func MigrateLegacyEncryptedData() error {
 		// 检查并重加密 ssh_key_encrypted
 		if item.sshKeyEnc != "" {
 			if _, err := crypto.DecryptAESGCM(item.sshKeyEnc, newKey); err != nil {
-				if plain, err := crypto.DecryptAESGCM(item.sshKeyEnc, legacyKey); err == nil {
+				if plain, err := DecryptSensitiveData(item.sshKeyEnc); err == nil && plain != "" {
 					if reEnc, err := crypto.EncryptAESGCM(plain, newKey); err == nil {
 						item.sshKeyEnc = reEnc
 						changed = true

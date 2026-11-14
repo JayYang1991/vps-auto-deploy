@@ -203,6 +203,8 @@ Description=Cloudflare Tunnel
 After=network.target network-online.target
 
 [Service]
+NoNewPrivileges=true
+PrivateTmp=true
 TimeoutStartSec=0
 Type=notify
 %sExecStart=%s %s

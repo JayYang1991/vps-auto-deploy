@@ -402,6 +402,20 @@ func handleLocalPTYSession(ws *websocket.Conn, initCols, initRows int, user, cli
 	<-done
 }
 
+// VerifyOrPinHostKey 实现 SSH HostKey 指纹校验与首次使用信任 (TOFU) 机制 (防范 SSH 中间人劫持)
+func VerifyOrPinHostKey(nodeID int64, expectedFingerprint string, saveFingerprintFunc func(int64, string) error) ssh.HostKeyCallback {
+	return func(hostname string, remote net.Addr, key ssh.PublicKey) error {
+		currentFP := ssh.FingerprintSHA256(key)
+		if expectedFingerprint != "" && subtle.ConstantTimeCompare([]byte(currentFP), []byte(expectedFingerprint)) != 1 {
+			return fmt.Errorf("【安全拦截】SSH 主机指纹不匹配！已记录: %s, 实际: %s (防中间人冒充)", expectedFingerprint, currentFP)
+		}
+		if expectedFingerprint == "" && saveFingerprintFunc != nil {
+			return saveFingerprintFunc(nodeID, currentFP)
+		}
+		return nil
+	}
+}
+
 // handleRemoteSSHSession 建立至远程纳管节点的 SSH PTY 会话
 func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, initRows int, user, clientIP, tempUser, tempPass, tempKey string) {
 	sshUser := node.SSHUser
@@ -467,20 +481,13 @@ func handleRemoteSSHSession(ws *websocket.Conn, node *model.Node, initCols, init
 
 	// TOFU 主机指纹比对机制
 	sshConfig := &ssh.ClientConfig{
-		User: sshUser,
-		Auth: authMethods,
-		HostKeyCallback: func(hostname string, remote net.Addr, key ssh.PublicKey) error {
-			currentFP := ssh.FingerprintSHA256(key)
-			if node.SSHHostKey != "" && subtle.ConstantTimeCompare([]byte(currentFP), []byte(node.SSHHostKey)) != 1 {
-				return fmt.Errorf("【安全拦截】SSH 主机指纹不匹配！已记录: %s, 实际: %s (防中间人冒充)", node.SSHHostKey, currentFP)
-			}
-			if node.SSHHostKey == "" {
-				node.SSHHostKey = currentFP
-				_ = model.UpdateNodeSSHHostKey(node.ID, currentFP)
-			}
-			return nil
-		},
-		Timeout: 10 * time.Second,
+		User:            sshUser,
+		Auth:            authMethods,
+		HostKeyCallback: VerifyOrPinHostKey(node.ID, node.SSHHostKey, func(id int64, fp string) error {
+			node.SSHHostKey = fp
+			return model.UpdateNodeSSHHostKey(id, fp)
+		}),
+		Timeout:         10 * time.Second,
 	}
 
 	addr := net.JoinHostPort(node.Host, strconv.Itoa(sshPort))

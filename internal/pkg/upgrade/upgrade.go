@@ -404,9 +404,113 @@ func copyFile(src, dst string) error {
 }
 
 const (
-	maxExtractSingleFileSize = 150 * 1024 * 1024 // 单个文件最多 150MB
+	MaxBinarySize            = 150 * 1024 * 1024 // 限制最大单文件解压体积 150MB，防 Zip Bomb
+	maxExtractSingleFileSize = MaxBinarySize     // 单个文件最多 150MB
 	maxExtractTotalSize      = 300 * 1024 * 1024 // 整个压缩包累计解压最多 300MB
 )
+
+// VerifyFileSHA256 强制校验下载文件的 SHA256 摘要 (防供应链劫持与文件损坏)
+func VerifyFileSHA256(filePath, expectedHexHash string) error {
+	if strings.TrimSpace(expectedHexHash) == "" {
+		return errors.New("security policy: empty SHA256 checksum is not allowed")
+	}
+	/* #nosec G304 - verified file path */
+	f, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return err
+	}
+	actualHash := hex.EncodeToString(h.Sum(nil))
+	if !strings.EqualFold(actualHash, strings.TrimSpace(expectedHexHash)) {
+		return fmt.Errorf("checksum mismatch: expected %s, got %s", expectedHexHash, actualHash)
+	}
+	return nil
+}
+
+// SafeExtractTarGz 安全解压 tar.gz 流，防御 Tar Slip 路径穿越与解压炸弹
+func SafeExtractTarGz(r io.Reader, destDir string) error {
+	cleanDest := filepath.Clean(destDir) + string(os.PathSeparator)
+
+	gzr, err := gzip.NewReader(r)
+	if err != nil {
+		return err
+	}
+	defer gzr.Close()
+
+	var totalExtracted int64
+	tr := tar.NewReader(gzr)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		// 拒绝软硬链接，防止通过符号链接跳出目录写入文件
+		if hdr.Typeflag == tar.TypeSymlink || hdr.Typeflag == tar.TypeLink {
+			return fmt.Errorf("security violation: symlinks are forbidden in archive: %s", hdr.Name)
+		}
+
+		/* #nosec G305 - path traversal protected via cleanTarget and cleanDest check */
+		targetPath := filepath.Join(destDir, hdr.Name)
+		cleanTarget := filepath.Clean(targetPath)
+		if !strings.HasPrefix(cleanTarget, cleanDest) && cleanTarget != filepath.Clean(destDir) {
+			return fmt.Errorf("zip-slip path traversal detected: %s", hdr.Name)
+		}
+
+		if hdr.Typeflag == tar.TypeDir {
+			if err := os.MkdirAll(cleanTarget, 0750); err != nil {
+				return err
+			}
+			continue
+		}
+
+		if hdr.Typeflag == tar.TypeReg {
+			if err := os.MkdirAll(filepath.Dir(cleanTarget), 0750); err != nil {
+				return err
+			}
+			perm := uint32(hdr.Mode & 0777)
+			safeMode := (os.FileMode(perm) & 0755) &^ (os.ModeSetuid | os.ModeSetgid | os.ModeSticky)
+			safeMode |= 0600
+			/* #nosec G304 - cleanTarget validated against cleanDest */
+			outFile, err := os.OpenFile(cleanTarget, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, safeMode)
+			if err != nil {
+				return err
+			}
+
+			remainTotal := int64(maxExtractTotalSize) - totalExtracted
+			if remainTotal <= 0 {
+				outFile.Close()
+				return fmt.Errorf("解压数据量超出总上限 (300MB)，已拦截防解压炸弹")
+			}
+			maxCopy := int64(MaxBinarySize)
+			if remainTotal < maxCopy {
+				maxCopy = remainTotal
+			}
+
+			written, copyErr := io.Copy(outFile, io.LimitReader(tr, maxCopy+1))
+			outFile.Close()
+			if copyErr != nil {
+				return copyErr
+			}
+			if written > MaxBinarySize {
+				return fmt.Errorf("解压单个文件 %s 超过大小限制 (150MB)，已拦截防解压炸弹", hdr.Name)
+			}
+			totalExtracted += written
+			if totalExtracted > maxExtractTotalSize {
+				return fmt.Errorf("解压数据总量超过上限 (300MB)，已拦截防解压炸弹")
+			}
+		}
+	}
+	return nil
+}
 
 // 解压 tar.gz
 func extractTarGz(src, destDir string) error {

@@ -109,6 +109,28 @@ func init() {
 	}
 }
 
+// IsDisallowedIP 判断 IP 是否属于内网、环回、多播、链路本地或受限地址 (SSRF 防御)
+func IsDisallowedIP(ip net.IP) bool {
+	if os.Getenv("ALLOW_PRIVATE_IP") == "1" {
+		return false
+	}
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() || ip.IsMulticast() || ip.IsUnspecified() {
+		return true
+	}
+	if ip.IsPrivate() {
+		return true
+	}
+	for _, cidr := range blockedCIDRs {
+		if cidr.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
 // IsSafePublicIP 检查单个 IP 是否为安全的公网 IP (拦截回环、私网、云元数据及受限保留地址)
 func IsSafePublicIP(ip net.IP, isLiteralIP bool) error {
 	if os.Getenv("ALLOW_PRIVATE_IP") == "1" {
@@ -259,6 +281,21 @@ func CreateSafeHTTPClient(timeout time.Duration) *http.Client {
 		Transport: CreateSafeHTTPTransport(timeout),
 		Timeout:   timeout,
 	}
+}
+
+// NewSSRFSafeHTTPClient 创建防 SSRF 与防 DNS 重绑定的安全 HTTP Client (集成重定向深度与协议安全约束)
+func NewSSRFSafeHTTPClient(timeout time.Duration) *http.Client {
+	client := CreateSafeHTTPClient(timeout)
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 3 {
+			return fmt.Errorf("too many redirects")
+		}
+		if req.URL.Scheme != "http" && req.URL.Scheme != "https" {
+			return fmt.Errorf("unsupported redirect scheme: %s", req.URL.Scheme)
+		}
+		return nil
+	}
+	return client
 }
 
 

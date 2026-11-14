@@ -115,6 +115,33 @@ func cleanLogString(s string) string {
 	return s
 }
 
+// NewSecureUpgrader 构建严格校验 Origin 的 WebSocket Upgrader (防范 CSWSH 跨源劫持)
+func NewSecureUpgrader(allowedOrigins []string) websocket.Upgrader {
+	return websocket.Upgrader{
+		ReadBufferSize:  4096,
+		WriteBufferSize: 4096,
+		CheckOrigin: func(r *http.Request) bool {
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				return false
+			}
+			u, err := url.Parse(origin)
+			if err != nil {
+				return false
+			}
+			if strings.EqualFold(u.Host, r.Host) {
+				return true
+			}
+			for _, allowed := range allowedOrigins {
+				if strings.EqualFold(origin, allowed) || strings.EqualFold(u.Host, allowed) {
+					return true
+				}
+			}
+			return isAllowedTerminalOrigin(r, "")
+		},
+	}
+}
+
 var upgrader = websocket.Upgrader{
 	ReadBufferSize:  4096,
 	WriteBufferSize: 4096,

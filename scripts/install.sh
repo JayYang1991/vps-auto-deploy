@@ -155,6 +155,7 @@ $SYSTEMCTL_CMD enable vps-panel
 $SYSTEMCTL_CMD restart vps-panel
 
 sleep 2
+chmod 600 "$CONFIG_DIR/data.db"* 2>/dev/null || true
 
 # 6. 读取日志中的访问路径
 echo -e "${GREEN}==========================================================${NC}"

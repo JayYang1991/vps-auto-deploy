@@ -108,9 +108,56 @@ func IsTrustedProxy(ipStr string) bool {
 	return false
 }
 
+// ExtractClientIP 仅在请求来自受信任的反代网段时才解析 X-Forwarded-For，且从右向左取首个非受信任代理 IP (防伪造)
+func ExtractClientIP(r *http.Request, trustedProxies []*net.IPNet) string {
+	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		remoteHost = r.RemoteAddr
+	}
+	remoteIP := net.ParseIP(remoteHost)
+	if remoteIP == nil {
+		return remoteHost
+	}
+
+	isTrusted := false
+	for _, cidr := range trustedProxies {
+		if cidr.Contains(remoteIP) {
+			isTrusted = true
+			break
+		}
+	}
+
+	if !isTrusted {
+		return remoteIP.String()
+	}
+
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			ipStr := strings.TrimSpace(parts[i])
+			ip := net.ParseIP(ipStr)
+			if ip == nil {
+				continue
+			}
+			trusted := false
+			for _, cidr := range trustedProxies {
+				if cidr.Contains(ip) {
+					trusted = true
+					break
+				}
+			}
+			if !trusted {
+				return ip.String()
+			}
+		}
+	}
+	return remoteIP.String()
+}
+
 // GetRealClientIP 智能获取客户端真实 IP：
 // 1. 若连接来自受信任反代（本机回环、内网私有网段、Cloudflare 官方边缘节点），
-//    安全提取 CF-Connecting-IP, X-Real-IP 或 X-Forwarded-For，精准识别真实来源，防止误封代理节点或跨节点 IP 漂移。
+//    安全提取 CF-Connecting-IP, X-Real-IP 或 X-Forwarded-For (从右向左取首个非受信节点，防左侧注入伪造)，
+//    精准识别真实来源，防止误封代理节点或跨节点 IP 漂移。
 // 2. 否则严格使用 c.ClientIP() / RemoteAddr，杜绝外网未授权客户端伪造 X-Forwarded-For。
 func GetRealClientIP(c *gin.Context) string {
 	remoteIP := c.ClientIP()
@@ -127,6 +174,14 @@ func GetRealClientIP(c *gin.Context) string {
 		}
 		if xff := c.GetHeader("X-Forwarded-For"); xff != "" {
 			parts := strings.Split(xff, ",")
+			for i := len(parts) - 1; i >= 0; i-- {
+				ipStr := strings.TrimSpace(parts[i])
+				if ip := net.ParseIP(ipStr); ip != nil {
+					if !IsTrustedProxy(ipStr) {
+						return ipStr
+					}
+				}
+			}
 			if len(parts) > 0 {
 				first := strings.TrimSpace(parts[0])
 				if net.ParseIP(first) != nil {

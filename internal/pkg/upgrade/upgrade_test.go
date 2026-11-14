@@ -139,3 +139,35 @@ func TestGetPackageBinaryPathSecurity(t *testing.T) {
 	}
 }
 
+func TestVerifyFileSHA256(t *testing.T) {
+	tmpFile, err := os.CreateTemp("", "test-verify-sha-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	content := "secure package content 2026"
+	_, _ = tmpFile.WriteString(content)
+	_ = tmpFile.Close()
+
+	hash, err := ComputeFileSHA256(tmpFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 匹配成功
+	if err := VerifyFileSHA256(tmpFile.Name(), hash); err != nil {
+		t.Fatalf("expected hash to verify successfully, got: %v", err)
+	}
+
+	// 哈希不匹配
+	if err := VerifyFileSHA256(tmpFile.Name(), "0000000000000000000000000000000000000000000000000000000000000000"); err == nil {
+		t.Fatalf("expected error for mismatched hash, got nil")
+	}
+
+	// 空哈希策略拒绝
+	if err := VerifyFileSHA256(tmpFile.Name(), ""); err == nil {
+		t.Fatalf("expected error for empty hash, got nil")
+	}
+}
+

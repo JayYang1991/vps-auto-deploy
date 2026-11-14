@@ -272,6 +272,9 @@ After=network.target network-online.target
 
 [Service]
 Type=simple
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
 WorkingDirectory=%s
 ExecStart=%s
 Restart=on-failure

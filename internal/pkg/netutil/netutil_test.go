@@ -1,6 +1,7 @@
 package netutil
 
 import (
+	"net"
 	"testing"
 )
 
@@ -39,6 +40,26 @@ func TestValidatePublicURL(t *testing.T) {
 	for _, u := range invalidURLs {
 		if err := ValidatePublicURL(u); err == nil {
 			t.Errorf("Expected SSRF block for %s, but passed!", u)
+		}
+	}
+
+	// 3. IsDisallowedIP 测试
+	disallowedIPs := []string{
+		"127.0.0.1", "10.0.0.1", "172.16.0.1", "192.168.1.1",
+		"169.254.169.254", "100.64.0.1", "::1", "fc00::1", "fe80::1",
+	}
+	for _, ipStr := range disallowedIPs {
+		ip := net.ParseIP(ipStr)
+		if !IsDisallowedIP(ip) {
+			t.Errorf("expected %s to be disallowed, but was allowed", ipStr)
+		}
+	}
+
+	allowedIPs := []string{"1.1.1.1", "8.8.8.8", "114.114.114.114", "2606:4700:4700::1111"}
+	for _, ipStr := range allowedIPs {
+		ip := net.ParseIP(ipStr)
+		if IsDisallowedIP(ip) {
+			t.Errorf("expected %s to be allowed, but was disallowed", ipStr)
 		}
 	}
 }

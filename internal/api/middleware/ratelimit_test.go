@@ -146,4 +146,15 @@ func TestIsTrustedProxyAndCloudflareRealIP(t *testing.T) {
 	if extractedIP != "203.0.113.88" {
 		t.Errorf("expected attacker's real IP 203.0.113.88 to be returned, got %s", extractedIP)
 	}
+
+	// 5. 验证 X-Forwarded-For 从右向左解析首个非受信任代理 IP，防左侧客户端伪造
+	reqXFF := httptest.NewRequest(http.MethodGet, "/test-ip", nil)
+	reqXFF.RemoteAddr = "127.0.0.1:44321" // 来自受信本机 Nginx 反代
+	// 客户端伪造了 1.2.3.4，实际客户端是 198.51.100.99，中间反代是 10.0.0.2
+	reqXFF.Header.Set("X-Forwarded-For", "1.2.3.4, 198.51.100.99, 10.0.0.2")
+	wXFF := httptest.NewRecorder()
+	r.ServeHTTP(wXFF, reqXFF)
+	if extractedIP != "198.51.100.99" {
+		t.Errorf("expected rightmost untrusted IP 198.51.100.99, got %s", extractedIP)
+	}
 }
