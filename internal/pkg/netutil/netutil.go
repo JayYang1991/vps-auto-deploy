@@ -19,6 +19,7 @@ var (
 )
 
 // isFakeIPMode 判断当前运行环境是否启用了 Fake-IP (198.18.0.0/15) 透明代理 DNS
+// 结合 RFC 6761 保留域名 probe 探测与 ALLOW_FAKE_IP 环境变量，严防公网域名指向 198.18.0.0/15 绕过 SSRF
 func isFakeIPMode() bool {
 	if v := os.Getenv("ALLOW_FAKE_IP"); v != "" {
 		return v == "1"
@@ -187,7 +188,7 @@ func IsSafePublicIP(ip net.IP, isLiteralIP bool) error {
 
 	for _, cidr := range blockedCIDRs {
 		if cidr.Contains(ip) {
-			// 默认严格拦截 198.18.0.0/15；仅在宿主机运行透明代理 (Fake-IP DNS) 且非直接传入的字面量 IP 时放行
+			// 严格拦截 198.18.0.0/15；仅在探测到宿主机启用 Fake-IP 且非直接传入的字面量 IP 时豁免 (防 SSRF 绕过)
 			if benchmarkCIDR != nil && benchmarkCIDR.String() == cidr.String() && !isLiteralIP && isFakeIPMode() {
 				continue
 			}

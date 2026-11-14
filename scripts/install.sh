@@ -93,6 +93,29 @@ if [ "$FOUND_LOCAL" -eq 0 ]; then
   TMP_DIR=$(mktemp -d)
   DOWNLOAD_OK=0
 
+  # 尝试获取官方 SHA-256 校验清单 (防供应链劫持与镜像投毒)
+  CHECKSUM_URL="https://github.com/JayYang1991/vps-auto-deploy/releases/download/${LATEST_TAG}/checksums.txt"
+  curl -fsSL -L "$CHECKSUM_URL" -o "$TMP_DIR/checksums.txt" 2>/dev/null || true
+
+  verify_sha256() {
+    local file_path="$1"
+    local expected_name="$2"
+    if [ -s "$TMP_DIR/checksums.txt" ]; then
+      local expected_hash
+      expected_hash=$(grep -E "[[:space:]](\./)?${expected_name}$" "$TMP_DIR/checksums.txt" | awk '{print $1}' | head -n 1)
+      if [ -n "$expected_hash" ]; then
+        local actual_hash
+        actual_hash=$(sha256sum "$file_path" | awk '{print $1}')
+        if [ "$expected_hash" != "$actual_hash" ]; then
+          echo -e "${RED}[安全拦截] ${expected_name} SHA-256 校验失败！预期: ${expected_hash}，实际: ${actual_hash}${NC}"
+          rm -rf "$TMP_DIR"
+          exit 1
+        fi
+        echo -e "${GREEN}[✓] SHA-256 完整性校验通过 (${expected_name})${NC}"
+      fi
+    fi
+  }
+
   # 1. 尝试下载 Release 压缩包 (首选格式)
   TAR_URLS=(
     "https://github.com/JayYang1991/vps-auto-deploy/releases/download/${LATEST_TAG}/vps-panel_${LATEST_TAG}_linux_${GOARCH}.tar.gz"
@@ -100,8 +123,10 @@ if [ "$FOUND_LOCAL" -eq 0 ]; then
   )
 
   for url in "${TAR_URLS[@]}"; do
+    fname=$(basename "$url")
     echo -e "${BLUE}[*] 尝试下载压缩包: $url ...${NC}"
     if curl -fsSL -L "$url" -o "$TMP_DIR/release.tar.gz" 2>/dev/null; then
+      verify_sha256 "$TMP_DIR/release.tar.gz" "$fname"
       tar -zxvf "$TMP_DIR/release.tar.gz" -C "$TMP_DIR" >/dev/null 2>&1
       if [ -f "$TMP_DIR/vps-panel" ]; then
         install_binary "$TMP_DIR/vps-panel"
@@ -113,9 +138,11 @@ if [ "$FOUND_LOCAL" -eq 0 ]; then
 
   # 2. 若压缩包不存在，尝试下载裸二进制
   if [ "$DOWNLOAD_OK" -eq 0 ]; then
-    BIN_URL="https://github.com/JayYang1991/vps-auto-deploy/releases/download/${LATEST_TAG}/vps-panel-linux-${GOARCH}"
+    BIN_NAME="vps-panel-linux-${GOARCH}"
+    BIN_URL="https://github.com/JayYang1991/vps-auto-deploy/releases/download/${LATEST_TAG}/${BIN_NAME}"
     echo -e "${BLUE}[*] 尝试直接下载二进制文件: $BIN_URL ...${NC}"
     if curl -fsSL -L "$BIN_URL" -o "$TMP_DIR/vps-panel" 2>/dev/null; then
+      verify_sha256 "$TMP_DIR/vps-panel" "$BIN_NAME"
       install_binary "$TMP_DIR/vps-panel"
       DOWNLOAD_OK=1
     fi

@@ -197,6 +197,10 @@ func GenerateServerConfig() (*SingboxConfig, error) {
 			obMap := make(map[string]interface{})
 			if obType == "custom" && strings.TrimSpace(specJSON) != "" {
 				if err := json.Unmarshal([]byte(specJSON), &obMap); err == nil {
+					customType, _ := obMap["type"].(string)
+					if customType == "" || customType == "direct" || customType == "block" {
+						continue // 禁止通过 custom 冒充或覆盖系统保留出站类型
+					}
 					obMap["tag"] = tag
 					cfg.Outbounds = append(cfg.Outbounds, obMap)
 					continue

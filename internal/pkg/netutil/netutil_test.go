@@ -8,7 +8,6 @@ import (
 func TestValidatePublicURL(t *testing.T) {
 	// 1. 合法公网地址应该通过
 	validURLs := []string{
-		"https://raw.githubusercontent.com/JayYang1991/ACL4SSR/refs/heads/main/Clash/config/ACL4SSR_Online_Bespoke.ini",
 		"http://1.1.1.1/test",
 		"https://8.8.8.8/test",
 	}
@@ -17,6 +16,14 @@ func TestValidatePublicURL(t *testing.T) {
 			t.Errorf("Expected valid for %s, got: %v", u, err)
 		}
 	}
+
+	// 针对宿主机处于 Fake-IP (198.18.0.0/15) 环境时，测试 ALLOW_FAKE_IP=1 豁免逻辑
+	t.Run("DomainWithFakeIPEnv", func(t *testing.T) {
+		t.Setenv("ALLOW_FAKE_IP", "1")
+		if err := ValidatePublicURL("https://raw.githubusercontent.com/JayYang1991/ACL4SSR/refs/heads/main/Clash/config/ACL4SSR_Online_Bespoke.ini"); err != nil {
+			t.Errorf("Expected valid with ALLOW_FAKE_IP=1, got: %v", err)
+		}
+	})
 
 	// 2. 内网、回环、元数据、非法协议、CGNAT、保留段应该被拦截
 	invalidURLs := []string{
@@ -61,6 +68,23 @@ func TestValidatePublicURL(t *testing.T) {
 		if IsDisallowedIP(ip) {
 			t.Errorf("expected %s to be allowed, but was disallowed", ipStr)
 		}
+	}
+
+	// 4. Fake-IP (198.18.0.0/15) SSRF 防护测试
+	fakeIP := net.ParseIP("198.18.1.10")
+	// 当显式关闭时，必须拦截
+	t.Setenv("ALLOW_FAKE_IP", "0")
+	if err := IsSafePublicIP(fakeIP, false); err == nil {
+		t.Errorf("expected 198.18.1.10 to be blocked when ALLOW_FAKE_IP=0, but passed")
+	}
+	// 当直接为字面量 IP 时，即使开启 ALLOW_FAKE_IP 也必须严格拦截
+	t.Setenv("ALLOW_FAKE_IP", "1")
+	if err := IsSafePublicIP(fakeIP, true); err == nil {
+		t.Errorf("expected literal 198.18.1.10 to be blocked even with ALLOW_FAKE_IP=1, but passed")
+	}
+	// 当域名解析出的非字面量 IP 且开启 ALLOW_FAKE_IP 时放行
+	if err := IsSafePublicIP(fakeIP, false); err != nil {
+		t.Errorf("expected resolved 198.18.1.10 to be allowed with ALLOW_FAKE_IP=1, got: %v", err)
 	}
 }
 

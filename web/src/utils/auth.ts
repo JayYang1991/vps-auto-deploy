@@ -1,10 +1,16 @@
 import { ref } from 'vue'
 
-const BROADCAST_CHANNEL_NAME = 'vps_panel_auth'
-const LAST_ACTIVITY_KEY = 'vps_last_activity'
-const IDLE_TIMEOUT_KEY = 'session_idle_timeout'
-const REMEMBER_ME_KEY = 'vps_remember_me'
-const TOKEN_KEY = 'token'
+// 按当前 secret_path 与路径隔离存储键，避免同 IP / 域不同实例登录态互相覆盖 (VULN-10 防御)
+export function getStoragePrefix(): string {
+  const parts = typeof window !== 'undefined' ? window.location.pathname.split('/').filter(Boolean) : []
+  return parts.length > 0 ? `vps_${parts[0]}_` : 'vps_default_'
+}
+
+const BROADCAST_CHANNEL_NAME = `${getStoragePrefix()}auth`
+const LAST_ACTIVITY_KEY = `${getStoragePrefix()}last_activity`
+const IDLE_TIMEOUT_KEY = `${getStoragePrefix()}session_idle_timeout`
+const REMEMBER_ME_KEY = `${getStoragePrefix()}remember_me`
+const TOKEN_KEY = `${getStoragePrefix()}token`
 
 let broadcastChannel: BroadcastChannel | null = null
 if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
@@ -42,12 +48,15 @@ export function getToken(): string | null {
   if (typeof window === 'undefined') return null
   const sessionToken = sessionStorage.getItem(TOKEN_KEY)
   if (sessionToken) return sessionToken
-  return localStorage.getItem(TOKEN_KEY)
+  const localToken = localStorage.getItem(TOKEN_KEY)
+  if (localToken) return localToken
+  // 优雅兼容历史旧版本未带前缀键
+  return sessionStorage.getItem('token') || localStorage.getItem('token')
 }
 
 // 是否勾选了“记住我”
 export function isRemembered(): boolean {
-  return localStorage.getItem(REMEMBER_ME_KEY) === 'true'
+  return localStorage.getItem(REMEMBER_ME_KEY) === 'true' || localStorage.getItem('vps_remember_me') === 'true'
 }
 
 // 存储 Token：若 rememberMe 为 true 存 localStorage，否则存 sessionStorage (关浏览器即销毁)
@@ -63,6 +72,11 @@ export function setToken(token: string, rememberMe = false) {
     localStorage.removeItem(REMEMBER_ME_KEY)
   }
 
+  // 清除旧版本残留键
+  localStorage.removeItem('token')
+  localStorage.removeItem('vps_remember_me')
+  sessionStorage.removeItem('token')
+
   recordActivity()
   postAuthMessage({ type: 'login' })
 }
@@ -74,6 +88,12 @@ export function clearToken(reason?: string, notifyOthers = true) {
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(REMEMBER_ME_KEY)
   localStorage.removeItem(LAST_ACTIVITY_KEY)
+
+  // 清除历史旧版本残留键
+  sessionStorage.removeItem('token')
+  localStorage.removeItem('token')
+  localStorage.removeItem('vps_remember_me')
+  localStorage.removeItem('vps_last_activity')
 
   if (notifyOthers) {
     postAuthMessage({ type: 'logout', reason })

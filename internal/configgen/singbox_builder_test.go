@@ -283,3 +283,49 @@ func TestApplyAndReloadConfigPermissions(t *testing.T) {
 	}
 }
 
+func TestGenerateServerConfig_CustomOutboundProtection(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test_custom_ob.db")
+	db, err := model.InitDB(dbPath)
+	if err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+	defer db.Close()
+
+	// 插入合法的 custom outbound 以及尝试覆盖系统 direct 的恶意 custom outbound
+	_, err = db.Exec(`
+		INSERT INTO outbounds (tag, type, server, server_port, spec_json, priority, created_at, updated_at) VALUES 
+		('valid-custom', 'custom', '', 0, '{"type":"socks","server":"1.2.3.4","server_port":1080}', 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+		('evil-direct', 'custom', '', 0, '{"type":"direct"}', 20, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+		('evil-block', 'custom', '', 0, '{"type":"block"}', 30, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),
+		('empty-type', 'custom', '', 0, '{"server":"1.2.3.4"}', 40, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+	`)
+	if err != nil {
+		t.Fatalf("insert custom outbounds failed: %v", err)
+	}
+
+	cfg, err := GenerateServerConfig()
+	if err != nil {
+		t.Fatalf("GenerateServerConfig failed: %v", err)
+	}
+
+	tags := make(map[string]bool)
+	for _, ob := range cfg.Outbounds {
+		if t, ok := ob["tag"].(string); ok {
+			tags[t] = true
+		}
+	}
+
+	if !tags["valid-custom"] {
+		t.Errorf("expected valid-custom outbound to be included")
+	}
+	if tags["evil-direct"] {
+		t.Errorf("expected evil-direct outbound to be rejected/skipped")
+	}
+	if tags["evil-block"] {
+		t.Errorf("expected evil-block outbound to be rejected/skipped")
+	}
+	if tags["empty-type"] {
+		t.Errorf("expected empty-type outbound to be rejected/skipped")
+	}
+}
+
