@@ -66,6 +66,49 @@ vless://uuid-1@104.238.148.149:443?encryption=none#HK-Test
 	}
 }
 
+func TestParsePlainIPList(t *testing.T) {
+	_, err := model.InitDB(":memory:")
+	if err != nil {
+		t.Fatalf("InitDB error: %v", err)
+	}
+
+	rawText := `
+162.159.160.213#CM-Default
+162.159.160.249:443#CU-Default
+104.17.153.28#CT-Default
+104.18.102.41,8443,HK-Cloudflare
+104.18.233.159
+`
+	skipSSRFValidationForTest = true
+	defer func() { skipSSRFValidationForTest = false }()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		w.Write([]byte(rawText))
+	}))
+	defer ts.Close()
+
+	res, err := FetchAndSavePreferredIPsWithConfig(ts.URL, "example.com", "uuid-test", true)
+	if err != nil {
+		t.Fatalf("FetchAndSavePreferredIPsWithConfig failed on plain IP list: %v", err)
+	}
+
+	if res.Count != 5 {
+		t.Errorf("expected 5 parsed IPs, got %d", res.Count)
+	}
+
+	ips, err := model.ListCFPreferredIPs("")
+	if err != nil || len(ips) != 5 {
+		t.Fatalf("expected 5 stored IPs, got %d (err: %v)", len(ips), err)
+	}
+
+	// 验证自动持久化 URL
+	savedURL, _ := model.GetSetting("cf_pref_sub_url")
+	if savedURL != ts.URL {
+		t.Errorf("expected saved sub_url %s, got %s", ts.URL, savedURL)
+	}
+}
+
 func TestSaveSettingsValidation(t *testing.T) {
 	_, err := model.InitDB(":memory:")
 	if err != nil {
@@ -97,4 +140,3 @@ func TestSaveSettingsValidation(t *testing.T) {
 		t.Fatalf("expected time 25:00 to be rejected, but passed")
 	}
 }
-

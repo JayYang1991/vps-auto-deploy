@@ -103,6 +103,11 @@ func TriggerManualFetch() (*FetchResult, error) {
 	return FetchAndSavePreferredIPs()
 }
 
+// TriggerManualFetchWithConfig 手动触发重新拉取并支持覆盖参数与自动保存
+func TriggerManualFetchWithConfig(customSubURL, customHost, customUUID string, autoSave bool) (*FetchResult, error) {
+	return FetchAndSavePreferredIPsWithConfig(customSubURL, customHost, customUUID, autoSave)
+}
+
 // GetStatusSummary 获取当前配置与同步摘要
 func GetStatusSummary() (map[string]interface{}, error) {
 	subURL, host, uuidStr, path := GetEffectiveConfig()

@@ -35,9 +35,17 @@ func SaveCFPreferredSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "优选 IP 抓取与调度配置已成功保存！"})
 }
 
-// TriggerCFPreferredFetch 手动立即拉取最新优选 IP
+// TriggerCFPreferredFetch 手动立即拉取最新优选 IP (支持在请求体中动态传入 sub_url 等参数并自动保存)
 func TriggerCFPreferredFetch(c *gin.Context) {
-	res, err := cfpref.TriggerManualFetch()
+	var body struct {
+		SubURL   string `json:"sub_url"`
+		Host     string `json:"host"`
+		UUID     string `json:"uuid"`
+		AutoSave bool   `json:"auto_save"`
+	}
+	_ = c.ShouldBindJSON(&body)
+
+	res, err := cfpref.TriggerManualFetchWithConfig(body.SubURL, body.Host, body.UUID, body.AutoSave)
 	if err != nil {
 		c.JSON(http.StatusBadGateway, gin.H{"error": "获取优选 IP 失败: " + err.Error()})
 		return

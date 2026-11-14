@@ -771,6 +771,35 @@
           </div>
         </div>
 
+        <!-- 抓取异常诊断提示条 -->
+        <div
+          v-if="cfFetchError"
+          style="margin-bottom: 1rem; padding: 0.75rem 1rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 0.5rem; display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;"
+        >
+          <div style="display: flex; align-items: flex-start; gap: 0.5rem;">
+            <span style="font-size: 1.1rem; line-height: 1.2;">⚠️</span>
+            <div>
+              <div style="font-weight: 600; color: #fca5a5; font-size: 0.85rem;">
+                优选 IP 抓取失败
+              </div>
+              <div style="color: #f87171; font-size: 0.775rem; margin-top: 0.2rem; word-break: break-all;">
+                {{ cfFetchError }}
+              </div>
+              <div style="color: #94a3b8; font-size: 0.725rem; margin-top: 0.25rem;">
+                提示：支持 EDGETUNNEL VLESS/Trojan 订阅链接，或直接填入纯 IP/IP:PORT 列表链接（如 GitHub raw、addressesapi）。
+              </div>
+            </div>
+          </div>
+          <button
+            @click="cfFetchError = ''"
+            type="button"
+            style="background: none; border: none; color: #94a3b8; cursor: pointer; padding: 0.2rem;"
+            title="关闭提示"
+          >
+            ✕
+          </button>
+        </div>
+
         <!-- 搜索过滤 -->
         <div style="margin-bottom: 1rem;">
           <input
@@ -793,11 +822,15 @@
           <div style="font-size: 0.95rem; font-weight: 600; color: #cbd5e1; margin-bottom: 0.35rem;">
             本地暂无持久化的 Cloudflare 优选 IP
           </div>
-          <p style="font-size: 0.8rem; max-width: 480px; margin: 0 auto 1.25rem; color: #64748b;">
-            点击右上角「立即重新获取」按钮，系统将立即从 EDGETUNNEL_SUB_URL 获取最新优选节点并保存在本地数据库中
+          <div v-if="cfFetchError" style="max-width: 500px; margin: 0.5rem auto 1rem; padding: 0.5rem 0.85rem; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 0.375rem; color: #fca5a5; font-size: 0.8rem; text-align: left;">
+            ❌ 最近一次抓取失败: {{ cfFetchError }}
+          </div>
+          <p v-else style="font-size: 0.8rem; max-width: 480px; margin: 0 auto 1.25rem; color: #64748b;">
+            点击右上角「立即重新获取」按钮，系统将立即从优选订阅源获取最新优选节点并保存在本地数据库中
           </p>
           <button @click="manualFetchCFIps" class="btn btn-primary" :disabled="fetchingCf">
-            ⚡ 立即获取优选 IP
+            <span>⚡</span>
+            <span>{{ fetchingCf ? '正在抓取中...' : '立即获取优选 IP' }}</span>
           </button>
         </div>
 
@@ -1835,6 +1868,7 @@ const loadingCfIps = ref(false)
 const fetchingCf = ref(false)
 const savingCfSettings = ref(false)
 const cfSearchKeyword = ref('')
+const cfFetchError = ref('')
 
 function formatDateTime(str?: string): string {
   if (!str) return ''
@@ -1848,6 +1882,11 @@ async function loadCFPrefStatus() {
     const res = await api.get('/cf-preferred/status')
     if (res.data) {
       Object.assign(cfPrefStatus, res.data)
+      if (res.data.last_fetch_status && res.data.last_fetch_status.startsWith('error:')) {
+        cfFetchError.value = res.data.last_fetch_status.replace(/^error:\s*/, '')
+      } else if (res.data.last_fetch_status === 'success') {
+        cfFetchError.value = ''
+      }
     }
   } catch (err: any) {
     console.error('加载优选 IP 配置失败:', err)
@@ -1889,14 +1928,27 @@ async function saveCFPrefSettings() {
 
 async function manualFetchCFIps() {
   fetchingCf.value = true
+  cfFetchError.value = ''
   try {
-    const res = await api.post('/cf-preferred/fetch')
+    // 携带前端输入框中用户当前编辑的最新订阅源及节点参数，支持改动后即时抓取并落盘
+    const res = await api.post('/cf-preferred/fetch', {
+      sub_url: cfPrefStatus.sub_url ? cfPrefStatus.sub_url.trim() : undefined,
+      host: cfPrefStatus.host ? cfPrefStatus.host.trim() : undefined,
+      uuid: cfPrefStatus.uuid ? cfPrefStatus.uuid.trim() : undefined,
+      auto_save: true,
+    })
     const count = res.data?.data?.count || 0
-    toast.success(`优选 IP 同步成功！已成功持久化 ${count} 个节点`)
+    if (count > 0) {
+      toast.success(`优选 IP 同步成功！已成功持久化 ${count} 个节点`)
+    } else {
+      toast.warning('优选 IP 同步完成，但未发现有效可用节点')
+    }
     await loadCFPrefStatus()
     await loadCFIps()
   } catch (err: any) {
-    toast.error('同步优选 IP 失败: ' + (err.response?.data?.error || err.message))
+    const errMsg = err.response?.data?.error || err.message || '网络连接或解析异常'
+    cfFetchError.value = errMsg
+    toast.error('同步优选 IP 失败: ' + errMsg)
     await loadCFPrefStatus()
   } finally {
     fetchingCf.value = false
