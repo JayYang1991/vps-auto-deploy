@@ -45,16 +45,15 @@ func IssueStreamTicket(username string, ttl time.Duration) string {
 
 	now := time.Now()
 	// 容量上限控制与过期条目清理，防范内存无界泄露 (Anti-DoS)
-	if len(streamTickets) >= maxStreamTickets {
-		for k, v := range streamTickets {
-			if now.After(v.ExpiresAt) {
-				delete(streamTickets, k)
-			}
-		}
-	}
 	for k, v := range streamTickets {
 		if now.After(v.ExpiresAt) {
 			delete(streamTickets, k)
+		}
+	}
+	if len(streamTickets) >= maxStreamTickets {
+		for k := range streamTickets {
+			delete(streamTickets, k)
+			break
 		}
 	}
 
@@ -243,6 +242,7 @@ func CORSMiddleware() gin.HandlerFunc {
 
 		allowed := false
 		if origin != "" {
+			c.Writer.Header().Add("Vary", "Origin")
 			if u, err := url.Parse(origin); err == nil && u.Host != "" {
 				if strings.EqualFold(u.Host, host) {
 					allowed = true
