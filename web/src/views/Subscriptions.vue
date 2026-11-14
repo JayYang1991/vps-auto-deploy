@@ -2212,6 +2212,12 @@ onMounted(async () => {
 
 onActivated(async () => {
   await loadMembers()
+  await loadCFPrefStatus()
+  if (activeSubSection.value === 'cf_preferred') {
+    await loadCFIps()
+  } else if (activeSubSection.value === 'inventory') {
+    await loadInventory()
+  }
 })
 
 onUnmounted(() => {

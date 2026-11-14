@@ -44,6 +44,7 @@ func ListCFPreferredIPs(keyword string) ([]CFPreferredIP, error) {
 	var list []CFPreferredIP
 	for rows.Next() {
 		var item CFPreferredIP
+		var createdAtRaw, updatedAtRaw any
 		if err := rows.Scan(
 			&item.ID,
 			&item.IP,
@@ -54,11 +55,13 @@ func ListCFPreferredIPs(keyword string) ([]CFPreferredIP, error) {
 			&item.Latency,
 			&item.Speed,
 			&item.RawLink,
-			&item.CreatedAt,
-			&item.UpdatedAt,
+			&createdAtRaw,
+			&updatedAtRaw,
 		); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("scan cf_preferred_ip: %w", err)
 		}
+		item.CreatedAt = ParseTime(createdAtRaw)
+		item.UpdatedAt = ParseTime(updatedAtRaw)
 		list = append(list, item)
 	}
 
@@ -90,7 +93,7 @@ func SaveCFPreferredIPs(ips []CFPreferredIP) error {
 	}
 	defer stmt.Close()
 
-	now := time.Now()
+	nowStr := time.Now().Format(time.RFC3339)
 	for _, item := range ips {
 		port := item.Port
 		if port <= 0 {
@@ -105,8 +108,8 @@ func SaveCFPreferredIPs(ips []CFPreferredIP) error {
 			item.Latency,
 			item.Speed,
 			item.RawLink,
-			now,
-			now,
+			nowStr,
+			nowStr,
 		)
 		if err != nil {
 			return fmt.Errorf("insert cf_preferred_ip (%s): %w", item.IP, err)
