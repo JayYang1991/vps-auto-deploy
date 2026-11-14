@@ -14,6 +14,9 @@ export interface NodeItem {
   use_tls: boolean
   cert_fingerprint: string
   ssh_host_key: string
+  ssh_user?: string
+  has_ssh_auth?: boolean
+  has_saved_password?: boolean
   cloud_provider?: string
   cloud_instance_id?: string
   region?: string

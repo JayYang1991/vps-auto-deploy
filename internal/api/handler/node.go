@@ -100,6 +100,9 @@ func StartUpgradeNode(c *gin.Context) {
 			if req.SSHPort <= 0 && n.SSHPort > 0 {
 				req.SSHPort = n.SSHPort
 			}
+			if strings.TrimSpace(req.SSHUser) == "" && strings.TrimSpace(n.SSHUser) != "" {
+				req.SSHUser = n.SSHUser
+			}
 		}
 	}
 

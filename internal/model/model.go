@@ -159,7 +159,8 @@ type Node struct {
 	SSHUser              string    `json:"ssh_user"`         // SSH 登录用户名 (默认 root)
 	SSHPasswordEncrypted string    `json:"-"`                // AES-256-GCM 加密的 SSH 密码
 	SSHKeyEncrypted      string    `json:"-"`                // AES-256-GCM 加密的 SSH 私钥
-	HasSSHAuth           bool      `json:"has_ssh_auth"`     // 是否已保存 SSH 免密凭据
+	HasSSHAuth           bool      `json:"has_ssh_auth"`     // 是否已保存 SSH 免密凭据 (含管理密码回退)
+	HasSavedPassword     bool      `json:"has_saved_password"`// 是否已保存管理登录密码
 	CloudProvider        string    `json:"cloud_provider"`   // "" (自建/手动) | "vultr"
 	CloudInstanceID   string    `json:"cloud_instance_id"`// 云厂商实例唯一 ID
 	Region            string    `json:"region"`           // 数据中心区域代码 (如 nrt, sgp)

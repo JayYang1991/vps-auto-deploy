@@ -327,4 +327,92 @@ func NewSSRFSafeHTTPClient(timeout time.Duration) *http.Client {
 	return client
 }
 
+// IsSafeClusterNodeIP 验证目标 IP 是否允许用于纳管节点集群通信
+// 阻断云元数据地址 (169.254.0.0/16, fe80::/10)、未指定地址 (0.0.0.0) 与回环地址 (127.0.0.1，受管节点禁止为回环)，
+// 但放行 VPC 私网、局域网与 Overlay 网络地址 (RFC 1918, RFC 4193, CGNAT 100.64.0.0/10)，保障内网/私有云纳管正常运行。
+func IsSafeClusterNodeIP(ip net.IP) error {
+	if os.Getenv("ALLOW_PRIVATE_IP") == "1" {
+		return nil
+	}
+	if v4 := ip.To4(); v4 != nil {
+		ip = v4
+	}
+
+	if ip.IsLoopback() {
+		return fmt.Errorf("【集群SSRF拦截】禁止将本地回环地址作为远程受管节点")
+	}
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return fmt.Errorf("【集群SSRF拦截】禁止访问链路本地或云厂商元数据地址 (169.254.0.0/16, fe80::/10)")
+	}
+	if ip.IsUnspecified() || ip.IsMulticast() {
+		return fmt.Errorf("【集群SSRF拦截】禁止访问未指定或多播地址")
+	}
+
+	for _, cidr := range blockedCIDRs {
+		if cidr.String() == "169.254.0.0/16" && cidr.Contains(ip) {
+			return fmt.Errorf("【集群SSRF拦截】禁止访问云厂商元数据地址块 (169.254.0.0/16)")
+		}
+	}
+	return nil
+}
+
+// CreateClusterSafeTransport 创建专用于集群节点间通信的安全 HTTP Transport：
+// 原生抵御 DNS 重绑定攻击，阻断元数据逃逸，同时保障公网 VPS 与私网/VPC 节点的连通性
+func CreateClusterSafeTransport(timeout time.Duration) *http.Transport {
+	dialer := &net.Dialer{
+		Timeout:   timeout,
+		KeepAlive: 30 * time.Second,
+	}
+
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			host, port, err := net.SplitHostPort(addr)
+			if err != nil {
+				return nil, err
+			}
+
+			lowerHost := strings.ToLower(host)
+			if os.Getenv("ALLOW_PRIVATE_IP") != "1" {
+				if lowerHost == "localhost" || strings.HasSuffix(lowerHost, ".localhost") {
+					return nil, fmt.Errorf("【集群SSRF拦截】禁止访问本地回环主机名: %s", host)
+				}
+			}
+
+			var ips []net.IP
+			if parsed := net.ParseIP(host); parsed != nil {
+				ips = []net.IP{parsed}
+			} else {
+				resolved, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+				if err != nil {
+					return nil, fmt.Errorf("解析节点域名失败: %w", err)
+				}
+				ips = resolved
+			}
+
+			if len(ips) == 0 {
+				return nil, fmt.Errorf("未找到可用的 IP 地址")
+			}
+
+			var dialErr error
+			for _, ip := range ips {
+				if err := IsSafeClusterNodeIP(ip); err != nil {
+					return nil, err
+				}
+				targetAddr := net.JoinHostPort(ip.String(), port)
+				conn, err := dialer.DialContext(ctx, network, targetAddr)
+				if err == nil {
+					return conn, nil
+				}
+				dialErr = err
+			}
+			return nil, dialErr
+		},
+		ResponseHeaderTimeout: timeout,
+		TLSHandshakeTimeout:   10 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+		MaxIdleConns:          100,
+	}
+}
+
+
 

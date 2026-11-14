@@ -24,9 +24,9 @@ func FetchRemoteNodeInventory(node *model.Node) ([]model.Inbound, map[int64]stri
 	if node.UseTLS {
 		client = crypto.CreatePinnedHTTPClient(node.CertFingerprint, 3*time.Second)
 	} else {
-		// 非 TLS 跨节点抓取强制挂载安全 Transport，阻断回环与云元数据 SSRF 探测
+		// 非 TLS 跨节点抓取挂载集群安全 Transport，阻断回环与云元数据 SSRF 探测
 		client = &http.Client{
-			Transport: netutil.CreateSafeHTTPTransport(3 * time.Second),
+			Transport: netutil.CreateClusterSafeTransport(3 * time.Second),
 			Timeout:   3 * time.Second,
 		}
 	}

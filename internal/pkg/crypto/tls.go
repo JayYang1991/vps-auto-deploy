@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -180,7 +181,7 @@ func CreatePinnedTLSConfig(pinnedFingerprint string) *tls.Config {
 
 // CreatePinnedTransport 创建带指纹强校验且免疫 SSRF / DNS 重绑定的安全 HTTP Transport
 func CreatePinnedTransport(pinnedFingerprint string) *http.Transport {
-	t := netutil.CreateSafeHTTPTransport(60 * time.Second)
+	t := netutil.CreateClusterSafeTransport(60 * time.Second)
 	t.TLSClientConfig = CreatePinnedTLSConfig(pinnedFingerprint)
 	t.ForceAttemptHTTP2 = true
 	t.MaxIdleConnsPerHost = 10
@@ -193,5 +194,24 @@ func CreatePinnedHTTPClient(pinnedFingerprint string, timeout time.Duration) *ht
 		Transport: CreatePinnedTransport(pinnedFingerprint),
 		Timeout:   timeout,
 	}
+}
+
+// ProbeRemoteFingerprint 探测目标主机指定端口的 TLS 证书 SHA-256 指纹 (用于指纹漂移自愈验证)
+func ProbeRemoteFingerprint(host string, port int, timeout time.Duration) (string, error) {
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	dialer := &net.Dialer{Timeout: timeout}
+	conn, err := tls.DialWithDialer(dialer, "tcp", addr, &tls.Config{
+		InsecureSkipVerify: true, /* #nosec G402 - probing peer certificate for subsequent authenticated pinning */
+	})
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close()
+
+	cs := conn.ConnectionState()
+	if len(cs.PeerCertificates) == 0 {
+		return "", errors.New("远端未提供任何 TLS 证书")
+	}
+	return FingerprintSHA256(cs.PeerCertificates[0].Raw), nil
 }
 

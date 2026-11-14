@@ -411,7 +411,8 @@ func GetNode(id int64) (*Node, error) {
 	}
 	n.IsMaster = isMasterInt == 1
 	n.UseTLS = useTLSInt == 1
-	n.HasSSHAuth = n.SSHPasswordEncrypted != "" || n.SSHKeyEncrypted != ""
+	n.HasSavedPassword = n.PasswordEncrypted != ""
+	n.HasSSHAuth = n.SSHPasswordEncrypted != "" || n.SSHKeyEncrypted != "" || n.PasswordEncrypted != ""
 	n.CreatedAt = ParseTime(createdAtRaw)
 	n.UpdatedAt = ParseTime(updatedAtRaw)
 	return &n, nil
@@ -444,7 +445,8 @@ func ListNodes() ([]Node, error) {
 		}
 		n.IsMaster = isMasterInt == 1
 		n.UseTLS = useTLSInt == 1
-		n.HasSSHAuth = n.SSHPasswordEncrypted != "" || n.SSHKeyEncrypted != ""
+		n.HasSavedPassword = n.PasswordEncrypted != ""
+		n.HasSSHAuth = n.SSHPasswordEncrypted != "" || n.SSHKeyEncrypted != "" || n.PasswordEncrypted != ""
 		n.CreatedAt = ParseTime(createdAtRaw)
 		n.UpdatedAt = ParseTime(updatedAtRaw)
 		nodes = append(nodes, n)
@@ -534,6 +536,16 @@ func UpdateNodeToken(id int64, token string) error {
 // UpdateNodeSSHHostKey 首次建立连接时持久化记录目标主机 SSH 指纹 (TOFU 防冒充)
 func UpdateNodeSSHHostKey(id int64, hostKey string) error {
 	_, err := DB.Exec("UPDATE nodes SET ssh_host_key = ?, updated_at = ? WHERE id = ?", hostKey, time.Now(), id)
+	return err
+}
+
+// UpdateNodeTLSConfig 更新节点的 TLS 配置与证书指纹 (自愈协议或指纹漂移)
+func UpdateNodeTLSConfig(id int64, useTLS bool, certFingerprint string) error {
+	useTLSInt := 0
+	if useTLS {
+		useTLSInt = 1
+	}
+	_, err := DB.Exec("UPDATE nodes SET use_tls = ?, cert_fingerprint = ?, updated_at = ? WHERE id = ?", useTLSInt, certFingerprint, time.Now(), id)
 	return err
 }
 

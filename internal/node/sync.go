@@ -62,9 +62,9 @@ func SyncMembersToNode(node *model.Node, members []model.Member) error {
 	if node.UseTLS {
 		client = crypto.CreatePinnedHTTPClient(node.CertFingerprint, 25*time.Second)
 	} else {
-		// 非 TLS 节点请求强制挂载安全 Transport，阻断回环与云元数据 SSRF 探测
+		// 非 TLS 节点请求挂载集群安全 Transport，阻断回环与云元数据 SSRF
 		client = &http.Client{
-			Transport: netutil.CreateSafeHTTPTransport(25 * time.Second),
+			Transport: netutil.CreateClusterSafeTransport(25 * time.Second),
 			Timeout:   25 * time.Second,
 		}
 	}

@@ -808,18 +808,23 @@
               </div>
 
               <div v-if="upgradeReq.auth_type === 'password'" class="form-group full-width">
-                <label>SSH 登录密码 <span class="req">*</span></label>
-                <input v-model="upgradeReq.ssh_password" type="password" placeholder="输入远程主机 root 密码" @keyup.enter="startUpgrade" />
+                <label>SSH 登录密码 <span v-if="!targetUpgradeNode?.has_ssh_auth" class="req">*</span></label>
+                <input
+                  v-model="upgradeReq.ssh_password"
+                  type="password"
+                  :placeholder="targetUpgradeNode?.has_ssh_auth ? '已保存节点登录凭据 (留空默认使用保存的凭据，若需要可输入新密码覆盖)' : '输入远程主机 root 密码'"
+                  @keyup.enter="startUpgrade"
+                />
               </div>
 
               <div v-else class="form-group full-width">
-                <label>SSH 私钥内容 (PEM) <span class="req">*</span></label>
+                <label>SSH 私钥内容 (PEM) <span v-if="!targetUpgradeNode?.has_ssh_auth" class="req">*</span></label>
                 <textarea
                   v-model="upgradeReq.ssh_private_key"
                   rows="4"
                   class="mono"
                   style="width: 100%; box-sizing: border-box; background: rgba(15, 23, 42, 0.8); border: 1px solid #334155; border-radius: 0.375rem; color: #f8fafc; padding: 0.5rem; font-size: 0.8125rem;"
-                  placeholder="-----BEGIN OPENSSH PRIVATE KEY-----&#10;...&#10;-----END OPENSSH PRIVATE KEY-----"
+                  :placeholder="targetUpgradeNode?.has_ssh_auth ? '已保存节点登录凭据 (留空默认使用保存的凭据，若需要可粘贴新私钥覆盖)' : '-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----'"
                 ></textarea>
               </div>
 
@@ -1061,7 +1066,7 @@ async function handlePing(id: number) {
     if (res.data.status === 'online') {
       toast.success(`测速成功：网络延迟 ${res.data.latency_ms} ms`)
     } else {
-      toast.warning('节点离线或未能连通')
+      toast.warning('节点离线或未能连通: ' + (res.data.error || '连接超时'))
     }
     await fetchNodes()
   } catch (err: any) {
@@ -1582,7 +1587,7 @@ async function openUpgradeModal(item: NodeItem) {
   upgradeReq.package_id = ''
   upgradeReq.host = item.host || ''
   upgradeReq.ssh_port = item.ssh_port || 22
-  upgradeReq.ssh_user = 'root'
+  upgradeReq.ssh_user = item.ssh_user || 'root'
   upgradeReq.auth_type = 'password'
   upgradeReq.ssh_password = ''
   upgradeReq.ssh_private_key = ''
@@ -1623,11 +1628,12 @@ function scrollUpgradeToBottom() {
 
 async function startUpgrade() {
   if (upgradeReq.mode === 'ssh') {
-    if (upgradeReq.auth_type === 'password' && !upgradeReq.ssh_password) {
+    const hasSavedAuth = targetUpgradeNode.value?.has_ssh_auth
+    if (upgradeReq.auth_type === 'password' && !upgradeReq.ssh_password && !hasSavedAuth) {
       toast.warning('请输入 SSH 登录密码')
       return
     }
-    if (upgradeReq.auth_type === 'key' && !upgradeReq.ssh_private_key) {
+    if (upgradeReq.auth_type === 'key' && !upgradeReq.ssh_private_key && !hasSavedAuth) {
       toast.warning('请输入 SSH 私钥内容')
       return
     }

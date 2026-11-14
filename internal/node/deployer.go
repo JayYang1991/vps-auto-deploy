@@ -123,9 +123,9 @@ func LoginNode(host string, port int, secretPath, username, password string, use
 	if useTLS {
 		client = crypto.CreatePinnedHTTPClient(certFingerprint, 4*time.Second)
 	} else {
-		// 非 TLS 节点请求强制挂载安全 Transport，阻断回环与云元数据 SSRF 探测
+		// 非 TLS 节点请求挂载集群安全 Transport，阻断回环与云元数据 SSRF 探测
 		client = &http.Client{
-			Transport: netutil.CreateSafeHTTPTransport(4 * time.Second),
+			Transport: netutil.CreateClusterSafeTransport(4 * time.Second),
 			Timeout:   4 * time.Second,
 		}
 	}
@@ -158,7 +158,7 @@ func LoginNode(host string, port int, secretPath, username, password string, use
 	return res.Token, nil
 }
 
-// PingNode 测量节点延迟并更新其在线状态（带证书指纹防篡改与 Token 失效自愈）
+// PingNode 测量节点延迟并更新其在线状态（带证书指纹防篡改与 Token/协议失效自愈）
 func PingNode(node *model.Node) (int64, error) {
 	if node.IsMaster {
 		_ = model.UpdateNodeStatus(node.ID, "online", 1)
@@ -182,39 +182,87 @@ func PingNode(node *model.Node) (int64, error) {
 
 	var client *http.Client
 	if node.UseTLS {
-		client = crypto.CreatePinnedHTTPClient(node.CertFingerprint, 8*time.Second)
+		client = crypto.CreatePinnedHTTPClient(node.CertFingerprint, 6*time.Second)
 	} else {
-		// 非 TLS 节点请求强制挂载安全 Transport，阻断回环与云元数据 SSRF 探测
+		// 非 TLS 节点请求挂载集群安全 Transport，阻断回环与云元数据 SSRF 探测
 		client = &http.Client{
-			Transport: netutil.CreateSafeHTTPTransport(8 * time.Second),
-			Timeout:   8 * time.Second,
+			Transport: netutil.CreateClusterSafeTransport(6 * time.Second),
+			Timeout:   6 * time.Second,
 		}
 	}
 
 	resp, err := client.Do(req)
 	latency := time.Since(start).Milliseconds()
 
-	// 若 Token 失效 (401)，尝试使用保存的加密密码重新登录刷新 Token
+	// 自愈层级 1：若 Token 失效 (401)，尝试使用保存的加密密码重新登录刷新 Token
 	if err == nil && resp.StatusCode == http.StatusUnauthorized {
 		resp.Body.Close()
-		rawPass, decErr := model.DecryptSensitiveData(node.PasswordEncrypted)
-		if decErr == nil && rawPass != "" {
-			newToken, logErr := LoginNode(node.Host, node.PanelPort, node.SecretPath, node.Username, rawPass, node.UseTLS, node.CertFingerprint)
-			if logErr == nil && newToken != "" {
-				node.APIToken = newToken
-				_ = model.UpdateNodeToken(node.ID, newToken)
-				_ = model.UpdateNodeStatus(node.ID, "online", latency)
-				return latency, nil
+		if node.PasswordEncrypted != "" {
+			rawPass, decErr := model.DecryptSensitiveData(node.PasswordEncrypted)
+			if decErr == nil && rawPass != "" {
+				newToken, logErr := LoginNode(node.Host, node.PanelPort, node.SecretPath, node.Username, rawPass, node.UseTLS, node.CertFingerprint)
+				if logErr == nil && newToken != "" {
+					node.APIToken = newToken
+					_ = model.UpdateNodeToken(node.ID, newToken)
+					_ = model.UpdateNodeStatus(node.ID, "online", latency)
+					return latency, nil
+				}
 			}
 		}
 		_ = model.UpdateNodeStatus(node.ID, "error", latency)
-		return latency, errors.New("节点认证失效且重试登录失败")
+		return latency, errors.New("节点认证失效 (401) 且自动刷新 Token 失败")
 	}
 
+	// 自愈层级 2：网络错误或非 200 响应，启动智能自愈机制 (证书指纹漂移自愈、协议错配探测)
 	if err != nil || resp.StatusCode != http.StatusOK {
 		if resp != nil {
 			resp.Body.Close()
 		}
+
+		var rawPass string
+		if node.PasswordEncrypted != "" {
+			rawPass, _ = model.DecryptSensitiveData(node.PasswordEncrypted)
+		}
+
+		// 自愈路径 A：如果启用 TLS，探测是否证书重新生成导致指纹漂移 (通过节点密码权威验证后自动更新指纹)
+		if node.UseTLS && rawPass != "" {
+			if probedFP, probeErr := crypto.ProbeRemoteFingerprint(node.Host, node.PanelPort, 3*time.Second); probeErr == nil && probedFP != "" {
+				cleanProbed := strings.ToLower(strings.ReplaceAll(probedFP, ":", ""))
+				cleanCurrent := strings.ToLower(strings.ReplaceAll(node.CertFingerprint, ":", ""))
+				if cleanProbed != cleanCurrent {
+					if newToken, logErr := LoginNode(node.Host, node.PanelPort, node.SecretPath, node.Username, rawPass, true, probedFP); logErr == nil && newToken != "" {
+						node.CertFingerprint = probedFP
+						node.APIToken = newToken
+						_ = model.UpdateNodeTLSConfig(node.ID, true, probedFP)
+						_ = model.UpdateNodeToken(node.ID, newToken)
+						_ = model.UpdateNodeStatus(node.ID, "online", latency)
+						return latency, nil
+					}
+				}
+			}
+		}
+
+		// 自愈路径 B：协议错配自动纠偏 (本地与远端 TLS 开启状态不一致)
+		if rawPass != "" {
+			altTLS := !node.UseTLS
+			var altFP string
+			if altTLS {
+				altFP, _ = crypto.ProbeRemoteFingerprint(node.Host, node.PanelPort, 3*time.Second)
+			}
+
+			if !altTLS || altFP != "" {
+				if newToken, logErr := LoginNode(node.Host, node.PanelPort, node.SecretPath, node.Username, rawPass, altTLS, altFP); logErr == nil && newToken != "" {
+					node.UseTLS = altTLS
+					node.CertFingerprint = altFP
+					node.APIToken = newToken
+					_ = model.UpdateNodeTLSConfig(node.ID, altTLS, altFP)
+					_ = model.UpdateNodeToken(node.ID, newToken)
+					_ = model.UpdateNodeStatus(node.ID, "online", latency)
+					return latency, nil
+				}
+			}
+		}
+
 		_ = model.UpdateNodeStatus(node.ID, "offline", 0)
 		if err != nil {
 			return 0, fmt.Errorf("节点不可达: %w", err)
@@ -789,9 +837,9 @@ func RunUpgradeAPI(task *DeployTask, req UpgradeRequest) {
 	if targetNode.UseTLS {
 		client = crypto.CreatePinnedHTTPClient(targetNode.CertFingerprint, 25*time.Second)
 	} else {
-		// 非 TLS 节点请求强制挂载安全 Transport，阻断回环与云元数据 SSRF 探测
+		// 非 TLS 节点请求挂载集群安全 Transport，阻断回环与云元数据 SSRF 探测
 		client = &http.Client{
-			Transport: netutil.CreateSafeHTTPTransport(25 * time.Second),
+			Transport: netutil.CreateClusterSafeTransport(25 * time.Second),
 			Timeout:   25 * time.Second,
 		}
 	}
@@ -871,9 +919,9 @@ func RunUpgradeAPI(task *DeployTask, req UpgradeRequest) {
 		if targetNode.UseTLS {
 			pushClient = crypto.CreatePinnedHTTPClient(targetNode.CertFingerprint, 180*time.Second)
 		} else {
-			// 非 TLS 节点推流强制挂载安全 Transport，阻断回环与云元数据 SSRF 探测
+			// 非 TLS 节点推流挂载集群安全 Transport，阻断回环与云元数据 SSRF 探测
 			pushClient = &http.Client{
-				Transport: netutil.CreateSafeHTTPTransport(180 * time.Second),
+				Transport: netutil.CreateClusterSafeTransport(180 * time.Second),
 				Timeout:   180 * time.Second,
 			}
 		}
@@ -996,21 +1044,7 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 		}
 	}()
 
-	if req.SSHPort <= 0 {
-		req.SSHPort = 22
-	}
-	if strings.TrimSpace(req.SSHUser) == "" {
-		req.SSHUser = "root"
-	}
-
-	if !validNameRegex.MatchString(req.SSHUser) {
-		task.Status = "failed"
-		task.Error = fmt.Sprintf("SSH 用户名格式不合法: %q (仅允许 1-32 位字母、数字、点、下划线及横线)", req.SSHUser)
-		task.AddLog("[ERROR] " + task.Error)
-		return
-	}
-
-	// 1. 获取目标节点元数据
+	// 1. 获取目标节点元数据并规范化参数
 	var targetNode *model.Node
 	if req.NodeID > 0 {
 		targetNode, _ = model.GetNode(req.NodeID)
@@ -1024,6 +1058,28 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 				break
 			}
 		}
+	}
+
+	if targetNode != nil {
+		if req.SSHPort <= 0 && targetNode.SSHPort > 0 {
+			req.SSHPort = targetNode.SSHPort
+		}
+		if strings.TrimSpace(req.SSHUser) == "" && strings.TrimSpace(targetNode.SSHUser) != "" {
+			req.SSHUser = targetNode.SSHUser
+		}
+	}
+	if req.SSHPort <= 0 {
+		req.SSHPort = 22
+	}
+	if strings.TrimSpace(req.SSHUser) == "" {
+		req.SSHUser = "root"
+	}
+
+	if !validNameRegex.MatchString(req.SSHUser) {
+		task.Status = "failed"
+		task.Error = fmt.Sprintf("SSH 用户名格式不合法: %q (仅允许 1-32 位字母、数字、点、下划线及横线)", req.SSHUser)
+		task.AddLog("[ERROR] " + task.Error)
+		return
 	}
 
 	task.AddLog(fmt.Sprintf("开始连接远程主机 %s:%d 进行软件推流升级 (用户: %s)...", req.Host, req.SSHPort, req.SSHUser))
@@ -1042,6 +1098,14 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 				req.SSHPassword = rawPass
 				req.AuthType = "password"
 				task.AddLog("已自动从集群凭据库解密装载目标节点的 SSH 登录密码进行认证...")
+			}
+		}
+		// 关键兜底：如果 SSH 独立凭据未配置，回退使用节点管理密码 (与 Web 终端保持一致)
+		if req.SSHPrivateKey == "" && req.SSHPassword == "" && targetNode.PasswordEncrypted != "" {
+			if rawPass, err := model.DecryptSensitiveData(targetNode.PasswordEncrypted); err == nil && rawPass != "" {
+				req.SSHPassword = rawPass
+				req.AuthType = "password"
+				task.AddLog("已自动从节点管理凭据库解密装载登录密码用于 SSH 救援认证...")
 			}
 		}
 	}
@@ -1146,19 +1210,47 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 	}
 	task.AddLog(fmt.Sprintf("目标主机架构: %s (主控当前架构: %s)", targetArch, runtime.GOARCH))
 
-	// 4. 比对版本指纹与推流传输新版 vps-panel 二进制
-	exePath, exeErr := os.Executable()
+	// 4. 寻优选择最佳升级二进制文件 (支持离线包仓库自动适配与指定 PackageID)
+	binPath, binErr := os.Executable()
 	useStream := false
-	if exeErr == nil && runtime.GOARCH == targetArch {
-		if fi, statErr := os.Stat(exePath); statErr == nil && fi.Size() > 1000000 {
-			useStream = true
+	if req.PackageID != "" {
+		pkgPath, pkgErr := upgrade.GetPackageBinaryPath(req.PackageID)
+		if pkgErr == nil && pkgPath != "" {
+			if arch, aErr := upgrade.ParseELFArch(pkgPath); aErr == nil && arch == targetArch {
+				binPath = pkgPath
+				binErr = nil
+				task.AddLog(fmt.Sprintf("选用已导入的程序升级包: %s", filepath.Base(binPath)))
+			} else {
+				task.AddLog(fmt.Sprintf("[WARN] 指定升级包架构不匹配 (目标架构: %s)，尝试本地主程序...", targetArch))
+			}
+		} else {
+			task.AddLog(fmt.Sprintf("[WARN] 指定升级包未找到: %v，尝试本地主程序...", pkgErr))
+		}
+	} else if runtime.GOARCH != targetArch {
+		// 尝试在本地安装包仓库中自动寻优查找匹配 targetArch 的程序包
+		bestPath, _, bestErr := upgrade.FindBestPackageForArch(targetArch)
+		if bestErr == nil && bestPath != "" {
+			binPath = bestPath
+			binErr = nil
+			task.AddLog(fmt.Sprintf("自动从离线包仓库适配目标架构 (%s) 程序包: %s", targetArch, filepath.Base(bestPath)))
 		}
 	}
 
+	if binErr == nil {
+		if arch, aErr := upgrade.ParseELFArch(binPath); aErr == nil && arch == targetArch {
+			if fi, statErr := os.Stat(binPath); statErr == nil && fi.Size() > 1000000 {
+				useStream = true
+			}
+		}
+	}
+
+	// 确保远端关键运行与配置目录存在
+	_, _ = runSSHCmd("mkdir -p /usr/local/bin /etc/vps-auto-deploy /etc/systemd/system")
+
 	needRestart := true
 	if useStream {
-		task.AddLog("目标架构与主控一致，正在比对本地与远端程序版本指纹...")
-		localHash, hashErr := computeFileSHA256(exePath)
+		task.AddLog("目标架构支持推流传输，正在比对本地与远端程序版本指纹...")
+		localHash, hashErr := computeFileSHA256(binPath)
 		var remoteHash string
 		if hashErr == nil {
 			remoteSumOut, remoteErr := runSSHCmd("sha256sum /usr/local/bin/vps-panel 2>/dev/null || shasum -a 256 /usr/local/bin/vps-panel 2>/dev/null")
@@ -1176,8 +1268,8 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 				prefixLen = len(localHash)
 			}
 			if !req.Force {
-				task.AddLog(fmt.Sprintf("✓ 远端节点程序指纹与主控完全一致 (SHA-256: %s...): 已是最新版本！", localHash[:prefixLen]))
-				task.AddLog("已自动跳过重复推流传输与服务重启，直接进入服务状态校验与全网凭据同步...")
+				task.AddLog(fmt.Sprintf("✓ 远端节点程序指纹与升级包完全一致 (SHA-256: %s...): 已是最新版本！", localHash[:prefixLen]))
+				task.AddLog("已自动跳过重复推流传输，继续校验远端服务运行状态与全网凭据同步...")
 				needRestart = false
 			} else {
 				task.AddLog(fmt.Sprintf("远端节点程序指纹已是一致 (SHA-256: %s...)，但已指定 [强制覆盖]，继续推流写入...", localHash[:prefixLen]))
@@ -1210,7 +1302,7 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 			}
 
 			/* #nosec G304 - reading validated local panel executable */
-		file, err := os.Open(exePath)
+			file, err := os.Open(binPath)
 			if err != nil {
 				session.Close()
 				task.Status = "failed"
@@ -1219,7 +1311,7 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 				return
 			}
 
-			cmd := "cat > /usr/local/bin/vps-panel.tmp && mv /usr/local/bin/vps-panel.tmp /usr/local/bin/vps-panel && chmod +x /usr/local/bin/vps-panel"
+			cmd := "cat > /usr/local/bin/vps-panel.tmp && chmod +x /usr/local/bin/vps-panel.tmp"
 			if err := session.Start(cmd); err != nil {
 				file.Close()
 				session.Close()
@@ -1242,7 +1334,28 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 
 			if err := session.Wait(); err != nil {
 				task.Status = "failed"
-				task.Error = fmt.Sprintf("设置远端二进制权限失败: %v", err)
+				task.Error = fmt.Sprintf("设置远端二进制临时文件权限失败: %v", err)
+				task.AddLog("[ERROR] " + task.Error)
+				return
+			}
+
+			// 预检新二进制执行环境
+			task.AddLog("正在执行新版二进制执行环境预检 (/usr/local/bin/vps-panel.tmp -version)...")
+			verOut, verErr := runSSHCmd("/usr/local/bin/vps-panel.tmp -version 2>&1")
+			if verErr != nil || !strings.Contains(verOut, "vps-panel version") {
+				_, _ = runSSHCmd("rm -f /usr/local/bin/vps-panel.tmp")
+				task.Status = "failed"
+				task.Error = fmt.Sprintf("新版程序在远端系统预检执行失败: %v (%s)", verErr, verOut)
+				task.AddLog("[ERROR] " + task.Error)
+				return
+			}
+			task.AddLog(fmt.Sprintf("✓ 远端执行预检通过: %s", strings.TrimSpace(verOut)))
+
+			// 预检通过后，执行原子替换
+			mvCmd := "mv /usr/local/bin/vps-panel.tmp /usr/local/bin/vps-panel && chmod +x /usr/local/bin/vps-panel && (restorecon -v /usr/local/bin/vps-panel 2>/dev/null || true)"
+			if mvOut, mvErr := runSSHCmd(mvCmd); mvErr != nil {
+				task.Status = "failed"
+				task.Error = fmt.Sprintf("原子替换可执行文件失败: %v (%s)", mvErr, mvOut)
 				task.AddLog("[ERROR] " + task.Error)
 				return
 			}
@@ -1251,7 +1364,7 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 	} else {
 		task.AddLog(fmt.Sprintf("跨架构升级 (%s -> %s)，从 GitHub Release 自动下载...", runtime.GOARCH, targetArch))
 		downloadCmd := fmt.Sprintf(
-			"curl -fsSL -o /usr/local/bin/vps-panel https://github.com/JayYang1991/vps-auto-deploy/releases/latest/download/vps-panel-linux-%s || wget -q -O /usr/local/bin/vps-panel https://github.com/JayYang1991/vps-auto-deploy/releases/latest/download/vps-panel-linux-%s && chmod +x /usr/local/bin/vps-panel",
+			"curl -fsSL -o /usr/local/bin/vps-panel.tmp https://github.com/JayYang1991/vps-auto-deploy/releases/latest/download/vps-panel-linux-%s || wget -q -O /usr/local/bin/vps-panel.tmp https://github.com/JayYang1991/vps-auto-deploy/releases/latest/download/vps-panel-linux-%s && chmod +x /usr/local/bin/vps-panel.tmp",
 			targetArch, targetArch,
 		)
 		if _, err := runSSHCmd(downloadCmd); err != nil {
@@ -1260,28 +1373,102 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 			task.AddLog("[ERROR] " + task.Error)
 			return
 		}
-		task.AddLog("跨架构二进制下载完成")
-	}
-
-	// 5. 重启远端守护进程
-	if needRestart {
-		task.AddLog("重启远程 vps-panel.service 守护进程...")
-		restartCmd := "systemctl daemon-reload && systemctl restart vps-panel"
-		if out, err := runSSHCmd(restartCmd); err != nil {
+		verOut, verErr := runSSHCmd("/usr/local/bin/vps-panel.tmp -version 2>&1")
+		if verErr != nil || !strings.Contains(verOut, "vps-panel version") {
+			_, _ = runSSHCmd("rm -f /usr/local/bin/vps-panel.tmp")
 			task.Status = "failed"
-			task.Error = fmt.Sprintf("重启远端守护进程失败: %v (%s)", err, out)
+			task.Error = fmt.Sprintf("下载的二进制在远端预检失败: %v (%s)", verErr, verOut)
 			task.AddLog("[ERROR] " + task.Error)
 			return
 		}
-		task.AddLog("守护进程重启指令已下发，正在验证服务在线状态...")
-		time.Sleep(2 * time.Second)
-	} else {
-		task.AddLog("守护进程运行正常，保持在线状态...")
-		time.Sleep(500 * time.Millisecond)
+		_, _ = runSSHCmd("mv /usr/local/bin/vps-panel.tmp /usr/local/bin/vps-panel && chmod +x /usr/local/bin/vps-panel && (restorecon -v /usr/local/bin/vps-panel 2>/dev/null || true)")
+		task.AddLog("跨架构二进制下载并安装完成")
 	}
 
+	panelPort := 20888
+	enableTLS := false
+	if targetNode != nil {
+		if targetNode.PanelPort > 0 {
+			panelPort = targetNode.PanelPort
+		}
+		enableTLS = targetNode.UseTLS
+	}
+
+	// 检查远端 Systemd 服务单元文件是否存在，若缺失则自动重建注册
+	chkServiceOut, _ := runSSHCmd("test -f /etc/systemd/system/vps-panel.service && echo 'OK' || echo 'MISSING'")
+	if strings.TrimSpace(chkServiceOut) != "OK" {
+		task.AddLog("检测到目标节点缺失 vps-panel.service 守护单元，正在自动生成注册...")
+		execArgs := fmt.Sprintf("-port %d", panelPort)
+		if enableTLS {
+			execArgs += " -tls"
+		}
+		serviceContent := fmt.Sprintf(`[Unit]
+Description=VPS Auto Deploy Panel
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/vps-panel %s
+Restart=always
+RestartSec=3
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+`, execArgs)
+		writeServiceCmd := fmt.Sprintf("cat <<'EOF' > /etc/systemd/system/vps-panel.service\n%s\nEOF\n", serviceContent)
+		_, _ = runSSHCmd(writeServiceCmd)
+		_, _ = runSSHCmd("systemctl daemon-reload && systemctl enable vps-panel 2>/dev/null || true")
+	}
+
+	// 自动放行主机防火墙端口 (ufw, firewalld, iptables)
+	firewallScript := fmt.Sprintf(`
+if command -v ufw >/dev/null 2>&1; then ufw allow %d/tcp >/dev/null 2>&1 || true; fi
+if command -v firewall-cmd >/dev/null 2>&1 && systemctl is-active --quiet firewalld 2>/dev/null; then firewall-cmd --add-port=%d/tcp --permanent >/dev/null 2>&1 || true; firewall-cmd --reload >/dev/null 2>&1 || true; fi
+if command -v iptables >/dev/null 2>&1; then iptables -C INPUT -p tcp --dport %d -j ACCEPT >/dev/null 2>&1 || iptables -I INPUT -p tcp --dport %d -j ACCEPT >/dev/null 2>&1 || true; fi
+`, panelPort, panelPort, panelPort, panelPort)
+	_, _ = runSSHCmd(firewallScript)
+
+	// 5. 重启远端守护进程
+	task.AddLog("重启远程 vps-panel.service 守护进程...")
+	cleanCmd := fmt.Sprintf("systemctl stop vps-panel 2>/dev/null || true; fuser -k %d/tcp 2>/dev/null || true", panelPort)
+	_, _ = runSSHCmd(cleanCmd)
+
+	restartCmd := "systemctl daemon-reload && systemctl enable vps-panel && systemctl restart vps-panel"
+	if out, err := runSSHCmd(restartCmd); err != nil {
+		diagOut, _ := runSSHCmd("journalctl -u vps-panel -n 30 --no-pager 2>&1; systemctl status vps-panel 2>&1")
+		task.Status = "failed"
+		task.Error = fmt.Sprintf("重启远端守护进程失败: %v (%s)\n[远端诊断日志]:\n%s", err, out, diagOut)
+		task.AddLog("[ERROR] " + task.Error)
+		return
+	}
+
+	time.Sleep(1500 * time.Millisecond)
+	activeOut, _ := runSSHCmd("systemctl is-active vps-panel")
+	if strings.TrimSpace(activeOut) != "active" {
+		diagOut, _ := runSSHCmd("journalctl -u vps-panel -n 30 --no-pager 2>&1; systemctl status vps-panel 2>&1")
+		task.AddLog(fmt.Sprintf("[WARN] 守护进程状态为 %s (非 active)，诊断日志:\n%s", strings.TrimSpace(activeOut), diagOut))
+	} else {
+		task.AddLog("✓ 守护进程重启成功并处于活跃运行状态 (active)！")
+	}
+
+	// 捕获最新 TLS 证书指纹 (自愈更新)
+	if enableTLS && targetNode != nil {
+		fpOut, fpErr := runSSHCmd("/usr/local/bin/vps-panel -print-fingerprint")
+		if fpErr == nil && strings.TrimSpace(fpOut) != "" {
+			newFP := strings.TrimSpace(fpOut)
+			if newFP != targetNode.CertFingerprint {
+				targetNode.CertFingerprint = newFP
+				_ = model.UpdateNodeTLSConfig(targetNode.ID, true, newFP)
+				task.AddLog(fmt.Sprintf("✓ 已自动捕获并更新目标节点最新 TLS 防劫持指纹: %s", newFP))
+			}
+		}
+	}
+
+	task.AddLog("守护进程重启验证完成，正在持续探活等待节点恢复上线...")
+	time.Sleep(1500 * time.Millisecond)
+
 	// 6. 服务健康探活
-	time.Sleep(2 * time.Second)
 	if targetNode != nil {
 		task.AddLog("正在执行网络延迟测速与 Token 安全握手...")
 		lat, pingErr := PingNode(targetNode)
@@ -1301,10 +1488,6 @@ func RunUpgradeSSH(task *DeployTask, req UpgradeSSHRequest) {
 	}
 
 	task.Status = "success"
-	if needRestart {
-		task.AddLog("[SUCCESS] 节点软件升级完成！所有最新功能 (路由分流、全网凭据同步、Sing-box 1.14) 已就绪！")
-	} else {
-		task.AddLog("[SUCCESS] 节点已处于最新版本，全量成员凭据与连接状态已校准同步！")
-	}
+	task.AddLog("[SUCCESS] 节点软件推流升级完成！所有服务守护进程与配置已就绪！")
 }
 
