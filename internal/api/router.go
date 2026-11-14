@@ -23,7 +23,7 @@ func SetupRouter(webFS fs.FS) *gin.Engine {
 	r.Use(gin.Recovery())
 	r.Use(middleware.SecurityHeadersMiddleware())
 	r.Use(middleware.CORSMiddleware())
-	r.Use(middleware.MaxBodySizeMiddleware(2 * 1024 * 1024))
+	r.Use(middleware.MaxBodySizeMiddleware(10 * 1024 * 1024)) // 全局请求体上限放宽至 10MB (兼顾巨量分流规则集与复杂配置导入，防内存 DoS 炸弹)
 
 	// 1. 公开免认证订阅接口 (挂载防频度压测与扫描中间件)
 	r.GET("/sub/:token", middleware.SubscriptionRateLimitMiddleware(), handler.ServeSubscription)
