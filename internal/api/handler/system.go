@@ -234,8 +234,8 @@ func StreamLogs(c *gin.Context) {
 
 // UploadUpgradePackage 上传并校验新版安装包 (二进制或 tar.gz/zip)
 func UploadUpgradePackage(c *gin.Context) {
-	// 限制最大上传 100MB
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 100*1024*1024)
+	// 限制最大上传 300MB
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 300*1024*1024)
 
 	file, header, err := c.Request.FormFile("package")
 	if err != nil {
@@ -313,7 +313,7 @@ func ApplyLocalUpgrade(c *gin.Context) {
 
 // SelfUpgradeSystem 供远程节点调用：接收二进制数据流并执行原子替换与自重启
 func SelfUpgradeSystem(c *gin.Context) {
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 100*1024*1024)
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 150*1024*1024)
 
 	tempFile, err := os.CreateTemp("", "vps-self-upgrade-*")
 	if err != nil {

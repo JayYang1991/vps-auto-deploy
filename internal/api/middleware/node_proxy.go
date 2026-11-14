@@ -188,7 +188,10 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 			_ = model.UpdateNodeStatus(targetNode.ID, "offline", 0)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadGateway)
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"error":"无法连接至远端节点 %s (%s): %v"}`, targetNode.Name, targetNode.Host, err)))
+			errBytes, _ := json.Marshal(gin.H{
+				"error": fmt.Sprintf("无法连接至远端节点 %s (%s): %v", targetNode.Name, targetNode.Host, err),
+			})
+			_, _ = w.Write(errBytes)
 		}
 
 		proxy.ServeHTTP(c.Writer, c.Request)
