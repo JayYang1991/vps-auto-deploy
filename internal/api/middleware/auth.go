@@ -96,6 +96,11 @@ func GenerateJWT(username string) (string, error) {
 
 // GenerateJWTWithDuration 生成指定有效期的 JWT Token
 func GenerateJWTWithDuration(username string, duration time.Duration) (string, error) {
+	return GenerateJWTWithIssuedAt(username, duration, time.Now())
+}
+
+// GenerateJWTWithIssuedAt 生成具有指定签发时间的 JWT Token (用于密码与会话安全轮换，消除 1 秒时钟边界竞态)
+func GenerateJWTWithIssuedAt(username string, duration time.Duration, issuedAt time.Time) (string, error) {
 	secret, err := model.GetSetting("jwt_secret")
 	if err != nil || secret == "" {
 		return "", fmt.Errorf("jwt secret not initialized")
@@ -104,8 +109,8 @@ func GenerateJWTWithDuration(username string, duration time.Duration) (string, e
 	claims := Claims{
 		Username: username,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(duration)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(issuedAt.Add(duration)),
+			IssuedAt:  jwt.NewNumericDate(issuedAt),
 		},
 	}
 

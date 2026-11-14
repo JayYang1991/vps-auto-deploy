@@ -175,6 +175,77 @@ func enrichInboundSpec(protocol, specStr string) string {
 	return specStr
 }
 
+// isAllowedCertPath 校验自定义 TLS 证书/私钥路径，严格限定在受管安全目录与合法证书扩展名 (VULN-10 防任意文件探测与读取)
+func isAllowedCertPath(p string) bool {
+	trimmed := strings.TrimSpace(p)
+	if trimmed == "" {
+		return true // 允许留空（由系统自动生成默认证书）
+	}
+	clean := filepath.Clean(trimmed)
+	if !filepath.IsAbs(clean) || strings.Contains(clean, "..") {
+		return false
+	}
+
+	// 必须具备合法的证书/私钥文件扩展名，严禁传入 .db, .sqlite, .json 等数据文件
+	ext := strings.ToLower(filepath.Ext(clean))
+	validExts := map[string]bool{
+		".pem": true, ".crt": true, ".key": true, ".cer": true, ".der": true, ".pub": true,
+	}
+	if !validExts[ext] {
+		return false
+	}
+
+	allowedDirs := []string{
+		"/etc/sing-box",
+		"/etc/vps-auto-deploy/certs",
+		"/etc/vps-auto-deploy/ssl",
+		"/etc/ssl",
+		"/etc/letsencrypt",
+	}
+	if home, _ := os.UserHomeDir(); home != "" {
+		allowedDirs = append(allowedDirs,
+			filepath.Join(home, ".config/sing-box"),
+			filepath.Join(home, ".config/vps-auto-deploy/certs"),
+			filepath.Join(home, ".config/vps-auto-deploy/ssl"),
+		)
+	}
+	for _, dir := range allowedDirs {
+		cleanDir := filepath.Clean(dir)
+		if clean == cleanDir || strings.HasPrefix(clean, cleanDir+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
+}
+
+// validateInboundSpecSecurity 校验入站协议特定参数中的文件路径安全性
+func validateInboundSpecSecurity(protocol, specStr string) error {
+	switch protocol {
+	case "trojan":
+		var spec model.TrojanInboundSpec
+		if err := json.Unmarshal([]byte(specStr), &spec); err == nil {
+			if !isAllowedCertPath(spec.CertificatePath) || !isAllowedCertPath(spec.KeyPath) {
+				return fmt.Errorf("证书或私钥路径不在受管安全目录内 (/etc/sing-box, /etc/vps-auto-deploy, /etc/ssl, /etc/letsencrypt)")
+			}
+		}
+	case "hysteria2":
+		var spec model.Hysteria2InboundSpec
+		if err := json.Unmarshal([]byte(specStr), &spec); err == nil {
+			if !isAllowedCertPath(spec.CertificatePath) || !isAllowedCertPath(spec.KeyPath) {
+				return fmt.Errorf("证书或私钥路径不在受管安全目录内 (/etc/sing-box, /etc/vps-auto-deploy, /etc/ssl, /etc/letsencrypt)")
+			}
+		}
+	case "tuic":
+		var spec model.TUICInboundSpec
+		if err := json.Unmarshal([]byte(specStr), &spec); err == nil {
+			if !isAllowedCertPath(spec.CertificatePath) || !isAllowedCertPath(spec.KeyPath) {
+				return fmt.Errorf("证书或私钥路径不在受管安全目录内 (/etc/sing-box, /etc/vps-auto-deploy, /etc/ssl, /etc/letsencrypt)")
+			}
+		}
+	}
+	return nil
+}
+
 func GenerateTLSCert(c *gin.Context) {
 	certPath, keyPath, err := configgen.EnsureDefaultTLSCert()
 	if err != nil {
@@ -223,6 +294,11 @@ func CreateInbound(c *gin.Context) {
 		specStr = "{}"
 	}
 	specStr = enrichInboundSpec(req.Protocol, specStr)
+
+	if err := validateInboundSpecSecurity(req.Protocol, specStr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	now := time.Now()
 	res, err := model.DB.Exec(
@@ -312,6 +388,11 @@ func UpdateInbound(c *gin.Context) {
 		specStr = "{}"
 	}
 	specStr = enrichInboundSpec(req.Protocol, specStr)
+
+	if err := validateInboundSpecSecurity(req.Protocol, specStr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	now := time.Now()
 	_, err = model.DB.Exec(

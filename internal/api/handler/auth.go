@@ -112,13 +112,12 @@ func UpdatePassword(c *gin.Context) {
 		return
 	}
 
-	newPwd := strings.TrimSpace(req.NewPassword)
-	if len(newPwd) < 8 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "新密码长度不能少于 8 位"})
+	if req.NewPassword != strings.TrimSpace(req.NewPassword) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "新密码首尾不能包含空格"})
 		return
 	}
-	if len(newPwd) > 128 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "新密码长度不能超过 128 位"})
+	if len(req.NewPassword) < 8 || len(req.NewPassword) > 128 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "新密码长度必须介于 8 ~ 128 位之间"})
 		return
 	}
 
@@ -139,9 +138,9 @@ func UpdatePassword(c *gin.Context) {
 	_ = model.SetSetting("admin_password_hash", string(newHash))
 	_ = model.SetSetting("initial_admin_password", "")
 
-	// 会话轮换 (Session Rotation)：废止此前签发的所有旧会话，防范旧凭据被盗用
-	epoch := time.Now().Unix()
-	_ = model.SetSetting("auth_min_issued_at", strconv.FormatInt(epoch, 10))
+	// 会话轮换 (Session Rotation)：废止此前签发的所有旧会话，消除同一秒边界竞态 (VULN-14)
+	nextSecond := time.Now().Add(1 * time.Second).Truncate(time.Second)
+	_ = model.SetSetting("auth_min_issued_at", strconv.FormatInt(nextSecond.Unix(), 10))
 
 	// 为当前操作端签发轮换后的全新有效 Token
 	username, _ := c.Get("username")
@@ -149,7 +148,7 @@ func UpdatePassword(c *gin.Context) {
 	if usernameStr == "" {
 		usernameStr, _ = model.GetSetting("admin_username")
 	}
-	newToken, _ := middleware.GenerateJWT(usernameStr)
+	newToken, _ := middleware.GenerateJWTWithIssuedAt(usernameStr, 7*24*time.Hour, nextSecond)
 
 	notifier.Send(notifier.Event{
 		Type:      notifier.EventPasswordChanged,
@@ -205,8 +204,8 @@ func UpdateSettings(c *gin.Context) {
 			return
 		}
 		_ = model.SetSetting("secret_path", trimmedSecret)
-		// 安全路径变更，强制废止所有旧会话以防扫描缓存利用
-		_ = model.SetSetting("auth_min_issued_at", strconv.FormatInt(time.Now().Unix(), 10))
+		// 安全路径变更，强制废止所有旧会话以防扫描缓存利用 (消除同一秒竞态)
+		_ = model.SetSetting("auth_min_issued_at", strconv.FormatInt(time.Now().Unix()+1, 10))
 	}
 	if req.PublicIP != "" {
 		trimmedIP := strings.TrimSpace(req.PublicIP)

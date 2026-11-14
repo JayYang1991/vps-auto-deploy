@@ -17,6 +17,8 @@ const (
 	EventNodeDeleted     = "NODE_DELETED"      // 节点移出集群
 	EventCloudDestroyed  = "CLOUD_DESTROYED"   // 云主机实例物理销毁
 	EventConfigReload    = "CONFIG_RELOAD"     // 核心网络配置重载
+	EventTunnelStatus    = "TUNNEL_STATUS"     // 穿透隧道变更 (创建/删除)
+	EventSystemWarning   = "SYSTEM_WARNING"    // 系统高危运维告警 (BBR/内核调优等)
 )
 
 // 告警严重级别
@@ -53,6 +55,8 @@ func AllEventCategories() []string {
 		EventNodeDeleted,
 		EventCloudDestroyed,
 		EventConfigReload,
+		EventTunnelStatus,
+		EventSystemWarning,
 	}
 }
 

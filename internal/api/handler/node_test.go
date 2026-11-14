@@ -400,4 +400,64 @@ func TestValidateTargetNodeHostSSRF(t *testing.T) {
 	}
 }
 
+func TestImportNodeSecurityValidations(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "node_sec_test.db")
+	_, err := model.InitDB(dbPath)
+	if err != nil {
+		t.Fatalf("InitDB failed: %v", err)
+	}
+
+	r := gin.New()
+	r.POST("/api/nodes/import", ImportNode)
+
+	// 1. 测试非法 SecretPath (包含路径穿越或特殊字符)
+	badSecrets := []string{
+		"../admin",
+		"/../../etc",
+		"admin/sub",
+		"secret*bad",
+		"sec$path",
+		"",
+	}
+	for _, sec := range badSecrets {
+		body, _ := json.Marshal(map[string]any{
+			"name":        "Test Node",
+			"host":        "203.0.113.10",
+			"panel_port":  20888,
+			"secret_path": sec,
+			"username":    "admin",
+			"password":    "pass",
+		})
+		req, _ := http.NewRequest(http.MethodPost, "/api/nodes/import", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for bad secret_path %q, got %d", sec, w.Code)
+		}
+	}
+
+	// 2. 测试非法 PanelPort
+	badPorts := []int{-1, 0, 65536, 70000}
+	for _, port := range badPorts {
+		body, _ := json.Marshal(map[string]any{
+			"name":        "Test Node",
+			"host":        "203.0.113.10",
+			"panel_port":  port,
+			"secret_path": "valid_sec",
+			"username":    "admin",
+			"password":    "pass",
+		})
+		req, _ := http.NewRequest(http.MethodPost, "/api/nodes/import", bytes.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Errorf("expected 400 for bad panel_port %d, got %d", port, w.Code)
+		}
+	}
+}
+
 

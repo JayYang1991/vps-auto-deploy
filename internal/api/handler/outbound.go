@@ -82,6 +82,27 @@ func GetOutbound(c *gin.Context) {
 	c.JSON(http.StatusOK, ob)
 }
 
+// validateOutboundSpec 校验出站 spec 安全性，防范配置注入
+func validateOutboundSpec(obType, specStr string) error {
+	if obType == "custom" {
+		var rawMap map[string]interface{}
+		if err := json.Unmarshal([]byte(specStr), &rawMap); err != nil {
+			return fmt.Errorf("自定义出站规则必须是合法的 JSON 对象")
+		}
+		subType, _ := rawMap["type"].(string)
+		subType = strings.ToLower(strings.TrimSpace(subType))
+		validOutboundTypes := map[string]bool{
+			"direct": true, "block": true, "socks": true, "http": true,
+			"shadowsocks": true, "vless": true, "trojan": true, "vmess": true,
+			"wireguard": true, "hysteria2": true, "tuic": true, "tor": true, "ssh": true,
+		}
+		if subType != "" && !validOutboundTypes[subType] {
+			return fmt.Errorf("自定义出站规则的 type '%s' 不合法", subType)
+		}
+	}
+	return nil
+}
+
 // CreateOutbound 新建出站规则
 func CreateOutbound(c *gin.Context) {
 	var req OutboundRequest
@@ -103,6 +124,10 @@ func CreateOutbound(c *gin.Context) {
 	specStr := string(req.Spec)
 	if specStr == "" || specStr == "null" {
 		specStr = "{}"
+	}
+	if err := validateOutboundSpec(req.Type, specStr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	priority := req.Priority
@@ -179,6 +204,10 @@ func UpdateOutbound(c *gin.Context) {
 	specStr := string(req.Spec)
 	if specStr == "" || specStr == "null" {
 		specStr = "{}"
+	}
+	if err := validateOutboundSpec(req.Type, specStr); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
 	}
 
 	priority := req.Priority
@@ -492,6 +521,15 @@ func LoadSingboxFromDisk(c *gin.Context) {
 	if stats.RoutesCreated > 0 {
 		msg += fmt.Sprintf("、%d 条路由分流规则", stats.RoutesCreated)
 	}
+
+	notifier.Send(notifier.Event{
+		Type:      notifier.EventConfigReload,
+		Level:     notifier.LevelWarn,
+		Title:     "磁盘配置反向覆盖面板数据库",
+		Message:   msg,
+		ClientIP:  middleware.GetRealClientIP(c),
+		Timestamp: time.Now(),
+	})
 
 	c.JSON(http.StatusOK, gin.H{
 		"message": msg,

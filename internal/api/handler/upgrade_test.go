@@ -144,3 +144,35 @@ func TestStartUpgradeNodeAPI(t *testing.T) {
 		t.Errorf("expected task_id in response: %v", res)
 	}
 }
+
+func TestSelfUpgradeSystemValidation(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.POST("/api/system/self-upgrade", SelfUpgradeSystem)
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Skip("unable to get executable")
+	}
+	exeData, err := os.ReadFile(exe)
+	if err != nil {
+		t.Skip("unable to read executable")
+	}
+
+	// 1. 缺失 X-Binary-SHA256 头 -> 400
+	reqNoHeader, _ := http.NewRequest(http.MethodPost, "/api/system/self-upgrade", bytes.NewReader(exeData))
+	wNoHeader := httptest.NewRecorder()
+	r.ServeHTTP(wNoHeader, reqNoHeader)
+	if wNoHeader.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing X-Binary-SHA256, got %d", wNoHeader.Code)
+	}
+
+	// 2. 错误的 X-Binary-SHA256 头 (哈希不匹配) -> 400
+	reqBadHash, _ := http.NewRequest(http.MethodPost, "/api/system/self-upgrade", bytes.NewReader(exeData))
+	reqBadHash.Header.Set("X-Binary-SHA256", "0000000000000000000000000000000000000000000000000000000000000000")
+	wBadHash := httptest.NewRecorder()
+	r.ServeHTTP(wBadHash, reqBadHash)
+	if wBadHash.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for mismatched X-Binary-SHA256, got %d", wBadHash.Code)
+	}
+}

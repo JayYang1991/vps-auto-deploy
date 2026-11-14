@@ -245,3 +245,47 @@ func TestDeleteInboundWithReferencingRoute(t *testing.T) {
 		t.Fatalf("expected route inbound_tags to be cascade updated to 'renamed-inbound', got: %s", updatedInTags)
 	}
 }
+
+func TestValidateInboundCertPath(t *testing.T) {
+	// 1. 合法受管证书路径
+	validPaths := []string{
+		"",
+		"/etc/sing-box/cert.pem",
+		"/etc/vps-auto-deploy/certs/key.pem",
+		"/etc/ssl/certs/ca.pem",
+		"/etc/letsencrypt/live/example.com/fullchain.pem",
+	}
+	for _, p := range validPaths {
+		if !isAllowedCertPath(p) {
+			t.Errorf("expected path %q to be allowed, but was rejected", p)
+		}
+	}
+
+	// 2. 尝试探测敏感系统文件或路径穿越
+	invalidPaths := []string{
+		"/etc/shadow",
+		"/etc/passwd",
+		"/etc/vps-auto-deploy/data.db",
+		"/root/.ssh/id_rsa",
+		"/var/log/syslog",
+		"../relative/path",
+		"/etc/sing-box/../../etc/shadow",
+		"/tmp/evil.pem",
+	}
+	for _, p := range invalidPaths {
+		if isAllowedCertPath(p) {
+			t.Errorf("expected sensitive/traversal path %q to be rejected, but was allowed", p)
+		}
+	}
+
+	// 3. 校验特定协议 spec
+	evilSpec := `{"certificate_path": "/etc/shadow", "key_path": "/etc/sing-box/key.pem"}`
+	if err := validateInboundSpecSecurity("trojan", evilSpec); err == nil {
+		t.Errorf("expected error on trojan with /etc/shadow, but got nil")
+	}
+
+	safeSpec := `{"certificate_path": "/etc/sing-box/cert.pem", "key_path": "/etc/sing-box/key.pem"}`
+	if err := validateInboundSpecSecurity("trojan", safeSpec); err != nil {
+		t.Errorf("expected safe spec to pass, got: %v", err)
+	}
+}

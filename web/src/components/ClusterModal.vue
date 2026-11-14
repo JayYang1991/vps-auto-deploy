@@ -1354,6 +1354,26 @@ async function handleImport() {
 const showTerminal = ref(false)
 const terminalNode = ref<any>(null)
 const cachedMasterPassword = ref('')
+let masterPwdExpireTimer: ReturnType<typeof setTimeout> | null = null
+
+function clearCachedMasterPassword() {
+  cachedMasterPassword.value = ''
+  if (masterPwdExpireTimer) {
+    clearTimeout(masterPwdExpireTimer)
+    masterPwdExpireTimer = null
+  }
+}
+
+function setCachedMasterPasswordWithTTL(pass: string, ttlMs = 60000) {
+  cachedMasterPassword.value = pass
+  if (masterPwdExpireTimer) {
+    clearTimeout(masterPwdExpireTimer)
+  }
+  masterPwdExpireTimer = setTimeout(() => {
+    cachedMasterPassword.value = ''
+    masterPwdExpireTimer = null
+  }, ttlMs)
+}
 
 function openTerminalModal(item: any) {
   terminalNode.value = { ...item }
@@ -1361,7 +1381,19 @@ function openTerminalModal(item: any) {
 }
 
 function handleAuthenticated(pass: string) {
-  cachedMasterPassword.value = pass
+  setCachedMasterPasswordWithTTL(pass, 60000)
+}
+
+// 页面隐藏 (切换标签页或锁屏) 时立即清空内存凭据
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      clearCachedMasterPassword()
+      if (revealModalVisible.value) {
+        closeRevealModal()
+      }
+    }
+  })
 }
 
 // ==================== 二次鉴权查看凭据 (Reveal) ====================
@@ -1391,6 +1423,7 @@ function closeRevealModal() {
     clearInterval(countdownTimer)
     countdownTimer = null
   }
+  clearCachedMasterPassword()
 }
 
 async function submitReveal() {
@@ -1401,7 +1434,7 @@ async function submitReveal() {
       master_password: masterVerifyPassword.value,
     })
     revealedData.value = res.data
-    cachedMasterPassword.value = masterVerifyPassword.value
+    setCachedMasterPasswordWithTTL(masterVerifyPassword.value, 60000)
     toast.success('身份验证通过，凭据已解密')
 
     // 开启 60 秒倒计时自动锁定
@@ -1692,6 +1725,7 @@ onUnmounted(() => {
   if (eventSource) eventSource.close()
   if (upgradeEventSource) upgradeEventSource.close()
   if (countdownTimer) clearInterval(countdownTimer)
+  clearCachedMasterPassword()
 })
 </script>
 

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"io"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"vps-auto-deploy/internal/api/middleware"
 	"vps-auto-deploy/internal/component"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/notifier"
 	"vps-auto-deploy/internal/pkg/executil"
 	"vps-auto-deploy/internal/pkg/netutil"
 	"vps-auto-deploy/internal/pkg/upgrade"
@@ -138,6 +140,14 @@ func EnableBBR(c *gin.Context) {
 		/* #nosec G306 - sysctl configuration file requires 0644 */
 		if err := os.WriteFile("/etc/sysctl.d/99-vps-bbr.conf", []byte(bbrContent), 0644); err == nil {
 			_, _ = executil.RunCommand(3*time.Second, "sysctl", "--system")
+			notifier.Send(notifier.Event{
+				Type:      notifier.EventSystemWarning,
+				Level:     notifier.LevelInfo,
+				Title:     "系统内核已开启 BBR 拥塞控制",
+				Message:   "管理员通过控制台一键启用了 Linux TCP BBR 拥塞控制算法并重新加载了 sysctl",
+				ClientIP:  middleware.GetRealClientIP(c),
+				Timestamp: time.Now(),
+			})
 			c.JSON(http.StatusOK, gin.H{"message": "BBR enabled successfully via sysctl.d"})
 			return
 		}
@@ -150,6 +160,14 @@ func EnableBBR(c *gin.Context) {
 		_, _ = f.WriteString("\n" + bbrContent)
 		f.Close()
 		_, _ = executil.RunCommand(3*time.Second, "sysctl", "-p")
+		notifier.Send(notifier.Event{
+			Type:      notifier.EventSystemWarning,
+			Level:     notifier.LevelInfo,
+			Title:     "系统内核已开启 BBR 拥塞控制",
+			Message:   "管理员通过控制台一键启用了 Linux TCP BBR 拥塞控制算法并重新加载了 sysctl",
+			ClientIP:  middleware.GetRealClientIP(c),
+			Timestamp: time.Now(),
+		})
 		c.JSON(http.StatusOK, gin.H{"message": "BBR enabled successfully"})
 		return
 	}
@@ -353,6 +371,19 @@ func SelfUpgradeSystem(c *gin.Context) {
 	}
 	if arch != runtime.GOARCH {
 		c.JSON(http.StatusBadRequest, gin.H{"error": fmt.Sprintf("架构不兼容！升级包架构为 %s，本节点运行架构为 %s", arch, runtime.GOARCH)})
+		return
+	}
+
+	// 校验传输完整性与防篡改指纹 (VULN-12)
+	expectedSHA := strings.ToLower(strings.TrimSpace(c.GetHeader("X-Binary-SHA256")))
+	if len(expectedSHA) != 64 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少合法的 X-Binary-SHA256 完整性校验头"})
+		return
+	}
+
+	actualSHA, err := upgrade.ComputeFileSHA256(tempFile.Name())
+	if err != nil || subtle.ConstantTimeCompare([]byte(expectedSHA), []byte(actualSHA)) != 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "【安全拦截】升级程序 SHA-256 指纹校验不匹配，拒绝替换"})
 		return
 	}
 

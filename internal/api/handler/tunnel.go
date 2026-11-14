@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -9,8 +10,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"vps-auto-deploy/internal/api/middleware"
 	"vps-auto-deploy/internal/component/cloudflared"
 	"vps-auto-deploy/internal/model"
+	"vps-auto-deploy/internal/notifier"
 	"vps-auto-deploy/internal/pkg/crypto"
 	"vps-auto-deploy/internal/pkg/executil"
 )
@@ -151,6 +154,15 @@ func CreateTunnel(c *gin.Context) {
 		}
 	}
 
+	notifier.Send(notifier.Event{
+		Type:      notifier.EventTunnelStatus,
+		Level:     notifier.LevelInfo,
+		Title:     "新建穿透隧道",
+		Message:   fmt.Sprintf("管理员创建了穿透隧道 [%s] (模式: %s, 目标端口: %d)", req.Name, cleanMode, req.TargetPort),
+		ClientIP:  middleware.GetRealClientIP(c),
+		Timestamp: time.Now(),
+	})
+
 	c.JSON(http.StatusOK, gin.H{
 		"id":      id,
 		"message": "tunnel saved successfully",
@@ -169,6 +181,15 @@ func DeleteTunnel(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+
+	notifier.Send(notifier.Event{
+		Type:      notifier.EventTunnelStatus,
+		Level:     notifier.LevelWarn,
+		Title:     "删除穿透隧道",
+		Message:   fmt.Sprintf("管理员删除了穿透隧道 (ID: %d)", id),
+		ClientIP:  middleware.GetRealClientIP(c),
+		Timestamp: time.Now(),
+	})
 
 	c.JSON(http.StatusOK, gin.H{"message": "tunnel deleted"})
 }

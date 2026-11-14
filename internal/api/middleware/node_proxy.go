@@ -105,9 +105,14 @@ func NodeProxyMiddleware() gin.HandlerFunc {
 		}
 
 		// 计算目标机器上的真实路径
-		// 截取掉主控端的 /:secret 前缀，拼上远端节点的 secret_path，并做路径安全规整
+		// 截取掉主控端的 /:secret 前缀，拼上远端节点的 secret_path，并做路径安全规整 (防路径逃逸)
 		restOfPath := strings.TrimPrefix(reqPath, "/"+secret)
-		remotePath := path.Clean("/" + strings.Trim(targetNode.SecretPath, "/") + restOfPath)
+		cleanSecret := strings.Trim(targetNode.SecretPath, "/")
+		remotePath := path.Clean("/" + cleanSecret + restOfPath)
+		if cleanSecret != "" && !strings.HasPrefix(remotePath, "/"+cleanSecret+"/") && remotePath != "/"+cleanSecret {
+			c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "非法反代路径"})
+			return
+		}
 
 		proxy := httputil.NewSingleHostReverseProxy(targetURL)
 		proxy.FlushInterval = 50 * time.Millisecond // 确保 SSE 实时日志流不被缓冲卡顿

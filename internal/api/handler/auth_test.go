@@ -125,6 +125,19 @@ func TestLoginAndSettings(t *testing.T) {
 		t.Errorf("expected 400 Bad Request for short password, got %d", w.Code)
 	}
 
+	// 5b. 密码首尾包含空格应被拦截 (VULN-16)
+	spacePassBody, _ := json.Marshal(map[string]string{
+		"old_password": "admin123456",
+		"new_password": "  spaces_in_pwd_888  ",
+	})
+	w = httptest.NewRecorder()
+	req, _ = http.NewRequest(http.MethodPost, "/password", bytes.NewReader(spacePassBody))
+	req.Header.Set("Content-Type", "application/json")
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 Bad Request for password with leading/trailing spaces, got %d", w.Code)
+	}
+
 	// 合法密码通过 (200)
 	validPassBody, _ := json.Marshal(map[string]string{
 		"old_password": "admin123456",

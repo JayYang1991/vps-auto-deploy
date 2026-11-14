@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -61,6 +62,14 @@ func StartDeployNode(c *gin.Context) {
 
 	if err := validateTargetNodeHost(req.Host); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.PanelPort <= 0 {
+		req.PanelPort = 20888
+	}
+	if req.PanelPort > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "面板端口必须介于 1 ~ 65535 之间"})
 		return
 	}
 
@@ -219,10 +228,24 @@ func ImportNode(c *gin.Context) {
 	if req.PanelPort <= 0 {
 		req.PanelPort = 20888
 	}
+	if req.PanelPort > 65535 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "面板端口必须介于 1 ~ 65535 之间"})
+		return
+	}
+
+	cleanSecret := strings.Trim(strings.TrimSpace(req.SecretPath), "/")
+	validNodeSecretRegex := regexp.MustCompile(`^[a-zA-Z0-9_\-]{1,64}$`)
+	if !validNodeSecretRegex.MatchString(cleanSecret) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "安全访问路径 (SecretPath) 格式不合法，仅允许 1-64 位字母、数字、下划线与短横线"})
+		return
+	}
+	req.SecretPath = cleanSecret
+
 	if err := validateTargetNodeHost(req.Host); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
+
 	if req.Username == "" {
 		req.Username = "admin"
 	}

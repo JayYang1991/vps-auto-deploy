@@ -241,6 +241,12 @@ func RunDeploySSH(task *DeployTask, req DeploySSHRequest) {
 	if req.PanelPort <= 0 {
 		req.PanelPort = 20888
 	}
+	if req.PanelPort > 65535 {
+		task.Status = "failed"
+		task.Error = fmt.Sprintf("面板监听端口不合法: %d (必须介于 1 ~ 65535 之间)", req.PanelPort)
+		task.AddLog("[ERROR] " + task.Error)
+		return
+	}
 	if req.SSHPort <= 0 {
 		req.SSHPort = 22
 	}
@@ -858,6 +864,7 @@ func RunUpgradeAPI(task *DeployTask, req UpgradeRequest) {
 		}
 		upReq.Header.Set("Content-Type", "application/octet-stream")
 		upReq.Header.Set("Authorization", "Bearer "+targetNode.APIToken)
+		upReq.Header.Set("X-Binary-SHA256", localHash)
 		upReq.ContentLength = fi.Size()
 
 		var pushClient *http.Client
