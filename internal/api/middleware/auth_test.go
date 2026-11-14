@@ -130,6 +130,15 @@ func TestJWTAuthQueryToken(t *testing.T) {
 	if wReplay.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 Unauthorized for replayed stream ticket, got %d", wReplay.Code)
 	}
+
+	// 4. Stream Ticket 仅限于 SSE 端点，常规 REST 端点尝试使用 ticket 必须被 401 拦截
+	ticketRest := IssueStreamTicket("stream_user", 10*time.Second)
+	wTicketRest := httptest.NewRecorder()
+	reqTicketRest, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/protected-api/nodes?ticket=%s", ticketRest), nil)
+	r.ServeHTTP(wTicketRest, reqTicketRest)
+	if wTicketRest.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized for REST endpoint with stream ticket, got %d", wTicketRest.Code)
+	}
 }
 
 func TestSecretPathMiddlewareAndCSP(t *testing.T) {

@@ -136,9 +136,12 @@ func SecretPathMiddleware() gin.HandlerFunc {
 // JWTAuthMiddleware 验证 Bearer Token (支持 Authorization Header、一次性 Stream Ticket 或限流白名单 SSE Query Token)
 func JWTAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		// 1. 优先校验单次有效短期的 Stream Ticket (针对 SSE 实时日志流 GET 请求，杜绝 URL 暴露长期 JWT)
+		cleanPath := path.Clean(c.Request.URL.Path)
+		isAllowedSSE := (strings.HasSuffix(cleanPath, "/logs") || strings.HasSuffix(cleanPath, "-logs") || strings.HasSuffix(cleanPath, "/sse") || strings.HasSuffix(cleanPath, "-sse")) && c.Request.Method == http.MethodGet
+
+		// 1. 优先校验单次有效短期的 Stream Ticket (仅严格限定在 SSE 实时日志流 GET 请求，杜绝用于常规 REST 接口或暴露长期 JWT)
 		if ticket := c.Query("ticket"); ticket != "" {
-			if c.Request.Method == http.MethodGet {
+			if isAllowedSSE {
 				if username, ok := ValidateAndConsumeStreamTicket(ticket); ok {
 					c.Set("username", username)
 					c.Next()
@@ -147,6 +150,8 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid or expired stream ticket"})
 				return
 			}
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "安全拦截：Stream Ticket 仅允许用于 SSE 实时日志流端点"})
+			return
 		}
 
 		// 2. 从 Authorization Header 提取 Bearer Token
@@ -163,9 +168,6 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 		if tokenStr == "" {
 			tokenQuery := c.Query("token")
 			if tokenQuery != "" {
-				cleanPath := path.Clean(c.Request.URL.Path)
-				baseName := path.Base(cleanPath)
-				isAllowedSSE := (strings.Contains(baseName, "logs") || strings.Contains(baseName, "sse")) && c.Request.Method == http.MethodGet
 				if !isAllowedSSE {
 					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 						"error": "安全拦截：禁止在常规 REST API 中通过 URL Query 传递 Token，请使用 Authorization 请求头或申请 Stream Ticket",
