@@ -274,6 +274,8 @@ After=network.target nss-lookup.target network-online.target
 
 [Service]
 NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
 PrivateTmp=true
 CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_PTRACE CAP_DAC_READ_SEARCH
 AmbientCapabilities=CAP_NET_ADMIN CAP_NET_BIND_SERVICE CAP_SYS_PTRACE CAP_DAC_READ_SEARCH

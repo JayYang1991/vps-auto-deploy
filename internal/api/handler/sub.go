@@ -137,52 +137,53 @@ func ServeSubscription(c *gin.Context) {
 	}
 
 	// 3. 优先使用 Subconverter 引擎生成最终客户端配置文件
-	// 获取配置模板：优先请求参数，次选配置中心设置的自定义模板，最后使用 ACL4SSR 在线精炼模板
-	configTemplate := strings.TrimSpace(config)
-	if configTemplate != "" {
-		if strings.HasPrefix(configTemplate, "http://") || strings.HasPrefix(configTemplate, "https://") {
-			// 安全防护：校验外部传入的 config 模板 URL，拦截私网/内网/元数据等 SSRF 敏感地址
-			if err := netutil.ValidatePublicURL(configTemplate); err != nil {
-				c.String(http.StatusBadRequest, "Invalid config template: %v", err)
-				return
-			}
-			if !isAllowedRemoteConfigHost(configTemplate) {
-				c.String(http.StatusForbidden, "Security Policy: 公开订阅接口仅允许引用受信任的规则集托管域名，如需使用私有源请在后台配置中心设定")
-				return
-			}
-		} else if IsSafeLocalTemplate(configTemplate) {
-			// 本地受管安全模板校验通过
+	// 安全防御策略 (VULN-02)：公开免认证订阅接口仅允许选用后台预置的受管本地规则模板 (防外部 URL SSRF 与注入放大)
+	requestedTpl := strings.TrimSpace(c.Query("template"))
+	if requestedTpl == "" {
+		requestedTpl = strings.TrimSpace(config)
+	}
+
+	var configTemplate string
+	if requestedTpl != "" {
+		if IsSafeLocalTemplate(requestedTpl) {
+			configTemplate = requestedTpl
 		} else {
-			c.String(http.StatusBadRequest, "Invalid config template: 仅支持公网 HTTP/HTTPS 远程链接或受管本地分流规则模板 (如 config/custom_rules.ini)")
+			c.String(http.StatusBadRequest, "Invalid template: 订阅端点仅允许选用受管本地规则模板 (如 config/custom_rules.ini)")
 			return
 		}
 	} else {
+		// 仅读取管理员在后台数据库中持久化保存的信任配置
 		prefTpl, _ := model.GetSetting("subconverter_pref_template")
 		prefTpl = strings.TrimSpace(prefTpl)
 		if prefTpl == "custom" {
 			if customURL, _ := model.GetSetting("subconverter_pref_custom_url"); strings.TrimSpace(customURL) != "" {
 				configTemplate = strings.TrimSpace(customURL)
 			}
-		} else if prefTpl != "" && (strings.HasPrefix(prefTpl, "http://") || strings.HasPrefix(prefTpl, "https://") || IsSafeLocalTemplate(prefTpl)) {
+		} else if prefTpl != "" {
 			configTemplate = prefTpl
 		} else if defaultExt, _ := model.GetSetting("subconverter_default_external_config"); strings.TrimSpace(defaultExt) != "" {
 			configTemplate = strings.TrimSpace(defaultExt)
 		} else {
 			configTemplate = "https://raw.githubusercontent.com/JayYang1991/ACL4SSR/refs/heads/main/Clash/config/ACL4SSR_Online_Bespoke.ini"
 		}
-		if configTemplate == "config/custom_rules.ini" {
-			_ = EnsureCustomRulesFile()
-		}
+	}
 
-		if strings.HasPrefix(configTemplate, "http://") || strings.HasPrefix(configTemplate, "https://") {
-			if err := netutil.ValidatePublicURL(configTemplate); err != nil {
-				c.String(http.StatusBadRequest, "Invalid config template: %v", err)
-				return
-			}
-		} else if !IsSafeLocalTemplate(configTemplate) {
-			c.String(http.StatusBadRequest, "Invalid config template: 仅支持公网 HTTP/HTTPS 远程链接或受管本地分流规则模板 (如 config/custom_rules.ini)")
+	if configTemplate == "config/custom_rules.ini" {
+		_ = EnsureCustomRulesFile()
+	}
+
+	if strings.HasPrefix(configTemplate, "http://") || strings.HasPrefix(configTemplate, "https://") {
+		if err := netutil.ValidatePublicURL(configTemplate); err != nil {
+			c.String(http.StatusBadRequest, "Invalid config template: %v", err)
 			return
 		}
+		if !isAllowedRemoteConfigHost(configTemplate) {
+			c.String(http.StatusForbidden, "Security Policy: 远程规则集域名未列入受信任名单")
+			return
+		}
+	} else if !IsSafeLocalTemplate(configTemplate) {
+		c.String(http.StatusBadRequest, "Invalid config template: 仅支持受管本地规则模板 (如 config/custom_rules.ini)")
+		return
 	}
 
 	extraParams := make(map[string]string)

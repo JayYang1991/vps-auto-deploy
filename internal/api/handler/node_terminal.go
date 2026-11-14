@@ -80,12 +80,12 @@ func isAllowedTerminalOrigin(r *http.Request, allowedHost string) bool {
 		return true
 	}
 
-	// 3. 仅当物理套接字连接来自本地回环或受信任反代时，才采信 X-Forwarded-Host
+	// 3. 仅当物理套接字连接来自本地回环时，才采信 X-Forwarded-Host (仅限标准反代场景)
 	remoteIP, _, _ := net.SplitHostPort(r.RemoteAddr)
 	if remoteIP == "" {
 		remoteIP = r.RemoteAddr
 	}
-	if node.IsLoopbackOrPrivate(remoteIP) || middleware.IsTrustedProxy(remoteIP) {
+	if remoteIP == "127.0.0.1" || remoteIP == "::1" || strings.HasPrefix(remoteIP, "127.") {
 		for _, hdr := range []string{"X-Forwarded-Host", "X-Original-Host"} {
 			if fwdHost := r.Header.Get(hdr); fwdHost != "" {
 				if strings.EqualFold(u.Host, fwdHost) || strings.EqualFold(origHost, fwdHost) {
@@ -99,13 +99,13 @@ func isAllowedTerminalOrigin(r *http.Request, allowedHost string) bool {
 		}
 	}
 
-	// 4. 仅允许本机回环调试，不再无条件放行整个 192.168/10/172 局域网段
+	// 4. 仅允许本机回环调试，严格禁止任意局域网/私有网段未授权跨源 (VULN-07 防御)
 	if origHost == "localhost" || origHost == "127.0.0.1" || origHost == "::1" {
 		return true
 	}
 
-	// 5. 若未显式绑定 allowedHost，检查面板已注册的公网 IP 或隧道域名
-	if allowedHost == "" && isKnownPanelHost(origHost) {
+	// 5. 校验面板已知受管资产 (public_ip / 节点 Host / 隧道域名)
+	if isKnownPanelHost(origHost) {
 		return true
 	}
 

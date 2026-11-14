@@ -711,6 +711,40 @@ func MigrateLegacyEncryptedData() error {
 		}
 	}
 
+	// 同样平滑迁移 tunnels 表中的历史明文与旧密钥 Token (VULN-04 防御)
+	tRows, err := DB.Query("SELECT id, token FROM tunnels WHERE mode = 'token' AND token != ''")
+	if err == nil {
+		type tunnelItem struct {
+			id       int64
+			tokenEnc string
+		}
+		var tUpdates []tunnelItem
+		for tRows.Next() {
+			var tid int64
+			var rawToken string
+			if err := tRows.Scan(&tid, &rawToken); err == nil && rawToken != "" {
+				// 若能用 newKey 解密说明已经是新版密文，无需处理
+				if _, err := crypto.DecryptAESGCM(rawToken, newKey); err != nil {
+					// 尝试用 legacyKey 解密，若成功则用 newKey 重新加密
+					if plain, err := crypto.DecryptAESGCM(rawToken, legacyKey); err == nil {
+						if reEnc, err := crypto.EncryptAESGCM(plain, newKey); err == nil {
+							tUpdates = append(tUpdates, tunnelItem{id: tid, tokenEnc: reEnc})
+						}
+					} else {
+						// 既非 newKey 也非 legacyKey 密文，说明是历史遗留明文，直接加密落盘
+						if enc, err := crypto.EncryptAESGCM(rawToken, newKey); err == nil {
+							tUpdates = append(tUpdates, tunnelItem{id: tid, tokenEnc: enc})
+						}
+					}
+				}
+			}
+		}
+		tRows.Close()
+		for _, tu := range tUpdates {
+			_, _ = DB.Exec("UPDATE tunnels SET token = ? WHERE id = ?", tu.tokenEnc, tu.id)
+		}
+	}
+
 	return nil
 }
 

@@ -115,12 +115,15 @@ func CreateTunnel(c *gin.Context) {
 		return
 	}
 
-	// 敏感凭据透明落盘加密 (AES-256-GCM)
-	savedToken := token
+	// 敏感凭据透明落盘加密 (AES-256-GCM, VULN-04 防御)
+	savedToken := ""
 	if token != "" {
-		if enc, err := crypto.EncryptAESGCM(token, model.GetEncryptionKey()); err == nil {
-			savedToken = enc
+		enc, encErr := crypto.EncryptAESGCM(token, model.GetEncryptionKey())
+		if encErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "加密隧道 Token 失败: " + encErr.Error()})
+			return
 		}
+		savedToken = enc
 	}
 
 	now := time.Now()

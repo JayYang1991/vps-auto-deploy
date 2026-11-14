@@ -34,6 +34,15 @@ var (
 	deployTasks = make(map[string]*DeployTask)
 )
 
+// Snapshot 线程安全地读取任务当前状态、错误信息与日志切片副本 (VULN-08 防并发读写 Data Race)
+func (t *DeployTask) Snapshot() (status, errMsg string, logs []string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	copied := make([]string, len(t.Logs))
+	copy(copied, t.Logs)
+	return t.Status, t.Error, copied
+}
+
 // CreateDeployTask 创建并登记一个部署任务 (自动清理历史过期任务，防内存泄漏)
 func CreateDeployTask(nodeName, host string) *DeployTask {
 	tasksLock.Lock()
@@ -42,7 +51,11 @@ func CreateDeployTask(nodeName, host string) *DeployTask {
 	// 1. 清理超过 2 小时的已完成历史任务，防止内存泄漏
 	now := time.Now()
 	for k, v := range deployTasks {
-		if v.Status != "running" && now.Sub(v.StartedAt) > 2*time.Hour {
+		v.mu.Lock()
+		done := v.Status != "running"
+		started := v.StartedAt
+		v.mu.Unlock()
+		if done && now.Sub(started) > 2*time.Hour {
 			delete(deployTasks, k)
 		}
 	}
@@ -50,7 +63,10 @@ func CreateDeployTask(nodeName, host string) *DeployTask {
 	// 2. 若仍超过容量上限，淘汰最旧的非运行中任务
 	if len(deployTasks) >= maxRetainedTasks {
 		for k, v := range deployTasks {
-			if v.Status != "running" {
+			v.mu.Lock()
+			done := v.Status != "running"
+			v.mu.Unlock()
+			if done {
 				delete(deployTasks, k)
 				if len(deployTasks) < maxRetainedTasks {
 					break

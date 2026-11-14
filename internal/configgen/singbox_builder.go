@@ -1,6 +1,7 @@
 package configgen
 
 import (
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -840,17 +841,23 @@ func ApplyAndReload(destPath string) error {
 	}
 
 	// 5. 自动确保已启用入站节点的防火墙端口放行 (ufw / firewalld / iptables)
-	go EnsureFirewallForActiveInbounds()
+	currentDB := model.DB
+	go EnsureFirewallForActiveInboundsWithDB(currentDB)
 
 	return nil
 }
 
 // EnsureFirewallForActiveInbounds 自动同步并放行数据库中所有已启用入站节点的公网防火墙端口
 func EnsureFirewallForActiveInbounds() {
-	if model.DB == nil {
+	EnsureFirewallForActiveInboundsWithDB(model.DB)
+}
+
+// EnsureFirewallForActiveInboundsWithDB 使用传入的 DB 实例同步放行防火墙端口 (防全局变量并发 Data Race)
+func EnsureFirewallForActiveInboundsWithDB(db *sql.DB) {
+	if db == nil {
 		return
 	}
-	rows, err := model.DB.Query("SELECT port, protocol, listen FROM inbounds WHERE enabled = 1")
+	rows, err := db.Query("SELECT port, protocol, listen FROM inbounds WHERE enabled = 1")
 	if err != nil {
 		return
 	}

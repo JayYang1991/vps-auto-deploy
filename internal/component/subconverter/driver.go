@@ -273,8 +273,10 @@ After=network.target network-online.target
 [Service]
 Type=simple
 NoNewPrivileges=true
-PrivateTmp=true
+ProtectSystem=strict
 ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=%s
 WorkingDirectory=%s
 ExecStart=%s
 Restart=on-failure
@@ -283,7 +285,7 @@ LimitNOFILE=infinity
 
 [Install]
 WantedBy=multi-user.target
-`, compDir, binPath)
+`, compDir, compDir, binPath)
 
 	if err := component.WriteServiceUnit(UnitName, unitContent); err != nil {
 		logFn(fmt.Sprintf("[WARN] 写入服务单元失败: %v", err))

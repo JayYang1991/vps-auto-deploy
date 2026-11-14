@@ -142,3 +142,20 @@ func TestReleaseCacheAndFallback(t *testing.T) {
 	}
 }
 
+func TestExtractChecksumsFromBody(t *testing.T) {
+	body := `
+### Checksums
+e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855  subconverter_linux64.tar.gz
+11223344556677889900aabbccddeeff0011223344556677889900aabbccddee *subconverter_darwin64.tar.gz
+`
+	res := make(map[string]string)
+	extractChecksumsFromBody(body, nil, res)
+
+	if res["subconverter_linux64.tar.gz"] != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" {
+		t.Errorf("failed to extract checksum for subconverter_linux64.tar.gz, got: %s", res["subconverter_linux64.tar.gz"])
+	}
+	if res["subconverter_darwin64.tar.gz"] != "11223344556677889900aabbccddeeff0011223344556677889900aabbccddee" {
+		t.Errorf("failed to extract checksum for subconverter_darwin64.tar.gz, got: %s", res["subconverter_darwin64.tar.gz"])
+	}
+}
+

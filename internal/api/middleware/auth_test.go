@@ -95,12 +95,13 @@ func TestJWTAuthQueryToken(t *testing.T) {
 		c.JSON(http.StatusOK, gin.H{"user": c.GetString("username")})
 	})
 
+	// 1. 安全拦截：彻底废除 URL Query 传递长期 JWT Token (VULN-06 防御)，即便在 SSE 端点亦拒绝并返回 401
 	token, _ := GenerateJWTWithDuration("admin", 1*time.Hour)
 	w := httptest.NewRecorder()
 	req, _ := http.NewRequest(http.MethodGet, fmt.Sprintf("/protected-sse?token=%s", token), nil)
 	r.ServeHTTP(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK via query token, got %d", w.Code)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized via query token, got %d", w.Code)
 	}
 
 	// 2. 常规 REST 端点禁止通过 URL Query 传递 Token
@@ -219,7 +220,7 @@ func TestCORSMiddlewareLoopbackProxy(t *testing.T) {
 		c.String(http.StatusOK, "pong")
 	})
 
-	// 1. 本地回环 + X-Forwarded-Host 匹配 -> 允许
+	// 1. 安全防御 (VULN-03)：不再信任未清洗的 X-Forwarded-Host 头，若非同源且未在 public_ip 白名单中则拦截
 	w1 := httptest.NewRecorder()
 	req1, _ := http.NewRequest(http.MethodGet, "/api/ping", nil)
 	req1.RemoteAddr = "127.0.0.1:12345"
@@ -227,8 +228,18 @@ func TestCORSMiddlewareLoopbackProxy(t *testing.T) {
 	req1.Header.Set("Origin", "https://proxy.example.com")
 	req1.Header.Set("X-Forwarded-Host", "proxy.example.com")
 	r.ServeHTTP(w1, req1)
-	if w1.Header().Get("Access-Control-Allow-Origin") != "https://proxy.example.com" {
-		t.Fatalf("expected CORS to allow forwarded host, got %q", w1.Header().Get("Access-Control-Allow-Origin"))
+	if w1.Header().Get("Access-Control-Allow-Origin") != "" {
+		t.Fatalf("expected CORS to reject untrusted forwarded host, got %q", w1.Header().Get("Access-Control-Allow-Origin"))
+	}
+
+	// 1b. 同源请求 Origin 与 Host 严格匹配 -> 允许
+	w1b := httptest.NewRecorder()
+	req1b, _ := http.NewRequest(http.MethodGet, "/api/ping", nil)
+	req1b.Host = "panel.my-vps.com"
+	req1b.Header.Set("Origin", "https://panel.my-vps.com")
+	r.ServeHTTP(w1b, req1b)
+	if w1b.Header().Get("Access-Control-Allow-Origin") != "https://panel.my-vps.com" {
+		t.Fatalf("expected CORS to allow same-origin host, got %q", w1b.Header().Get("Access-Control-Allow-Origin"))
 	}
 
 	// 2. 本地回环 + public_ip 匹配 -> 允许

@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -154,27 +153,13 @@ func JWTAuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// 2. 从 Authorization Header 提取 Bearer Token
+		// 2. 仅从 Authorization Header 提取 Bearer Token，彻底禁止 URL Query 传递 JWT (VULN-06 防御)
 		tokenStr := ""
 		authHeader := c.GetHeader("Authorization")
 		if authHeader != "" {
 			parts := strings.SplitN(authHeader, " ", 2)
 			if len(parts) == 2 && parts[0] == "Bearer" {
 				tokenStr = parts[1]
-			}
-		}
-
-		// 3. 若 Header 中无 Token，仅严格限制在 SSE 实时流白名单 GET 端点允许读取 URL query 中的 token 参数作为向后兼容
-		if tokenStr == "" {
-			tokenQuery := c.Query("token")
-			if tokenQuery != "" {
-				if !isAllowedSSE {
-					c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-						"error": "安全拦截：禁止在常规 REST API 中通过 URL Query 传递 Token，请使用 Authorization 请求头或申请 Stream Ticket",
-					})
-					return
-				}
-				tokenStr = tokenQuery
 			}
 		}
 
@@ -256,7 +241,7 @@ func MaxBodySizeMiddleware(limitBytes int64) gin.HandlerFunc {
 	}
 }
 
-// CORSMiddleware 安全跨域处理 (防御任意源反射与敏感凭据泄露，兼容反代与隧道)
+// CORSMiddleware 安全跨域处理 (防御任意源反射与敏感凭据泄露，消除 X-Forwarded-Host 伪造绕过)
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		origin := c.Request.Header.Get("Origin")
@@ -265,25 +250,22 @@ func CORSMiddleware() gin.HandlerFunc {
 		allowed := false
 		if origin != "" {
 			c.Writer.Header().Add("Vary", "Origin")
-			if u, err := url.Parse(origin); err == nil && u.Host != "" {
+			if u, err := url.Parse(origin); err == nil && u.Host != "" && (u.Scheme == "http" || u.Scheme == "https") {
+				// 1. 严格同源匹配
 				if strings.EqualFold(u.Host, host) {
 					allowed = true
 				} else {
-					// 安全严密校验：仅当物理套接字连接真正来自本地回环时，才信任反向代理/隧道头 (防 Host 请求头伪造绕过)
-					remoteIP := c.ClientIP()
-					if rip, _, err := net.SplitHostPort(c.Request.RemoteAddr); err == nil && rip != "" {
-						remoteIP = rip
-					}
-					isLoopback := remoteIP == "127.0.0.1" || remoteIP == "::1" || strings.HasPrefix(remoteIP, "127.")
-
-					if isLoopback {
-						if fwdHost := c.GetHeader("X-Forwarded-Host"); fwdHost != "" && strings.EqualFold(u.Host, fwdHost) {
+					// 2. 匹配管理员在后台显式配置的公网域名/IP (不再信任客户端可控的 X-Forwarded-Host)
+					if pubHost, _ := model.GetSetting("public_ip"); pubHost != "" {
+						cleanPub := strings.TrimSpace(pubHost)
+						if strings.EqualFold(u.Hostname(), cleanPub) || strings.EqualFold(u.Host, cleanPub) {
 							allowed = true
-						} else if pubIP, _ := model.GetSetting("public_ip"); pubIP != "" {
-							if strings.EqualFold(u.Hostname(), pubIP) || strings.EqualFold(u.Host, pubIP) {
-								allowed = true
-							}
 						}
+					}
+					// 3. 匹配本地回环开发/管理地址
+					origHost := u.Hostname()
+					if origHost == "localhost" || origHost == "127.0.0.1" || origHost == "::1" {
+						allowed = true
 					}
 				}
 
@@ -295,15 +277,15 @@ func CORSMiddleware() gin.HandlerFunc {
 		}
 
 		if !allowed {
-			// 未经允许的跨域来源，不赋予凭据权限
-			c.Writer.Header().Set("Access-Control-Allow-Origin", "")
+			c.Writer.Header().Del("Access-Control-Allow-Origin")
+			c.Writer.Header().Del("Access-Control-Allow-Credentials")
 		}
 
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Authorization, X-Requested-With, X-Target-Node-ID")
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
 
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
+		if c.Request.Method == http.MethodOptions {
+			c.AbortWithStatus(http.StatusNoContent)
 			return
 		}
 

@@ -123,7 +123,7 @@ func StartUpgradeNode(c *gin.Context) {
 	}
 }
 
-// GetDeployStatus 查询部署任务当前状态
+// GetDeployStatus 查询部署任务当前状态 (并发安全读取快照，防 Data Race)
 func GetDeployStatus(c *gin.Context) {
 	taskID := c.Query("task_id")
 	task, err := node.GetDeployTask(taskID)
@@ -132,19 +132,20 @@ func GetDeployStatus(c *gin.Context) {
 		return
 	}
 
+	status, errMsg, logs := task.Snapshot()
 	c.JSON(http.StatusOK, gin.H{
 		"task_id":           task.ID,
 		"node_name":         task.NodeName,
 		"host":              task.Host,
-		"status":            task.Status,
-		"error":             task.Error,
+		"status":            status,
+		"error":             errMsg,
 		"node_id":           task.NodeID,
 		"cloud_provider":    task.CloudProvider,
 		"cloud_instance_id": task.CloudInstanceID,
 		"cloud_region":      task.CloudRegion,
 		"cloud_plan":        task.CloudPlan,
 		"started_at":        task.StartedAt,
-		"logs":              task.Logs,
+		"logs":              logs,
 	})
 }
 

@@ -27,6 +27,7 @@ const (
 
 type GitHubRelease struct {
 	TagName string        `json:"tag_name"`
+	Body    string        `json:"body"`
 	Assets  []GitHubAsset `json:"assets"`
 }
 
@@ -227,16 +228,52 @@ func FetchReleaseChecksums(rel *GitHubRelease) map[string]string {
 		}
 	}
 
+	// 补充从 Release 正文 (body) 提取 "<sha256>  <filename>" 或 Markdown 代码块中的摘要
+	if rel.Body != "" {
+		extractChecksumsFromBody(rel.Body, rel.Assets, result)
+	}
+
 	return result
+}
+
+// extractChecksumsFromBody 从 GitHub Release 说明正文中正则提取文件名与对应 64 位 SHA-256 校验和
+func extractChecksumsFromBody(body string, assets []GitHubAsset, result map[string]string) {
+	if body == "" {
+		return
+	}
+	scanner := bufio.NewScanner(strings.NewReader(body))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		fields := strings.Fields(line)
+		if len(fields) >= 2 {
+			hash := strings.ToLower(strings.Trim(fields[0], "`*"))
+			name := filepath.Base(strings.Trim(fields[1], "`*"))
+			if len(hash) == 64 && isHexString(hash) {
+				if _, exists := result[name]; !exists {
+					result[name] = hash
+				}
+			}
+		}
+	}
+}
+
+func isHexString(s string) bool {
+	for _, r := range s {
+		if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 // DownloadFileWithChecksum 下载文件并严格校验 SHA-256 (若提供了 expectedHash，校验不匹配立即销毁文件并拦截)
 func DownloadFileWithChecksum(downloadURL, destPath, expectedHash string) error {
 	client := createBrowserHTTPClient(300*time.Second, false)
 
-	// 优先直接下载，若失败可支持 ghproxy 镜像代理
 	urlsToTry := []string{downloadURL}
-	if !strings.HasPrefix(downloadURL, "https://ghproxy.") {
+	// 安全防御策略 (VULN-01)：仅当具备官方 SHA-256 强校验时，才允许回退使用第三方加速镜像代理
+	// 若缺失官方校验和，严禁向第三方非可信代理发起请求并赋予执行权限，防范供应链镜像劫持与投毒
+	if strings.TrimSpace(expectedHash) != "" && !strings.HasPrefix(downloadURL, "https://ghproxy.") {
 		urlsToTry = append(urlsToTry, "https://ghproxy.net/"+downloadURL)
 	}
 
